@@ -148,6 +148,36 @@ func (t *TestContextCheckTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+// AnyCheckTask represents a task to run any check.
+type AnyCheckTask struct {
+	Dir string
+}
+
+func (t *AnyCheckTask) Run(ctx context.Context, root string) error {
+	klog.Infof("Running any check in %s", t.Dir)
+	apPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("could not find ap executable: %w", err)
+	}
+	args := []string{"lint", "any", "./..."}
+	anyCmd := exec.CommandContext(ctx, apPath, args...)
+	anyCmd.Dir = t.Dir
+	anyCmd.Stdout = os.Stdout
+	anyCmd.Stderr = os.Stderr
+	if err := anyCmd.Run(); err != nil {
+		klog.Warningf("any check failed in %s: %v", t.Dir, err)
+	}
+	return nil
+}
+
+func (t *AnyCheckTask) GetName() string {
+	return "any-check"
+}
+
+func (t *AnyCheckTask) GetChildren() []tasks.Task {
+	return nil
+}
+
 // LintTasks returns a task group for running go linting in discovered modules.
 func LintTasks(root string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
@@ -196,6 +226,11 @@ func LintTasks(root string) (tasks.Task, error) {
 			modGroup.Tasks = append(modGroup.Tasks, &TestContextCheckTask{
 				Dir:     dir,
 				IsError: cfg.IsTestContextError(),
+			})
+		}
+		if cfg.IsAnyEnabled() {
+			modGroup.Tasks = append(modGroup.Tasks, &AnyCheckTask{
+				Dir: dir,
 			})
 		}
 

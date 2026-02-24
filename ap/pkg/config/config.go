@@ -46,9 +46,14 @@ type LintConfig struct {
 	Unused           *UnusedConfig           `json:"unused"`
 	TestContext      *TestContextConfig      `json:"testcontext"`
 	UnusedParameters *UnusedParametersConfig `json:"unusedparameters"`
+	Any              *AnyConfig              `json:"any"`
 }
 
 type UnusedConfig struct {
+	Enabled *bool `json:"enabled"`
+}
+
+type AnyConfig struct {
 	Enabled *bool `json:"enabled"`
 }
 
@@ -137,4 +142,12 @@ func (c *Config) IsTestContextError() bool {
 		return c.Lint.TestContext.Mode == "error"
 	}
 	return false
+}
+
+// IsAnyEnabled returns true if any detection is enabled in the config (defaulting to true).
+func (c *Config) IsAnyEnabled() bool {
+	if c.Lint != nil && c.Lint.Any != nil && c.Lint.Any.Enabled != nil {
+		return *c.Lint.Any.Enabled
+	}
+	return true
 }

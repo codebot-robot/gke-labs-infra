@@ -15,6 +15,8 @@
 package main
 
 import (
+	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/any"
+	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/testcontext"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/unused"
 	"golang.org/x/tools/go/analysis/multichecker"
 )
@@ -22,5 +24,7 @@ import (
 func main() {
 	multichecker.Main(
 		unused.Analyzer,
+		any.Analyzer,
+		testcontext.Analyzer,
 	)
 }
