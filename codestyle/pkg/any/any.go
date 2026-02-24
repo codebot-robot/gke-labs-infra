@@ -22,7 +22,7 @@ import (
 )
 
 var Analyzer = &analysis.Analyzer{
-	Name: "any",
+	Name: "replaceEmptyInterfaceWithAny",
 	Doc:  "check for use of interface{} where any could be used",
 	Run:  run,
 }

@@ -22,12 +22,12 @@ import (
 	"golang.org/x/tools/go/analysis/multichecker"
 )
 
-// BuildAnyCommand constructs the cobra command for "any".
-// This is a hidden command used by "ap lint" to run the any analyzer.
-func BuildAnyCommand() *cobra.Command {
+// BuildReplaceEmptyInterfaceWithAnyCommand constructs the cobra command for "replace-empty-interface-with-any".
+// This is a hidden command used by "ap lint" to run the replace-empty-interface-with-any analyzer.
+func BuildReplaceEmptyInterfaceWithAnyCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:                "any",
-		Short:              "Run the any analyzer",
+		Use:                "replace-empty-interface-with-any",
+		Short:              "Run the replace-empty-interface-with-any analyzer",
 		Hidden:             true,
 		DisableFlagParsing: true,
 		Run: func(_ *cobra.Command, args []string) {

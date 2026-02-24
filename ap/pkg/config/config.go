@@ -46,14 +46,14 @@ type LintConfig struct {
 	Unused           *UnusedConfig           `json:"unused"`
 	TestContext      *TestContextConfig      `json:"testcontext"`
 	UnusedParameters *UnusedParametersConfig `json:"unusedparameters"`
-	Any              *AnyConfig              `json:"any"`
+	ReplaceEmptyInterfaceWithAny *ReplaceEmptyInterfaceWithAnyConfig `json:"replace-empty-interface-with-any"`
 }
 
 type UnusedConfig struct {
 	Enabled *bool `json:"enabled"`
 }
 
-type AnyConfig struct {
+type ReplaceEmptyInterfaceWithAnyConfig struct {
 	Enabled *bool `json:"enabled"`
 }
 
@@ -144,10 +144,10 @@ func (c *Config) IsTestContextError() bool {
 	return false
 }
 
-// IsAnyEnabled returns true if any detection is enabled in the config (defaulting to true).
-func (c *Config) IsAnyEnabled() bool {
-	if c.Lint != nil && c.Lint.Any != nil && c.Lint.Any.Enabled != nil {
-		return *c.Lint.Any.Enabled
+// IsReplaceEmptyInterfaceWithAnyEnabled returns true if any detection is enabled in the config (defaulting to true).
+func (c *Config) IsReplaceEmptyInterfaceWithAnyEnabled() bool {
+	if c.Lint != nil && c.Lint.ReplaceEmptyInterfaceWithAny != nil && c.Lint.ReplaceEmptyInterfaceWithAny.Enabled != nil {
+		return *c.Lint.ReplaceEmptyInterfaceWithAny.Enabled
 	}
 	return true
 }
