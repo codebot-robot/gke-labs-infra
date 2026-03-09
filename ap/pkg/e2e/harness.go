@@ -20,6 +20,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -176,6 +177,45 @@ func (h *Harness) KindLoad(tag string) {
 	h.t.Helper()
 	h.t.Logf("Loading image %s into kind cluster %s", tag, h.clusterName)
 	h.runCmd("kind", "load", "docker-image", tag, "--name", h.clusterName)
+}
+
+// SetupRegistry deploys an in-cluster registry and waits for it to be ready.
+func (h *Harness) SetupRegistry() {
+	h.t.Helper()
+	h.t.Log("Setting up in-cluster registry")
+	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd.Stdin = strings.NewReader(RegistryManifests)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		h.t.Fatalf("kubectl apply failed: %v\nStdout: %s\nStderr: %s", err, stdout.String(), stderr.String())
+	}
+	h.runCmd("kubectl", "wait", "-n", "default", "--for=jsonpath={.status.readyReplicas}=1", "--timeout=2m", "statefulset/images")
+}
+
+// RunCmd runs a command and returns its output.
+func (h *Harness) RunCmd(name string, args ...string) string {
+	return h.runCmd(name, args...)
+}
+
+// FindRepoRoot finds the root of the git repository.
+func (h *Harness) FindRepoRoot() string {
+	h.t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		h.t.Fatalf("failed to get current working directory: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			h.t.Fatalf("failed to find repo root")
+		}
+		dir = parent
+	}
 }
 
 func (h *Harness) runCmd(name string, args ...string) string {

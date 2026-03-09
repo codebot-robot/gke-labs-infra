@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
 	"k8s.io/klog/v2"
@@ -42,9 +43,14 @@ func (t *DockerBuildTask) Run(ctx context.Context, root string) error {
 		tag = "latest"
 	}
 
+	actualImagePrefix := imagePrefix
+	if imagePrefix == "images.local" && t.Push {
+		actualImagePrefix = "localhost:5000"
+	}
+
 	var fullImageName string
-	if imagePrefix != "" {
-		fullImageName = fmt.Sprintf("%s/%s:%s", imagePrefix, t.ImageName, tag)
+	if actualImagePrefix != "" {
+		fullImageName = fmt.Sprintf("%s/%s:%s", actualImagePrefix, t.ImageName, tag)
 	} else {
 		fullImageName = fmt.Sprintf("%s:%s", t.ImageName, tag)
 	}
@@ -56,12 +62,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, root string) error {
 		return fmt.Errorf("failed to get relative path for dockerfile: %w", err)
 	}
 
-	args := []string{"build", "-t", fullImageName, "-f", relDockerfilePath}
-	if t.Push {
-		// Use buildx for push support if requested
-		args = []string{"buildx", "build", "-t", fullImageName, "-f", relDockerfilePath, "--push"}
-	}
-	args = append(args, ".")
+	args := []string{"build", "-t", fullImageName, "-f", relDockerfilePath, "."}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Dir = root
@@ -69,6 +70,17 @@ func (t *DockerBuildTask) Run(ctx context.Context, root string) error {
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
+	}
+
+	if t.Push {
+		klog.Infof("Pushing image %s", fullImageName)
+		pushCmd := exec.CommandContext(ctx, "docker", "push", fullImageName)
+		pushCmd.Dir = root
+		pushCmd.Stdout = os.Stdout
+		pushCmd.Stderr = os.Stderr
+		if err := pushCmd.Run(); err != nil {
+			return fmt.Errorf("docker push failed for %s: %w", t.ImageName, err)
+		}
 	}
 	return nil
 }
@@ -112,10 +124,22 @@ func BuildTasks(root string, push bool) (tasks.Task, error) {
 		})
 	}
 
-	return &tasks.Group{
+	var rootTask tasks.Task = &tasks.Group{
 		Name:  "build-images",
 		Tasks: buildTasks,
-	}, nil
+	}
+
+	if push && os.Getenv("IMAGE_PREFIX") == "images.local" {
+		rootTask = &k8s.PortForwardTask{
+			Child:      rootTask,
+			Service:    "images",
+			Namespace:  "default",
+			LocalPort:  5000,
+			RemotePort: 5000,
+		}
+	}
+
+	return rootTask, nil
 }
 
 // Build builds docker images found in images/<name>/Dockerfile.
