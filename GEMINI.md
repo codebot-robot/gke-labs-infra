@@ -32,3 +32,18 @@ When `DryRun` is true, `tasks.Run` will print the task tree instead of executing
 *   **Avoid side effects during task building**: The process of creating the task tree should be fast and side-effect free. Heavy operations should happen inside the `Run` method.
 *   **Deterministic Order**: When building a `tasks.Group`, ensure the order of tasks is deterministic (e.g., by sorting by name).
 *   **Granular Tasks**: Prefer many small tasks over one large task. For example, building each docker image should be its own task.
+
+### Verifying changes
+
+Before submitting a Pull Request, you MUST run `ap lint` to verify that your changes follow the project's style and quality guidelines.
+
+```bash
+ap lint
+```
+
+Additionally, you should run the following commands to ensure that your changes do not introduce any regressions:
+
+```bash
+ap test
+ap e2e
+```
