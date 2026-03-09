@@ -49,15 +49,21 @@ func (t *DockerBuildTask) Run(ctx context.Context, root string) error {
 		fullImageName = fmt.Sprintf("%s:%s", t.ImageName, tag)
 	}
 
-	klog.Infof("Building image %s from %s", fullImageName, t.Root)
-	args := []string{"buildx", "build", "-t", fullImageName, "-f", t.Dockerfile}
+	klog.Infof("Building image %s from %s", fullImageName, root)
+	dockerfilePath := filepath.Join(t.Root, t.Dockerfile)
+	relDockerfilePath, err := filepath.Rel(root, dockerfilePath)
+	if err != nil {
+		return fmt.Errorf("failed to get relative path for dockerfile: %w", err)
+	}
+
+	args := []string{"buildx", "build", "-t", fullImageName, "-f", relDockerfilePath}
 	if t.Push {
 		args = append(args, "--push")
 	}
 	args = append(args, ".")
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
-	cmd.Dir = t.Root
+	cmd.Dir = root
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

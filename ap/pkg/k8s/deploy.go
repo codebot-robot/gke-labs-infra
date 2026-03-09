@@ -302,13 +302,34 @@ func Deploy(ctx context.Context, root string) error {
 
 func findManifests(root string) ([]string, error) {
 	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
-	return walker.Walk(root, ignoreList, func(path string, info os.FileInfo) bool {
-		if info.IsDir() {
-			return false
+
+	var manifests []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
 		}
+
 		relPath, err := filepath.Rel(root, path)
 		if err != nil {
-			return false
+			return err
+		}
+		if relPath == "." {
+			return nil
+		}
+
+		if ignoreList.ShouldIgnore(relPath, info.IsDir()) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if info.IsDir() {
+			// If this directory contains a .ap directory, it's a different root, so skip it.
+			if _, err := os.Stat(filepath.Join(path, ".ap")); err == nil {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 
 		// Check if it is under a k8s directory
@@ -321,10 +342,14 @@ func findManifests(root string) ([]string, error) {
 			}
 		}
 		if !inK8s {
-			return false
+			return nil
 		}
 
 		ext := filepath.Ext(path)
-		return ext == ".yaml" || ext == ".yml"
+		if ext == ".yaml" || ext == ".yml" {
+			manifests = append(manifests, path)
+		}
+		return nil
 	})
+	return manifests, err
 }
