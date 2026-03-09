@@ -29,20 +29,20 @@ type APRunner struct {
 // RunAP executes an 'ap' command in the given directory.
 func (r *APRunner) RunAP(ctx context.Context, dir string, args ...string) error {
 	klog.Infof("Running ap %v in %s", args, dir)
-	
+
 	// TODO: When running in K8s, this should probably create a K8s Job
 	// for now we'll just use exec.Command as a placeholder.
-	
+
 	cmd := exec.CommandContext(ctx, "ap", args...)
 	cmd.Dir = dir
 	// TODO: Set environment variables for BuildKit and Registry
-	
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		klog.Errorf("ap command failed: %v, output: %s", err, string(output))
 		return err
 	}
-	
+
 	return nil
 }
 

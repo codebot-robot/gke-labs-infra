@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"time"
 
@@ -31,6 +32,13 @@ func main() {
 	klog.InitFlags(nil)
 	defer klog.Flush()
 
+	if err := run(context.Background()); err != nil {
+		klog.Error(err)
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context) error {
 	var repoURL string
 	var pollInterval time.Duration
 	var buildkitAddr string
@@ -43,8 +51,7 @@ func main() {
 	flag.Parse()
 
 	if repoURL == "" {
-		klog.Error("repo flag is required")
-		os.Exit(1)
+		return fmt.Errorf("repo flag is required")
 	}
 
 	klog.Infof("Starting autodeploy for repo: %s", repoURL)
@@ -55,12 +62,10 @@ func main() {
 		Runner:   &executor.APRunner{},     // TODO: Pass buildkit and registry config
 	}
 
-	ctx := context.Background()
-
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return ctx.Err()
 		case <-time.After(pollInterval):
 			if err := ctrl.Reconcile(ctx, repoURL); err != nil {
 				klog.Errorf("Reconciliation failed: %v", err)
