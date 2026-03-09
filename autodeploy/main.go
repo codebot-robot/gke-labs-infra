@@ -15,61 +15,44 @@
 package main
 
 import (
-	"context"
-	"flag"
-	"fmt"
-	"os"
-	"time"
-
+	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/apis/infra/v1alpha1"
 	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/controller"
-	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/executor"
-	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/git"
-	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/strategy"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
-func main() {
-	klog.InitFlags(nil)
-	defer klog.Flush()
+var (
+	scheme = runtime.NewScheme()
+)
 
-	if err := run(context.Background()); err != nil {
-		klog.Error(err)
-		os.Exit(1)
-	}
+func init() {
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
 }
 
-func run(ctx context.Context) error {
-	var repoURL string
-	var pollInterval time.Duration
-	var buildkitAddr string
-	var registryAddr string
+func main() {
+	ctrl.SetLogger(zap.New())
 
-	flag.StringVar(&repoURL, "repo", "", "URL of the git repository to monitor")
-	flag.DurationVar(&pollInterval, "interval", 1*time.Minute, "Polling interval")
-	flag.StringVar(&buildkitAddr, "buildkit", "", "Address of the BuildKit endpoint")
-	flag.StringVar(&registryAddr, "registry", "", "Address of the self-hosted image registry")
-	flag.Parse()
-
-	if repoURL == "" {
-		return fmt.Errorf("repo flag is required")
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+		Scheme: scheme,
+	})
+	if err != nil {
+		klog.Fatalf("unable to start manager: %v", err)
 	}
 
-	klog.Infof("Starting autodeploy for repo: %s", repoURL)
-
-	ctrl := &controller.Controller{
-		Monitor:  git.NewMonitor(repoURL),
-		Strategy: &strategy.AlwaysDeploy{}, // TODO: Make configurable
-		Runner:   &executor.APRunner{},     // TODO: Pass buildkit and registry config
+	if err = (&controller.AutoDeployReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		klog.Fatalf("unable to create controller: %v", err)
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(pollInterval):
-			if err := ctrl.Reconcile(ctx, repoURL); err != nil {
-				klog.Errorf("Reconciliation failed: %v", err)
-			}
-		}
+	klog.Info("starting manager")
+	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+		klog.Fatalf("problem running manager: %v", err)
 	}
 }

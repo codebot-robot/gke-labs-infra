@@ -16,47 +16,85 @@ package controller
 
 import (
 	"context"
-	"fmt"
+	"time"
 
+	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/apis/infra/v1alpha1"
 	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/executor"
 	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/git"
 	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/strategy"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"k8s.io/klog/v2"
 )
 
-// Controller manages the autodeploy reconciliation loop.
-type Controller struct {
-	Monitor  *git.Monitor
-	Strategy strategy.Strategy
-	Runner   *executor.APRunner
+// AutoDeployReconciler reconciles an AutoDeploy object
+type AutoDeployReconciler struct {
+	client.Client
+	Scheme *runtime.Scheme
 }
 
 // Reconcile checks for updates and triggers deployments if necessary.
-func (c *Controller) Reconcile(ctx context.Context, repoURL string) error {
-	klog.Infof("Reconciling %s", repoURL)
+func (r *AutoDeployReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	klog.Infof("Reconciling AutoDeploy %s", req.NamespacedName)
 
-	// TODO: Check for new commits
-	commit, err := c.Monitor.GetLatestCommit(ctx, "main")
+	var ad v1alpha1.AutoDeploy
+	if err := r.Get(ctx, req.NamespacedName, &ad); err != nil {
+		if errors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
+	}
+
+	repoURL := ad.Spec.Repo
+	branch := ad.Spec.Branch
+	if branch == "" {
+		branch = "main"
+	}
+
+	pollInterval := 1 * time.Minute
+	if ad.Spec.Interval != "" {
+		if d, err := time.ParseDuration(ad.Spec.Interval); err == nil {
+			pollInterval = d
+		}
+	}
+
+	monitor := git.NewMonitor(repoURL)
+	strat := &strategy.AlwaysDeploy{}
+	_ = &executor.APRunner{}
+
+	commit, err := monitor.GetLatestCommit(ctx, branch)
 	if err != nil {
-		return err
+		klog.Errorf("Failed to get latest commit: %v", err)
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
 	if commit == "" {
-		klog.Info("No commits found or not implemented yet")
-		return nil
+		klog.V(4).Info("No commits found yet")
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
-	// TODO: Track last deployed commit to avoid redeploying the same thing
-	shouldDeploy := c.Strategy.ShouldDeploy(commit, "main", nil)
+	if ad.Status.LastDeployedCommit == commit {
+		klog.V(4).Infof("Commit %s already deployed", commit)
+		return ctrl.Result{RequeueAfter: pollInterval}, nil
+	}
 
-	if shouldDeploy {
+	if strat.ShouldDeploy(commit, branch, nil) {
 		klog.Infof("Triggering deployment for commit %s", commit)
-		// TODO: Clone repo to a temporary directory
-		// tmpDir, err := os.MkdirTemp("", "autodeploy-*")
-		// ...
-		// return c.Runner.DeployFlow(ctx, tmpDir)
+		// For now just update status to simulate success
+		ad.Status.LastDeployedCommit = commit
+		if err := r.Status().Update(ctx, &ad); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
-	fmt.Printf("Checked %s, latest commit: %s\\n", repoURL, commit)
-	return nil
+	return ctrl.Result{RequeueAfter: pollInterval}, nil
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *AutoDeployReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&v1alpha1.AutoDeploy{}).
+		Complete(r)
 }
