@@ -43,12 +43,17 @@ type GovulncheckConfig struct {
 }
 
 type LintConfig struct {
-	Unused           *UnusedConfig           `json:"unused"`
-	TestContext      *TestContextConfig      `json:"testcontext"`
-	UnusedParameters *UnusedParametersConfig `json:"unusedparameters"`
+	Unused                       *UnusedConfig                       `json:"unused"`
+	TestContext                  *TestContextConfig                  `json:"testcontext"`
+	UnusedParameters             *UnusedParametersConfig             `json:"unusedparameters"`
+	ReplaceEmptyInterfaceWithAny *ReplaceEmptyInterfaceWithAnyConfig `json:"replaceEmptyInterfaceWithAny"`
 }
 
 type UnusedConfig struct {
+	Enabled *bool `json:"enabled"`
+}
+
+type ReplaceEmptyInterfaceWithAnyConfig struct {
 	Enabled *bool `json:"enabled"`
 }
 
@@ -137,4 +142,12 @@ func (c *Config) IsTestContextError() bool {
 		return c.Lint.TestContext.Mode == "error"
 	}
 	return false
+}
+
+// IsReplaceEmptyInterfaceWithAnyEnabled returns true if the replace-empty-interface-with-any linter is enabled in the config (defaulting to true).
+func (c *Config) IsReplaceEmptyInterfaceWithAnyEnabled() bool {
+	if c.Lint != nil && c.Lint.ReplaceEmptyInterfaceWithAny != nil && c.Lint.ReplaceEmptyInterfaceWithAny.Enabled != nil {
+		return *c.Lint.ReplaceEmptyInterfaceWithAny.Enabled
+	}
+	return true
 }

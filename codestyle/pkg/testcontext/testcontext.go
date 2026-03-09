@@ -27,7 +27,7 @@ var Analyzer = &analysis.Analyzer{
 	Run:  run,
 }
 
-func run(pass *analysis.Pass) (interface{}, error) {
+func run(pass *analysis.Pass) (any, error) {
 	for _, f := range pass.Files {
 		isTestFile := strings.HasSuffix(pass.Fset.File(f.Pos()).Name(), "_test.go")
 

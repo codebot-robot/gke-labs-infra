@@ -148,6 +148,36 @@ func (t *TestContextCheckTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+// ReplaceEmptyInterfaceWithAnyTask represents a task to run replace-empty-interface-with-any check.
+type ReplaceEmptyInterfaceWithAnyTask struct {
+	Dir string
+}
+
+func (t *ReplaceEmptyInterfaceWithAnyTask) Run(ctx context.Context, root string) error {
+	klog.Infof("Running replace-empty-interface-with-any check in %s", t.Dir)
+	apPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("could not find ap executable: %w", err)
+	}
+	args := []string{"lint", "replace-empty-interface-with-any", "./..."}
+	anyCmd := exec.CommandContext(ctx, apPath, args...)
+	anyCmd.Dir = t.Dir
+	anyCmd.Stdout = os.Stdout
+	anyCmd.Stderr = os.Stderr
+	if err := anyCmd.Run(); err != nil {
+		klog.Warningf("replace-empty-interface-with-any check failed in %s: %v", t.Dir, err)
+	}
+	return nil
+}
+
+func (t *ReplaceEmptyInterfaceWithAnyTask) GetName() string {
+	return "replace-empty-interface-with-any-check"
+}
+
+func (t *ReplaceEmptyInterfaceWithAnyTask) GetChildren() []tasks.Task {
+	return nil
+}
+
 // LintTasks returns a task group for running go linting in discovered modules.
 func LintTasks(root string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
@@ -196,6 +226,11 @@ func LintTasks(root string) (tasks.Task, error) {
 			modGroup.Tasks = append(modGroup.Tasks, &TestContextCheckTask{
 				Dir:     dir,
 				IsError: cfg.IsTestContextError(),
+			})
+		}
+		if cfg.IsReplaceEmptyInterfaceWithAnyEnabled() {
+			modGroup.Tasks = append(modGroup.Tasks, &ReplaceEmptyInterfaceWithAnyTask{
+				Dir: dir,
 			})
 		}
 

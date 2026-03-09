@@ -34,7 +34,7 @@ func init() {
 	Analyzer.Flags.BoolVar(&checkParameters, "check-parameters", false, "report unused parameters")
 }
 
-func run(pass *analysis.Pass) (interface{}, error) {
+func run(pass *analysis.Pass) (any, error) {
 	// We use token.Pos as the key because go/types creates different Object instances
 	// for different instantiations of a generic type, even though they refer to the same declaration.
 	used := make(map[token.Pos]bool)
