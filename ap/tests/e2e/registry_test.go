@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build e2e
-
 package e2e
 
 import (
@@ -60,7 +58,7 @@ spec:
     image: ap-golang:latest
     command: ["/bin/sh", "-c", "echo hello"]
 `
-	
+
 	// Create a temporary directory for the test manifests
 	tmpDir, err := os.MkdirTemp("", "ap-e2e-test")
 	if err != nil {
