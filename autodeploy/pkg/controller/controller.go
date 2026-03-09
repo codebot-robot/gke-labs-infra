@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/apis/infra/v1alpha1"
@@ -24,9 +25,9 @@ import (
 	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/strategy"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"k8s.io/klog/v2"
 )
 
 // AutoDeployReconciler reconciles an AutoDeploy object
@@ -66,8 +67,7 @@ func (r *AutoDeployReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	commit, err := monitor.GetLatestCommit(ctx, branch)
 	if err != nil {
-		klog.Errorf("Failed to get latest commit: %v", err)
-		return ctrl.Result{RequeueAfter: pollInterval}, nil
+		return ctrl.Result{RequeueAfter: pollInterval}, fmt.Errorf("failed to get latest commit: %w", err)
 	}
 
 	if commit == "" {
