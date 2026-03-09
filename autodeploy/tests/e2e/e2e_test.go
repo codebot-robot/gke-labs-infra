@@ -150,7 +150,7 @@ func waitForDeployment(t *testing.T, name, namespace string, timeout time.Durati
 		if time.Since(start) > timeout {
 			t.Fatalf("timeout waiting for deployment %s", name)
 		}
-		
+
 		cmd := exec.Command("kubectl", "get", "deployment", name, "-n", namespace, "-o", "jsonpath={.status.readyReplicas}")
 		var stdout bytes.Buffer
 		cmd.Stdout = &stdout
@@ -161,7 +161,7 @@ func waitForDeployment(t *testing.T, name, namespace string, timeout time.Durati
 				return
 			}
 		}
-		
+
 		time.Sleep(5 * time.Second)
 	}
 }
