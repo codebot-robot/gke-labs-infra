@@ -36,6 +36,7 @@ spec:
       containers:
       - name: controller
         image: autodeploy-controller
+        imagePullPolicy: IfNotPresent
 ---
 apiVersion: v1
 kind: ServiceAccount
