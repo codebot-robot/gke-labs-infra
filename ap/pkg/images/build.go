@@ -56,9 +56,10 @@ func (t *DockerBuildTask) Run(ctx context.Context, root string) error {
 		return fmt.Errorf("failed to get relative path for dockerfile: %w", err)
 	}
 
-	args := []string{"buildx", "build", "-t", fullImageName, "-f", relDockerfilePath}
+	args := []string{"build", "-t", fullImageName, "-f", relDockerfilePath}
 	if t.Push {
-		args = append(args, "--push")
+		// Use buildx for push support if requested
+		args = []string{"buildx", "build", "-t", fullImageName, "-f", relDockerfilePath, "--push"}
 	}
 	args = append(args, ".")
 
