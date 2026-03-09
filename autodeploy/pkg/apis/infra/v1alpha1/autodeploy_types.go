@@ -35,6 +35,10 @@ type AutoDeploySpec struct {
 	// +optional
 	Tag string `json:"tag,omitempty"`
 
+	// Directory is the directory within the repository to deploy. If empty, it defaults to the root.
+	// +optional
+	Directory string `json:"directory,omitempty"`
+
 	// Interval is the polling interval. If empty, it defaults to 1m.
 	// +optional
 	Interval string `json:"interval,omitempty"`

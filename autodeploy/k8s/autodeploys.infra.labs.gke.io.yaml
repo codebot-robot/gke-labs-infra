@@ -43,6 +43,10 @@ spec:
               repo:
                 description: Repo is the URL of the git repository to monitor.
                 type: string
+              directory:
+                description: Directory is the directory within the repository to deploy.
+                  If empty, it defaults to the root.
+                type: string
               tag:
                 description: Tag is a pattern for tags to monitor.
                 type: string

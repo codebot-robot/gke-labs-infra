@@ -29,6 +29,7 @@ import (
 // DeployOptions holds the configuration for the "deploy" command.
 type DeployOptions struct {
 	*RootOptions
+	SkipPush bool
 }
 
 // BuildDeployCommand constructs the cobra command for "deploy".
@@ -45,6 +46,8 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 			return RunDeploy(cmd.Context(), opt)
 		},
 	}
+
+	cmd.Flags().BoolVar(&opt.SkipPush, "skip-push", false, "Skip pushing images to registry")
 
 	return cmd
 }
@@ -66,7 +69,7 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		}
 
 		// Deploy typically also builds
-		buildTasks, err := images.BuildTasks(apRoot, true)
+		buildTasks, err := images.BuildTasks(apRoot, !opt.SkipPush)
 		if err != nil {
 			return fmt.Errorf("build failed during deploy for %s: %w", apRoot, err)
 		}

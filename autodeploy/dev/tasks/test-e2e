@@ -1,0 +1,54 @@
+#!/bin/bash
+
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "${REPO_ROOT}/autodeploy"
+
+# Architecture detection
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+case ${ARCH} in
+  x86_64) ARCH="amd64" ;;
+  aarch64) ARCH="arm64" ;;
+esac
+
+# Install kind, kubectl, etc into .build
+BUILD_DIR="${REPO_ROOT}/.build"
+mkdir -p "${BUILD_DIR}"
+
+KIND_VERSION="v0.27.0"
+if [[ ! -x "${BUILD_DIR}/kind" ]]; then
+  echo "Installing kind ${KIND_VERSION}..."
+  curl -Lo "${BUILD_DIR}/kind" "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-${OS}-${ARCH}"
+  chmod +x "${BUILD_DIR}/kind"
+fi
+
+KUBECTL_VERSION="v1.32.2"
+if [[ ! -x "${BUILD_DIR}/kubectl" ]]; then
+  echo "Installing kubectl ${KUBECTL_VERSION}..."
+  curl -Lo "${BUILD_DIR}/kubectl" "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${OS}/${ARCH}/kubectl"
+  chmod +x "${BUILD_DIR}/kubectl"
+fi
+
+export PATH="${BUILD_DIR}:${PATH}"
+
+# Ensure we are running from the autodeploy directory
+export RUN_E2E=1
+go test ./tests/e2e -v -tags e2e

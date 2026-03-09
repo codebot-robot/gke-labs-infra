@@ -32,6 +32,7 @@ type RootOptions struct {
 	APRoot   string
 	APRoots  []string
 	DryRun   bool
+	RootFlag string
 }
 
 // BuildRootCommand constructs the root cobra command.
@@ -49,11 +50,19 @@ func BuildRootCommand() *cobra.Command {
 				opt.APRoot = apRoot
 
 				if repoRoot != "" {
-					apRoots, err := config.FindAllAPRoots(repoRoot)
-					if err != nil {
-						return fmt.Errorf("failed to find all ap roots: %w", err)
+					if opt.RootFlag != "" {
+						absRoot := opt.RootFlag
+						if !filepath.IsAbs(absRoot) {
+							absRoot = filepath.Join(repoRoot, opt.RootFlag)
+						}
+						opt.APRoots = []string{absRoot}
+					} else {
+						apRoots, err := config.FindAllAPRoots(repoRoot)
+						if err != nil {
+							return fmt.Errorf("failed to find all ap roots: %w", err)
+						}
+						opt.APRoots = apRoots
 					}
-					opt.APRoots = apRoots
 				}
 			}
 			return nil
@@ -62,6 +71,7 @@ func BuildRootCommand() *cobra.Command {
 
 	fs := cmd.PersistentFlags()
 	fs.BoolVar(&opt.DryRun, "dry-run", false, "If true, just print the tasks that would be executed")
+	fs.StringVar(&opt.RootFlag, "root", "", "The specific AP root to operate on")
 
 	klogFlags := flag.NewFlagSet("klog", flag.ContinueOnError)
 	klog.InitFlags(klogFlags)
