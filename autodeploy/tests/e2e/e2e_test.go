@@ -63,6 +63,7 @@ apiVersion: infra.labs.gke.io/v1alpha1
 kind: AutoDeploy
 metadata:
   name: helloworld-autodeploy
+  namespace: default
 spec:
   repo: https://github.com/gke-labs/gke-labs-infra
   directory: autodeploy/examples/helloworld
@@ -137,7 +138,7 @@ func setupKindCluster(t *testing.T, name string) {
 	if os.Getenv("SKIP_CLEANUP") == "" {
 		t.Cleanup(func() {
 			t.Logf("Deleting kind cluster %s", name)
-			// runCmd(t, ".", "kind", "delete", "cluster", "--name", name)
+			runCmd(t, ".", "kind", "delete", "cluster", "--name", name)
 		})
 	}
 }
