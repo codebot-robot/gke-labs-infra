@@ -29,6 +29,7 @@ import (
 
 const (
 	configPath   = "/etc/containerd/config.toml"
+	certsDPath   = "/etc/containerd/certs.d"
 	registryHost = "images.local"
 	namespace    = "in-cluster-image-registry-system"
 	serviceName  = "in-cluster-image-registry"
@@ -69,67 +70,60 @@ func reconcile(ctx context.Context, clientset *kubernetes.Clientset) error {
 
 	klog.Infof("Found service %s ClusterIP: %s", serviceName, clusterIP)
 
-	return updateConfig(ctx, clusterIP)
+	hostsDir := fmt.Sprintf("%s/%s", certsDPath, registryHost)
+	hostsPath := fmt.Sprintf("%s/hosts.toml", hostsDir)
+	if err := updateHostsConfig(hostsDir, hostsPath, clusterIP); err != nil {
+		return fmt.Errorf("failed to update hosts config: %v", err)
+	}
+
+	return cleanupOldConfig(configPath)
 }
 
-func updateConfig(ctx context.Context, ip string) error {
-	content, err := os.ReadFile(configPath)
+func updateHostsConfig(dir, path, ip string) error {
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %v", dir, err)
+	}
+
+	desiredContent := fmt.Sprintf(`server = "http://%s"
+
+[host."http://%s"]
+  capabilities = ["pull", "resolve"]
+  skip_verify = true
+`, registryHost, ip)
+
+	currentContent, err := os.ReadFile(path)
+	if err == nil && string(currentContent) == desiredContent {
+		return nil
+	}
+
+	klog.Infof("Updating %s", path)
+	return os.WriteFile(path, []byte(desiredContent), 0644)
+}
+
+func cleanupOldConfig(path string) error {
+	content, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// If it doesn't exist, we might be in a weird environment, or we should create it.
-			// But usually it exists on K8s nodes.
-			return fmt.Errorf("config file %s does not exist", configPath)
+			return nil
 		}
-		return fmt.Errorf("failed to read %s: %v", configPath, err)
+		return fmt.Errorf("failed to read %s: %v", path, err)
 	}
-
-	newContent, changed, err := updateTOML(content, ip)
-	if err != nil {
-		return err
-	}
-
-	if changed {
-		klog.Infof("Updating %s", configPath)
-		err = os.WriteFile(configPath, newContent, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to write %s: %v", configPath, err)
-		}
-
-		klog.Infof("Successfully updated %s. Note: containerd may need to be restarted to pick up changes.", configPath)
-	}
-
-	return nil
-}
-
-func updateTOML(content []byte, ip string) ([]byte, bool, error) {
-	desiredBlock := fmt.Sprintf(`%s
-[plugins."io.containerd.grpc.v1.cri".registry.mirrors."%s"]
-  endpoint = ["http://%s"]
-
-[plugins."io.containerd.grpc.v1.cri".registry.configs."%s".tls]
-  insecure_skip_verify = true
-%s`, beginMarker, registryHost, ip, registryHost, endMarker)
 
 	strContent := string(content)
 	startIndex := strings.Index(strContent, beginMarker)
 	endIndex := strings.Index(strContent, endMarker)
 
 	if startIndex != -1 && endIndex != -1 && startIndex < endIndex {
-		// Existing block found, check if it matches
-		currentBlock := strContent[startIndex : endIndex+len(endMarker)]
-		if currentBlock == desiredBlock {
-			return content, false, nil
+		klog.Infof("Removing old configuration from %s", path)
+		newStr := strContent[:startIndex] + strContent[endIndex+len(endMarker):]
+		// Remove trailing newlines if we left any
+		newStr = strings.TrimRight(newStr, "\n") + "\n"
+		
+		err = os.WriteFile(path, []byte(newStr), 0644)
+		if err != nil {
+			return fmt.Errorf("failed to write %s: %v", path, err)
 		}
-		// Replace it
-		newStr := strContent[:startIndex] + desiredBlock + strContent[endIndex+len(endMarker):]
-		return []byte(newStr), true, nil
 	}
 
-	// Not found, append it
-	newStr := strContent
-	if len(newStr) > 0 && newStr[len(newStr)-1] != '\n' {
-		newStr += "\n"
-	}
-	newStr += "\n" + desiredBlock + "\n"
-	return []byte(newStr), true, nil
+	return nil
 }
