@@ -15,72 +15,55 @@
 package main
 
 import (
-	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestUpdateTOML(t *testing.T) {
-	initialTOML := []byte(`# This is a comment that should be preserved
-version = 2
-[plugins]
-  [plugins."io.containerd.grpc.v1.cri"]
-    [plugins."io.containerd.grpc.v1.cri".registry]
-      [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
-        [plugins."io.containerd.grpc.v1.cri".registry.mirrors."docker.io"]
-          endpoint = ["https://registry-1.docker.io"]
-`)
-
+func TestUpdateHostsConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	hostsPath := filepath.Join(tmpDir, "images.local", "hosts.toml")
 	ip := "10.96.0.10"
-	newContent, changed, err := updateTOML(initialTOML, ip)
+
+	err := updateHostsConfig(hostsPath, ip)
 	if err != nil {
-		t.Fatalf("updateTOML failed: %v", err)
+		t.Fatalf("updateHostsConfig failed: %v", err)
 	}
 
-	if !changed {
-		t.Fatal("expected changed to be true")
-	}
-
-	strContent := string(newContent)
-	if !strings.Contains(strContent, "# This is a comment that should be preserved") {
-		t.Error("expected comment to be preserved")
-	}
-
-	if !strings.Contains(strContent, beginMarker) {
-		t.Error("expected begin marker")
-	}
-
-	if !strings.Contains(strContent, `endpoint = ["http://10.96.0.10"]`) {
-		t.Error("expected correct endpoint")
-	}
-
-	if !strings.Contains(strContent, `insecure_skip_verify = true`) {
-		t.Error("expected insecure_skip_verify to be true")
-	}
-
-	// Run again with same IP, should not change
-	newContent2, changed2, err := updateTOML(newContent, ip)
+	content, err := os.ReadFile(hostsPath)
 	if err != nil {
-		t.Fatalf("second updateTOML failed: %v", err)
-	}
-	if changed2 {
-		t.Fatal("expected changed to be false on second run")
-	}
-	if !bytes.Equal(newContent, newContent2) {
-		t.Fatal("expected content to be identical on second run")
+		t.Fatalf("failed to read hosts.toml: %v", err)
 	}
 
-	// Run with different IP, should change
+	expected := `server = "http://images.local"
+
+[host."http://10.96.0.10"]
+  capabilities = ["pull", "resolve"]
+  skip_verify = true
+`
+	if string(content) != expected {
+		t.Errorf("unexpected content:\ngot:\n%s\nwant:\n%s", string(content), expected)
+	}
+
+	// Update with same IP, should not change anything (just verify it doesn't fail)
+	err = updateHostsConfig(hostsPath, ip)
+	if err != nil {
+		t.Fatalf("second updateHostsConfig failed: %v", err)
+	}
+
+	// Update with new IP
 	newIP := "10.96.0.11"
-	newContent3, changed3, err := updateTOML(newContent, newIP)
+	err = updateHostsConfig(hostsPath, newIP)
 	if err != nil {
-		t.Fatalf("third updateTOML failed: %v", err)
-	}
-	if !changed3 {
-		t.Fatal("expected changed to be true on IP change")
+		t.Fatalf("third updateHostsConfig failed: %v", err)
 	}
 
-	if !strings.Contains(string(newContent3), `endpoint = ["http://10.96.0.11"]`) {
-		t.Error("expected updated endpoint")
+	content, err = os.ReadFile(hostsPath)
+	if err != nil {
+		t.Fatalf("failed to read hosts.toml after update: %v", err)
+	}
+	if !strings.Contains(string(content), `[host."http://10.96.0.11"]`) {
+		t.Errorf("expected updated IP in content: %s", string(content))
 	}
 }
