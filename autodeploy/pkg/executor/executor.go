@@ -30,8 +30,8 @@ type Runner interface {
 
 // APRunner handles execution of 'ap' commands.
 type APRunner struct {
-	ImagePrefix string
-	DockerHost  string
+	ImagePrefix  string
+	BuildkitHost string
 }
 
 // RunAP executes an 'ap' command in the given directory.
@@ -47,8 +47,8 @@ func (r *APRunner) RunAP(ctx context.Context, dir string, args ...string) error 
 	if r.ImagePrefix != "" {
 		cmd.Env = append(cmd.Env, "IMAGE_PREFIX="+r.ImagePrefix)
 	}
-	if r.DockerHost != "" {
-		cmd.Env = append(cmd.Env, "DOCKER_HOST="+r.DockerHost)
+	if r.BuildkitHost != "" {
+		cmd.Env = append(cmd.Env, "BUILDKIT_HOST="+r.BuildkitHost)
 	}
 
 	output, err := cmd.CombinedOutput()

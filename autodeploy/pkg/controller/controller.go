@@ -68,8 +68,8 @@ func (r *AutoDeployReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	runner := r.Runner
 	if runner == nil {
 		runner = &executor.APRunner{
-			ImagePrefix: os.Getenv("IMAGE_PREFIX"),
-			DockerHost:  os.Getenv("DOCKER_HOST"),
+			ImagePrefix:  os.Getenv("IMAGE_PREFIX"),
+			BuildkitHost: os.Getenv("BUILDKIT_HOST"),
 		}
 	}
 
