@@ -132,10 +132,10 @@ func BuildTasks(root string, push bool) (tasks.Task, error) {
 	if push && os.Getenv("IMAGE_PREFIX") == "images.local" {
 		rootTask = &k8s.PortForwardTask{
 			Child:      rootTask,
-			Service:    "images",
-			Namespace:  "default",
+			Service:    "in-cluster-image-registry",
+			Namespace:  "in-cluster-image-registry-system",
 			LocalPort:  5000,
-			RemotePort: 5000,
+			RemotePort: 80,
 		}
 	}
 

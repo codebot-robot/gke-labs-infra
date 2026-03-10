@@ -191,7 +191,7 @@ func (h *Harness) SetupRegistry() {
 	if err := cmd.Run(); err != nil {
 		h.t.Fatalf("kubectl apply failed: %v\nStdout: %s\nStderr: %s", err, stdout.String(), stderr.String())
 	}
-	h.runCmd("kubectl", "wait", "-n", "default", "--for=jsonpath={.status.readyReplicas}=1", "--timeout=2m", "statefulset/images")
+	h.runCmd("kubectl", "wait", "-n", "in-cluster-image-registry-system", "--for=jsonpath={.status.readyReplicas}=1", "--timeout=2m", "statefulset/in-cluster-image-registry")
 }
 
 // RunCmd runs a command and returns its output.
