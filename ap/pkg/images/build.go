@@ -73,13 +73,17 @@ func (t *DockerBuildTask) Run(ctx context.Context, root string) error {
 
 func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, relDockerfilePath string) error {
 	klog.Infof("Building image %s from %s using buildctl", fullImageName, root)
+	output := fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push)
+	if t.Push {
+		output += ",registry.insecure=true"
+	}
 	buildctlArgs := []string{
 		"build",
 		"--frontend", "dockerfile.v0",
 		"--local", "context=.",
 		"--local", "dockerfile=.",
 		"--opt", "filename=" + relDockerfilePath,
-		"--output", fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push),
+		"--output", output,
 	}
 	cmd := exec.CommandContext(ctx, "buildctl", buildctlArgs...)
 	cmd.Dir = root
