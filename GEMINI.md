@@ -35,9 +35,10 @@ When `DryRun` is true, `tasks.Run` will print the task tree instead of executing
 
 ### Verifying changes
 
-Before submitting a Pull Request, you MUST run `ap lint` to verify that your changes follow the project's style and quality guidelines.
+Before submitting a Pull Request, you MUST run `ap generate` and `ap lint` to verify that your changes follow the project's style and quality guidelines.
 
 ```bash
+ap generate
 ap lint
 ```
 
