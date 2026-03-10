@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/apis/infra/v1alpha1"
@@ -34,6 +35,7 @@ import (
 type AutoDeployReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	Runner executor.Runner
 }
 
 // Reconcile checks for updates and triggers deployments if necessary.
@@ -63,7 +65,10 @@ func (r *AutoDeployReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	monitor := git.NewMonitor(repoURL)
 	strat := &strategy.AlwaysDeploy{}
-	_ = &executor.APRunner{}
+	runner := r.Runner
+	if runner == nil {
+		runner = &executor.APRunner{}
+	}
 
 	commit, err := monitor.GetLatestCommit(ctx, branch)
 	if err != nil {
@@ -82,6 +87,26 @@ func (r *AutoDeployReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	if strat.ShouldDeploy(commit, branch, nil) {
 		klog.Infof("Triggering deployment for commit %s", commit)
+
+		tempDir, err := os.MkdirTemp("", "autodeploy-*")
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to create temp dir: %w", err)
+		}
+		defer os.RemoveAll(tempDir)
+
+		if err := monitor.Clone(ctx, branch, tempDir); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to clone repo: %w", err)
+		}
+
+		args := []string{"test"}
+		if ad.Spec.Directory != "" {
+			args = append(args, "--root="+ad.Spec.Directory)
+		}
+
+		if err := runner.RunAP(ctx, tempDir, args...); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to run ap test: %w", err)
+		}
+
 		// For now just update status to simulate success
 		ad.Status.LastDeployedCommit = commit
 		if err := r.Status().Update(ctx, &ad); err != nil {
