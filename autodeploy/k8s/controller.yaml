@@ -37,7 +37,7 @@ spec:
       - name: controller
         image: autodeploy-controller
         env:
-        - name: DOCKER_HOST
+        - name: BUILDKIT_HOST
           value: tcp://buildkit:2375
         - name: IMAGE_PREFIX
           value: images.local
