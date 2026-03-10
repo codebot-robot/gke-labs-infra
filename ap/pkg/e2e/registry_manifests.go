@@ -14,56 +14,9 @@
 
 package e2e
 
-const RegistryManifests = `
-apiVersion: v1
-kind: Service
-metadata:
-  name: images
-  namespace: default
-spec:
-  ports:
-  - name: registry
-    port: 5000
-    targetPort: 5000
-  - name: http
-    port: 80
-    targetPort: 5000
-  selector:
-    app: images
----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: images
-  namespace: default
-spec:
-  serviceName: images
-  replicas: 1
-  selector:
-    matchLabels:
-      app: images
-  template:
-    metadata:
-      labels:
-        app: images
-    spec:
-      containers:
-      - name: registry
-        image: registry:2
-        ports:
-        - containerPort: 5000
-        env:
-        - name: REGISTRY_HTTP_ADDR
-          value: :5000
-        volumeMounts:
-        - name: data
-          mountPath: /var/lib/registry
-  volumeClaimTemplates:
-  - metadata:
-      name: data
-    spec:
-      accessModes: [ "ReadWriteOnce" ]
-      resources:
-        requests:
-          storage: 1Gi
-`
+import (
+	_ "embed"
+)
+
+//go:embed registry_manifests.yaml
+var RegistryManifests string
