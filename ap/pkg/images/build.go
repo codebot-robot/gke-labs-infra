@@ -45,7 +45,11 @@ func (t *DockerBuildTask) Run(ctx context.Context, root string) error {
 
 	actualImagePrefix := imagePrefix
 	if imagePrefix == "images.local" && t.Push {
-		actualImagePrefix = "localhost:5000"
+		if k8s.IsInCluster() {
+			actualImagePrefix = "in-cluster-image-registry.in-cluster-image-registry-system.svc.cluster.local:80"
+		} else {
+			actualImagePrefix = "localhost:5000"
+		}
 	}
 
 	var fullImageName string
