@@ -15,6 +15,7 @@
 package k8s
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -35,12 +36,21 @@ type PortForwardTask struct {
 }
 
 func (t *PortForwardTask) Run(ctx context.Context, root string) error {
+	if IsInCluster() {
+		klog.Infof("Running in-cluster, skipping port-forward to %s/%s", t.Namespace, t.Service)
+		return t.Child.Run(ctx, root)
+	}
+
 	klog.Infof("Starting port-forward to %s/%s (%d:%d)...", t.Namespace, t.Service, t.LocalPort, t.RemotePort)
 
 	pfCmd := exec.CommandContext(ctx, "kubectl", "port-forward",
 		"-n", t.Namespace,
 		"svc/"+t.Service,
 		fmt.Sprintf("%d:%d", t.LocalPort, t.RemotePort))
+
+	var stdout, stderr bytes.Buffer
+	pfCmd.Stdout = &stdout
+	pfCmd.Stderr = &stderr
 
 	if err := pfCmd.Start(); err != nil {
 		return fmt.Errorf("failed to start port-forward: %w", err)
@@ -65,6 +75,13 @@ func (t *PortForwardTask) Run(ctx context.Context, root string) error {
 	}
 
 	if !ready {
+		klog.Errorf("port-forward to %s/%s did not become ready", t.Namespace, t.Service)
+		if stdout.Len() > 0 {
+			klog.Errorf("kubectl port-forward stdout: %s", stdout.String())
+		}
+		if stderr.Len() > 0 {
+			klog.Errorf("kubectl port-forward stderr: %s", stderr.String())
+		}
 		return fmt.Errorf("port-forward did not become ready")
 	}
 
