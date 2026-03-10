@@ -6,7 +6,8 @@
 
 - A `.ap` directory marks an **AP root**.
 - A repository can contain multiple AP roots, allowing for multiple independent projects within one repo.
-- `ap` commands operate relative to the nearest AP root found by walking up from the current directory.
+- By default, `ap` commands operate on all AP roots found within the git repository.
+- Use the `--root` flag to specify a single AP root (e.g., `ap --root autodeploy lint`).
 
 ## Recommended Workflow for Agents
 
