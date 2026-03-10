@@ -16,13 +16,12 @@ package main
 
 import (
 	"bytes"
+	"strings"
 	"testing"
-
-	"github.com/pelletier/go-toml/v2"
 )
 
 func TestUpdateTOML(t *testing.T) {
-	initialTOML := []byte(`
+	initialTOML := []byte(`# This is a comment that should be preserved
 version = 2
 [plugins]
   [plugins."io.containerd.grpc.v1.cri"]
@@ -42,29 +41,21 @@ version = 2
 		t.Fatal("expected changed to be true")
 	}
 
-	var cfg map[string]interface{}
-	err = toml.Unmarshal(newContent, &cfg)
-	if err != nil {
-		t.Fatalf("failed to unmarshal new TOML: %v", err)
+	strContent := string(newContent)
+	if !strings.Contains(strContent, "# This is a comment that should be preserved") {
+		t.Error("expected comment to be preserved")
 	}
 
-	// Verify mirror
-	plugins := cfg["plugins"].(map[string]interface{})
-	cri := plugins["io.containerd.grpc.v1.cri"].(map[string]interface{})
-	registry := cri["registry"].(map[string]interface{})
-	mirrors := registry["mirrors"].(map[string]interface{})
-	mirror := mirrors["images.local"].(map[string]interface{})
-	endpoints := mirror["endpoint"].([]interface{})
-	if len(endpoints) != 1 || endpoints[0] != "http://10.96.0.10" {
-		t.Errorf("unexpected endpoints: %v", endpoints)
+	if !strings.Contains(strContent, beginMarker) {
+		t.Error("expected begin marker")
 	}
 
-	// Verify config
-	configs := registry["configs"].(map[string]interface{})
-	config := configs["images.local"].(map[string]interface{})
-	tls := config["tls"].(map[string]interface{})
-	if tls["insecure_skip_verify"] != true {
-		t.Errorf("expected insecure_skip_verify to be true")
+	if !strings.Contains(strContent, `endpoint = ["http://10.96.0.10"]`) {
+		t.Error("expected correct endpoint")
+	}
+
+	if !strings.Contains(strContent, `insecure_skip_verify = true`) {
+		t.Error("expected insecure_skip_verify to be true")
 	}
 
 	// Run again with same IP, should not change
@@ -81,11 +72,15 @@ version = 2
 
 	// Run with different IP, should change
 	newIP := "10.96.0.11"
-	_, changed3, err := updateTOML(newContent, newIP)
+	newContent3, changed3, err := updateTOML(newContent, newIP)
 	if err != nil {
 		t.Fatalf("third updateTOML failed: %v", err)
 	}
 	if !changed3 {
 		t.Fatal("expected changed to be true on IP change")
+	}
+
+	if !strings.Contains(string(newContent3), `endpoint = ["http://10.96.0.11"]`) {
+		t.Error("expected updated endpoint")
 	}
 }

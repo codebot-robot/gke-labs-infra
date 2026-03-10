@@ -18,9 +18,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
-	"github.com/pelletier/go-toml/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -31,7 +31,9 @@ const (
 	configPath   = "/etc/containerd/config.toml"
 	registryHost = "images.local"
 	namespace    = "in-cluster-image-registry-system"
-	serviceName  = "images"
+	serviceName  = "in-cluster-image-registry"
+	beginMarker  = "# BEGIN IN-CLUSTER-IMAGE-REGISTRY CONFIGURATION"
+	endMarker    = "# END IN-CLUSTER-IMAGE-REGISTRY CONFIGURATION"
 )
 
 func main() {
@@ -44,8 +46,9 @@ func main() {
 		klog.Fatalf("Error creating clientset: %v", err)
 	}
 
+	ctx := context.Background()
 	for {
-		err := reconcile(clientset)
+		err := reconcile(ctx, clientset)
 		if err != nil {
 			klog.Errorf("Reconcile failed: %v", err)
 		}
@@ -53,8 +56,8 @@ func main() {
 	}
 }
 
-func reconcile(clientset *kubernetes.Clientset) error {
-	svc, err := clientset.CoreV1().Services(namespace).Get(context.TODO(), serviceName, metav1.GetOptions{})
+func reconcile(ctx context.Context, clientset *kubernetes.Clientset) error {
+	svc, err := clientset.CoreV1().Services(namespace).Get(ctx, serviceName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to get service %s/%s: %v", namespace, serviceName, err)
 	}
@@ -66,10 +69,10 @@ func reconcile(clientset *kubernetes.Clientset) error {
 
 	klog.Infof("Found service %s ClusterIP: %s", serviceName, clusterIP)
 
-	return updateConfig(clusterIP)
+	return updateConfig(ctx, clusterIP)
 }
 
-func updateConfig(ip string) error {
+func updateConfig(ctx context.Context, ip string) error {
 	content, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -99,103 +102,34 @@ func updateConfig(ip string) error {
 }
 
 func updateTOML(content []byte, ip string) ([]byte, bool, error) {
-	var cfg map[string]interface{}
-	err := toml.Unmarshal(content, &cfg)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to unmarshal TOML: %v", err)
-	}
+	desiredBlock := fmt.Sprintf(`%s
+[plugins."io.containerd.grpc.v1.cri".registry.mirrors."%s"]
+  endpoint = ["http://%s"]
 
-	changed := false
+[plugins."io.containerd.grpc.v1.cri".registry.configs."%s".tls]
+  insecure_skip_verify = true
+%s`, beginMarker, registryHost, ip, registryHost, endMarker)
 
-	// Ensure plugins."io.containerd.grpc.v1.cri".registry.mirrors."images.local"
-	// and plugins."io.containerd.grpc.v1.cri".registry.configs."images.local".tls
+	strContent := string(content)
+	startIndex := strings.Index(strContent, beginMarker)
+	endIndex := strings.Index(strContent, endMarker)
 
-	plugins, ok := cfg["plugins"].(map[string]interface{})
-	if !ok {
-		plugins = make(map[string]interface{})
-		cfg["plugins"] = plugins
-		changed = true
-	}
-
-	cri, ok := plugins["io.containerd.grpc.v1.cri"].(map[string]interface{})
-	if !ok {
-		cri = make(map[string]interface{})
-		plugins["io.containerd.grpc.v1.cri"] = cri
-		changed = true
-	}
-
-	registry, ok := cri["registry"].(map[string]interface{})
-	if !ok {
-		registry = make(map[string]interface{})
-		cri["registry"] = registry
-		changed = true
-	}
-
-	mirrors, ok := registry["mirrors"].(map[string]interface{})
-	if !ok {
-		mirrors = make(map[string]interface{})
-		registry["mirrors"] = mirrors
-		changed = true
-	}
-
-	mirror, ok := mirrors[registryHost].(map[string]interface{})
-	if !ok {
-		mirror = make(map[string]interface{})
-		mirrors[registryHost] = mirror
-		changed = true
-	}
-
-	desiredEndpoint := fmt.Sprintf("http://%s", ip)
-	currentEndpointsRaw, ok := mirror["endpoint"].([]interface{})
-	currentEndpoints := []string{}
-	if ok {
-		for _, e := range currentEndpointsRaw {
-			if s, ok := e.(string); ok {
-				currentEndpoints = append(currentEndpoints, s)
-			}
+	if startIndex != -1 && endIndex != -1 && startIndex < endIndex {
+		// Existing block found, check if it matches
+		currentBlock := strContent[startIndex : endIndex+len(endMarker)]
+		if currentBlock == desiredBlock {
+			return content, false, nil
 		}
-	} else if existing, ok := mirror["endpoint"].([]string); ok {
-		currentEndpoints = existing
+		// Replace it
+		newStr := strContent[:startIndex] + desiredBlock + strContent[endIndex+len(endMarker):]
+		return []byte(newStr), true, nil
 	}
 
-	if len(currentEndpoints) != 1 || currentEndpoints[0] != desiredEndpoint {
-		mirror["endpoint"] = []string{desiredEndpoint}
-		changed = true
+	// Not found, append it
+	newStr := strContent
+	if len(newStr) > 0 && newStr[len(newStr)-1] != '\n' {
+		newStr += "\n"
 	}
-
-	configs, ok := registry["configs"].(map[string]interface{})
-	if !ok {
-		configs = make(map[string]interface{})
-		registry["configs"] = configs
-		changed = true
-	}
-
-	registryConfig, ok := configs[registryHost].(map[string]interface{})
-	if !ok {
-		registryConfig = make(map[string]interface{})
-		configs[registryHost] = registryConfig
-		changed = true
-	}
-
-	tls, ok := registryConfig["tls"].(map[string]interface{})
-	if !ok {
-		tls = make(map[string]interface{})
-		registryConfig["tls"] = tls
-		changed = true
-	}
-
-	if tls["insecure_skip_verify"] != true {
-		tls["insecure_skip_verify"] = true
-		changed = true
-	}
-
-	if changed {
-		newContent, err := toml.Marshal(cfg)
-		if err != nil {
-			return nil, false, fmt.Errorf("failed to marshal TOML: %v", err)
-		}
-		return newContent, true, nil
-	}
-
-	return content, false, nil
+	newStr += "\n" + desiredBlock + "\n"
+	return []byte(newStr), true, nil
 }

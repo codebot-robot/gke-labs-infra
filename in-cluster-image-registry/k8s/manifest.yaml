@@ -20,11 +20,11 @@ metadata:
 apiVersion: v1
 kind: Service
 metadata:
-  name: images
+  name: in-cluster-image-registry
   namespace: in-cluster-image-registry-system
 spec:
   selector:
-    app: images
+    app: in-cluster-image-registry
   ports:
     - port: 80
       targetPort: 5000
@@ -32,18 +32,18 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: images
+  name: in-cluster-image-registry
   namespace: in-cluster-image-registry-system
 spec:
-  serviceName: images
+  serviceName: in-cluster-image-registry
   replicas: 1
   selector:
     matchLabels:
-      app: images
+      app: in-cluster-image-registry
   template:
     metadata:
       labels:
-        app: images
+        app: in-cluster-image-registry
     spec:
       containers:
         - name: registry

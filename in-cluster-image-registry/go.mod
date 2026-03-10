@@ -3,7 +3,6 @@ module github.com/gke-labs/gke-labs-infra/in-cluster-image-registry
 go 1.26.1
 
 require (
-	github.com/pelletier/go-toml/v2 v2.2.4
 	k8s.io/apimachinery v0.32.2
 	k8s.io/client-go v0.32.2
 	k8s.io/klog/v2 v2.130.1
