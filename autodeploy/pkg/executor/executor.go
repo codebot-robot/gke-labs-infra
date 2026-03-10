@@ -21,6 +21,11 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// Runner defines the interface for running 'ap' commands.
+type Runner interface {
+	RunAP(ctx context.Context, dir string, args ...string) error
+}
+
 // APRunner handles execution of 'ap' commands.
 type APRunner struct {
 	// TODO: Add config for BuildKit endpoint and registry

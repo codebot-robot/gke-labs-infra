@@ -56,6 +56,7 @@ type AutoDeployStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:plural=autodeploys
 
 // AutoDeploy is the Schema for the autodeploys API
 type AutoDeploy struct {
