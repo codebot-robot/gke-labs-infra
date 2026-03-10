@@ -16,17 +16,17 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func TestUpdateHostsConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	hostsDir := tmpDir + "/images.local"
-	hostsPath := hostsDir + "/hosts.toml"
+	hostsPath := filepath.Join(tmpDir, "images.local", "hosts.toml")
 	ip := "10.96.0.10"
 
-	err := updateHostsConfig(hostsDir, hostsPath, ip)
+	err := updateHostsConfig(hostsPath, ip)
 	if err != nil {
 		t.Fatalf("updateHostsConfig failed: %v", err)
 	}
@@ -47,14 +47,14 @@ func TestUpdateHostsConfig(t *testing.T) {
 	}
 
 	// Update with same IP, should not change anything (just verify it doesn't fail)
-	err = updateHostsConfig(hostsDir, hostsPath, ip)
+	err = updateHostsConfig(hostsPath, ip)
 	if err != nil {
 		t.Fatalf("second updateHostsConfig failed: %v", err)
 	}
 
 	// Update with new IP
 	newIP := "10.96.0.11"
-	err = updateHostsConfig(hostsDir, hostsPath, newIP)
+	err = updateHostsConfig(hostsPath, newIP)
 	if err != nil {
 		t.Fatalf("third updateHostsConfig failed: %v", err)
 	}
@@ -65,45 +65,5 @@ func TestUpdateHostsConfig(t *testing.T) {
 	}
 	if !strings.Contains(string(content), `[host."http://10.96.0.11"]`) {
 		t.Errorf("expected updated IP in content: %s", string(content))
-	}
-}
-
-func TestCleanupOldConfig(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := tmpDir + "/config.toml"
-
-	initialContent := `version = 2
-[plugins]
-  [plugins."io.containerd.grpc.v1.cri"]
-# BEGIN IN-CLUSTER-IMAGE-REGISTRY CONFIGURATION
-[plugins."io.containerd.grpc.v1.cri".registry.mirrors."images.local"]
-  endpoint = ["http://10.96.0.10"]
-# END IN-CLUSTER-IMAGE-REGISTRY CONFIGURATION
-    [plugins."io.containerd.grpc.v1.cri".registry]
-      config_path = "/etc/containerd/certs.d"
-`
-	err := os.WriteFile(configPath, []byte(initialContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write initial config: %v", err)
-	}
-
-	err = cleanupOldConfig(configPath)
-	if err != nil {
-		t.Fatalf("cleanupOldConfig failed: %v", err)
-	}
-
-	content, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("failed to read config after cleanup: %v", err)
-	}
-
-	if strings.Contains(string(content), beginMarker) {
-		t.Error("expected begin marker to be removed")
-	}
-	if strings.Contains(string(content), "mirrors.\"images.local\"") {
-		t.Error("expected old config to be removed")
-	}
-	if !strings.Contains(string(content), "config_path = \"/etc/containerd/certs.d\"") {
-		t.Error("expected other config to be preserved")
 	}
 }

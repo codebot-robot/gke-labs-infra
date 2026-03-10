@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
+	"path/filepath"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,13 +28,10 @@ import (
 )
 
 const (
-	configPath   = "/etc/containerd/config.toml"
 	certsDPath   = "/etc/containerd/certs.d"
 	registryHost = "images.local"
 	namespace    = "in-cluster-image-registry-system"
 	serviceName  = "in-cluster-image-registry"
-	beginMarker  = "# BEGIN IN-CLUSTER-IMAGE-REGISTRY CONFIGURATION"
-	endMarker    = "# END IN-CLUSTER-IMAGE-REGISTRY CONFIGURATION"
 )
 
 func main() {
@@ -60,7 +57,7 @@ func main() {
 func reconcile(ctx context.Context, clientset *kubernetes.Clientset) error {
 	svc, err := clientset.CoreV1().Services(namespace).Get(ctx, serviceName, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to get service %s/%s: %v", namespace, serviceName, err)
+		return fmt.Errorf("failed to get service %s/%s: %w", namespace, serviceName, err)
 	}
 
 	clusterIP := svc.Spec.ClusterIP
@@ -70,18 +67,18 @@ func reconcile(ctx context.Context, clientset *kubernetes.Clientset) error {
 
 	klog.Infof("Found service %s ClusterIP: %s", serviceName, clusterIP)
 
-	hostsDir := fmt.Sprintf("%s/%s", certsDPath, registryHost)
-	hostsPath := fmt.Sprintf("%s/hosts.toml", hostsDir)
-	if err := updateHostsConfig(hostsDir, hostsPath, clusterIP); err != nil {
-		return fmt.Errorf("failed to update hosts config: %v", err)
+	hostsPath := filepath.Join(certsDPath, registryHost, "hosts.toml")
+	if err := updateHostsConfig(hostsPath, clusterIP); err != nil {
+		return fmt.Errorf("failed to update hosts config: %w", err)
 	}
 
-	return cleanupOldConfig(configPath)
+	return nil
 }
 
-func updateHostsConfig(dir, path, ip string) error {
+func updateHostsConfig(path, ip string) error {
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory %s: %v", dir, err)
+		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
 	desiredContent := fmt.Sprintf(`server = "http://%s"
@@ -92,38 +89,17 @@ func updateHostsConfig(dir, path, ip string) error {
 `, registryHost, ip)
 
 	currentContent, err := os.ReadFile(path)
-	if err == nil && string(currentContent) == desiredContent {
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("failed to read %s: %w", path, err)
+		}
+	} else if string(currentContent) == desiredContent {
 		return nil
 	}
 
 	klog.Infof("Updating %s", path)
-	return os.WriteFile(path, []byte(desiredContent), 0644)
-}
-
-func cleanupOldConfig(path string) error {
-	content, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to read %s: %v", path, err)
+	if err := os.WriteFile(path, []byte(desiredContent), 0644); err != nil {
+		return fmt.Errorf("failed to write %s: %w", path, err)
 	}
-
-	strContent := string(content)
-	startIndex := strings.Index(strContent, beginMarker)
-	endIndex := strings.Index(strContent, endMarker)
-
-	if startIndex != -1 && endIndex != -1 && startIndex < endIndex {
-		klog.Infof("Removing old configuration from %s", path)
-		newStr := strContent[:startIndex] + strContent[endIndex+len(endMarker):]
-		// Remove trailing newlines if we left any
-		newStr = strings.TrimRight(newStr, "\n") + "\n"
-		
-		err = os.WriteFile(path, []byte(newStr), 0644)
-		if err != nil {
-			return fmt.Errorf("failed to write %s: %v", path, err)
-		}
-	}
-
 	return nil
 }
