@@ -1,6 +1,6 @@
 module github.com/gke-labs/gke-labs-infra/autodeploy
 
-go 1.25.0
+go 1.26.1
 
 require (
 	k8s.io/apimachinery v0.32.2

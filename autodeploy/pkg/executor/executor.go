@@ -16,6 +16,7 @@ package executor
 
 import (
 	"context"
+	"os"
 	"os/exec"
 
 	"k8s.io/klog/v2"
@@ -24,11 +25,13 @@ import (
 // Runner defines the interface for running 'ap' commands.
 type Runner interface {
 	RunAP(ctx context.Context, dir string, args ...string) error
+	DeployFlow(ctx context.Context, dir string, args ...string) error
 }
 
 // APRunner handles execution of 'ap' commands.
 type APRunner struct {
-	// TODO: Add config for BuildKit endpoint and registry
+	ImagePrefix string
+	DockerHost  string
 }
 
 // RunAP executes an 'ap' command in the given directory.
@@ -40,7 +43,13 @@ func (r *APRunner) RunAP(ctx context.Context, dir string, args ...string) error 
 
 	cmd := exec.CommandContext(ctx, "ap", args...)
 	cmd.Dir = dir
-	// TODO: Set environment variables for BuildKit and Registry
+	cmd.Env = os.Environ()
+	if r.ImagePrefix != "" {
+		cmd.Env = append(cmd.Env, "IMAGE_PREFIX="+r.ImagePrefix)
+	}
+	if r.DockerHost != "" {
+		cmd.Env = append(cmd.Env, "DOCKER_HOST="+r.DockerHost)
+	}
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -52,14 +61,14 @@ func (r *APRunner) RunAP(ctx context.Context, dir string, args ...string) error 
 }
 
 // DeployFlow runs the full build-test-deploy flow.
-func (r *APRunner) DeployFlow(ctx context.Context, dir string) error {
-	if err := r.RunAP(ctx, dir, "build"); err != nil {
+func (r *APRunner) DeployFlow(ctx context.Context, dir string, args ...string) error {
+	if err := r.RunAP(ctx, dir, append([]string{"build"}, args...)...); err != nil {
 		return err
 	}
-	if err := r.RunAP(ctx, dir, "test"); err != nil {
+	if err := r.RunAP(ctx, dir, append([]string{"test"}, args...)...); err != nil {
 		return err
 	}
-	if err := r.RunAP(ctx, dir, "deploy"); err != nil {
+	if err := r.RunAP(ctx, dir, append([]string{"deploy"}, args...)...); err != nil {
 		return err
 	}
 	return nil

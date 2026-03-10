@@ -42,6 +42,12 @@ func (m *mockRunner) RunAP(ctx context.Context, dir string, args ...string) erro
 	return nil
 }
 
+func (m *mockRunner) DeployFlow(ctx context.Context, dir string, args ...string) error {
+	m.runCount++
+	m.args = args
+	return nil
+}
+
 func TestReconcile(t *testing.T) {
 	ctx := t.Context()
 
@@ -118,11 +124,8 @@ func TestReconcile(t *testing.T) {
 	if runner.runCount != 1 {
 		t.Errorf("expected 1 ap run, got %d", runner.runCount)
 	}
-	if runner.args[0] != "test" {
-		t.Errorf("expected ap test, got ap %v", runner.args)
-	}
-	if runner.args[1] != "--root=testdir" {
-		t.Errorf("expected --root=testdir, got %s", runner.args[1])
+	if len(runner.args) != 1 || runner.args[0] != "--root=testdir" {
+		t.Errorf("expected [--root=testdir], got %v", runner.args)
 	}
 
 	// Verify status update

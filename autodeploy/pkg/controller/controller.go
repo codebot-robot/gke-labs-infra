@@ -67,7 +67,10 @@ func (r *AutoDeployReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	strat := &strategy.AlwaysDeploy{}
 	runner := r.Runner
 	if runner == nil {
-		runner = &executor.APRunner{}
+		runner = &executor.APRunner{
+			ImagePrefix: os.Getenv("IMAGE_PREFIX"),
+			DockerHost:  os.Getenv("DOCKER_HOST"),
+		}
 	}
 
 	commit, err := monitor.GetLatestCommit(ctx, branch)
@@ -98,13 +101,13 @@ func (r *AutoDeployReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			return ctrl.Result{}, fmt.Errorf("failed to clone repo: %w", err)
 		}
 
-		args := []string{"test"}
+		var args []string
 		if ad.Spec.Directory != "" {
 			args = append(args, "--root="+ad.Spec.Directory)
 		}
 
-		if err := runner.RunAP(ctx, tempDir, args...); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to run ap test: %w", err)
+		if err := runner.DeployFlow(ctx, tempDir, args...); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to run deploy flow: %w", err)
 		}
 
 		// For now just update status to simulate success
