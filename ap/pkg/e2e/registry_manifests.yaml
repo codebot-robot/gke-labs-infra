@@ -13,10 +13,15 @@
 # limitations under the License.
 
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: in-cluster-image-registry-system
+---
+apiVersion: v1
 kind: Service
 metadata:
-  name: images
-  namespace: default
+  name: in-cluster-image-registry
+  namespace: in-cluster-image-registry-system
 spec:
   ports:
   - name: registry
@@ -26,23 +31,23 @@ spec:
     port: 80
     targetPort: 5000
   selector:
-    app: images
+    app: in-cluster-image-registry
 ---
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: images
-  namespace: default
+  name: in-cluster-image-registry
+  namespace: in-cluster-image-registry-system
 spec:
-  serviceName: images
+  serviceName: in-cluster-image-registry
   replicas: 1
   selector:
     matchLabels:
-      app: images
+      app: in-cluster-image-registry
   template:
     metadata:
       labels:
-        app: images
+        app: in-cluster-image-registry
     spec:
       containers:
       - name: registry
