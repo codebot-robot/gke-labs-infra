@@ -1,0 +1,120 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: in-cluster-image-registry-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: in-cluster-image-registry
+  namespace: in-cluster-image-registry-system
+spec:
+  selector:
+    app: in-cluster-image-registry
+  ports:
+    - port: 80
+      targetPort: 5000
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: in-cluster-image-registry
+  namespace: in-cluster-image-registry-system
+spec:
+  serviceName: in-cluster-image-registry
+  replicas: 1
+  selector:
+    matchLabels:
+      app: in-cluster-image-registry
+  template:
+    metadata:
+      labels:
+        app: in-cluster-image-registry
+    spec:
+      containers:
+        - name: registry
+          image: registry:2
+          ports:
+            - containerPort: 5000
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/registry
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-agent
+  namespace: in-cluster-image-registry-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: in-cluster-image-registry-node-agent
+rules:
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: in-cluster-image-registry-node-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: in-cluster-image-registry-node-agent
+subjects:
+  - kind: ServiceAccount
+    name: node-agent
+    namespace: in-cluster-image-registry-system
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-agent
+  namespace: in-cluster-image-registry-system
+spec:
+  selector:
+    matchLabels:
+      app: node-agent
+  template:
+    metadata:
+      labels:
+        app: node-agent
+    spec:
+      serviceAccountName: node-agent
+      hostNetwork: true
+      containers:
+        - name: agent
+          image: in-cluster-image-registry-node-agent
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: etc-containerd
+              mountPath: /etc/containerd
+      volumes:
+        - name: etc-containerd
+          hostPath:
+            path: /etc/containerd
