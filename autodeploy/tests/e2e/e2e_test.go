@@ -40,7 +40,7 @@ func TestAutodeploy(t *testing.T) {
 
 	// 2. Build and install autodeploy
 	imagePrefix := "e2e"
-	imageTag := "latest"
+	imageTag := time.Now().Format("20060102T150405")
 	os.Setenv("IMAGE_PREFIX", imagePrefix)
 	os.Setenv("IMAGE_TAG", imageTag)
 

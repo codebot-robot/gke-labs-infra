@@ -36,7 +36,6 @@ spec:
       containers:
       - name: controller
         image: autodeploy-controller
-        imagePullPolicy: IfNotPresent
         env:
         - name: DOCKER_HOST
           value: tcp://buildkit:2375
