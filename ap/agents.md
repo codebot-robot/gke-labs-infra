@@ -24,3 +24,10 @@ When making changes to an AP-managed project, coding agents should follow this v
 -   **Command**: `ap deploy`
 -   **Images**: `ap` automatically builds Docker images found in the `images/<image-name>` directory.
 -   **Kubernetes**: `ap` deploys Kubernetes manifests located in the `k8s` directory.
+
+## Kubernetes Manifests
+
+When writing Kubernetes manifests, follow these guidelines:
+
+-   **Do not specify `imagePullPolicy`**: Kubernetes will automatically set a reasonable default (e.g., `Always` if the tag is `:latest`, `IfNotPresent` otherwise).
+-   **Image Naming**: The image name should map to the directory name under `images`. For example, a Dockerfile at `images/foo/Dockerfile` will result in an image named `${IMAGE_PREFIX}/foo`. In your manifest, you should specify the image as `foo` or `foo:latest`. `ap` will handle the prefixing during deployment.

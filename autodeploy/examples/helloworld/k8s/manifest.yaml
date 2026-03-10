@@ -30,7 +30,6 @@ spec:
       containers:
       - name: helloworld
         image: examples-helloworld
-        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
 ---
