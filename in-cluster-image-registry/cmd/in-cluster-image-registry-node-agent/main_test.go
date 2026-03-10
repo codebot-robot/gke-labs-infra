@@ -36,9 +36,7 @@ func TestUpdateHostsConfig(t *testing.T) {
 		t.Fatalf("failed to read hosts.toml: %v", err)
 	}
 
-	expected := `server = "http://images.local"
-
-[host."http://10.96.0.10"]
+	expected := `[host."http://10.96.0.10"]
   capabilities = ["pull", "resolve"]
   skip_verify = true
 `
