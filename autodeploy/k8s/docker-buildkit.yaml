@@ -29,7 +29,7 @@ spec:
     spec:
       containers:
       - name: buildkit
-        image: moby/buildkit:v0.12.5
+        image: moby/buildkit:v0.28.0
         args:
           - --addr
           - tcp://0.0.0.0:2375
