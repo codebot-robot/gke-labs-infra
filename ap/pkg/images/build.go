@@ -55,13 +55,40 @@ func (t *DockerBuildTask) Run(ctx context.Context, root string) error {
 		fullImageName = fmt.Sprintf("%s:%s", t.ImageName, tag)
 	}
 
-	klog.Infof("Building image %s from %s", fullImageName, root)
 	dockerfilePath := filepath.Join(t.Root, t.Dockerfile)
 	relDockerfilePath, err := filepath.Rel(root, dockerfilePath)
 	if err != nil {
 		return fmt.Errorf("failed to get relative path for dockerfile: %w", err)
 	}
 
+	if os.Getenv("BUILDKIT_HOST") != "" {
+		return t.runBuildctl(ctx, root, fullImageName, relDockerfilePath)
+	}
+	return t.runDocker(ctx, root, fullImageName, relDockerfilePath)
+}
+
+func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, relDockerfilePath string) error {
+	klog.Infof("Building image %s from %s using buildctl", fullImageName, root)
+	buildctlArgs := []string{
+		"build",
+		"--frontend", "dockerfile.v0",
+		"--local", "context=.",
+		"--local", "dockerfile=.",
+		"--opt", "filename=" + relDockerfilePath,
+		"--output", fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push),
+	}
+	cmd := exec.CommandContext(ctx, "buildctl", buildctlArgs...)
+	cmd.Dir = root
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
+	}
+	return nil
+}
+
+func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, relDockerfilePath string) error {
+	klog.Infof("Building image %s from %s using docker", fullImageName, root)
 	args := []string{"build", "-t", fullImageName, "-f", relDockerfilePath, "."}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
