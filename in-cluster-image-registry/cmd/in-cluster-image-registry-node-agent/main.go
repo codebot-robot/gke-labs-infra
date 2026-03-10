@@ -18,7 +18,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,10 +30,11 @@ import (
 )
 
 const (
-	certsDPath   = "/etc/containerd/certs.d"
-	registryHost = "images.local"
-	namespace    = "in-cluster-image-registry-system"
-	serviceName  = "in-cluster-image-registry"
+	certsDPath           = "/etc/containerd/certs.d"
+	containerdConfigPath = "/etc/containerd/config.toml"
+	registryHost         = "images.local"
+	namespace            = "in-cluster-image-registry-system"
+	serviceName          = "in-cluster-image-registry"
 )
 
 func main() {
@@ -72,6 +75,66 @@ func reconcile(ctx context.Context, clientset *kubernetes.Clientset) error {
 		return fmt.Errorf("failed to update hosts config: %w", err)
 	}
 
+	changed, err := updateContainerdConfig(containerdConfigPath)
+	if err != nil {
+		return fmt.Errorf("failed to update containerd config: %w", err)
+	}
+
+	if changed {
+		if err := restartContainerd(); err != nil {
+			return fmt.Errorf("failed to restart containerd: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func updateContainerdConfig(path string) (bool, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			klog.Warningf("containerd config file %s does not exist", path)
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to read %s: %w", path, err)
+	}
+
+	strContent := string(content)
+	lines := strings.Split(strContent, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "config_path") && !strings.HasPrefix(trimmed, "#") {
+			if strings.Contains(trimmed, certsDPath) {
+				return false, nil
+			}
+		}
+	}
+
+	// If we didn't find it, append it.
+	newContent := strContent
+	if !strings.HasSuffix(newContent, "\n") {
+		newContent += "\n"
+	}
+	newContent += "\n[plugins.\"io.containerd.cri.v1.images\".registry]\n"
+	newContent += fmt.Sprintf("  config_path = %q\n", certsDPath)
+
+	klog.Infof("Updating %s to enable certs.d support", path)
+	if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
+		return false, fmt.Errorf("failed to write %s: %w", path, err)
+	}
+
+	return true, nil
+}
+
+func restartContainerd() error {
+	klog.Infof("Restarting containerd...")
+	// We use nsenter to run systemctl on the host.
+	// This requires hostPID: true and privileged: true.
+	cmd := exec.Command("nsenter", "-t", "1", "-m", "-u", "-i", "-n", "systemctl", "restart", "containerd")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to restart containerd: %w (output: %s)", err, string(output))
+	}
+	klog.Infof("Successfully restarted containerd")
 	return nil
 }
 

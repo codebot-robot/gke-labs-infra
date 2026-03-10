@@ -21,6 +21,7 @@ WORKDIR /workspace/in-cluster-image-registry
 RUN go build -o /usr/local/bin/in-cluster-image-registry-node-agent ./cmd/in-cluster-image-registry-node-agent
 
 FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y util-linux && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /usr/local/bin/in-cluster-image-registry-node-agent /usr/local/bin/in-cluster-image-registry-node-agent
 
 ENTRYPOINT ["in-cluster-image-registry-node-agent"]

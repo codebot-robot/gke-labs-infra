@@ -106,6 +106,7 @@ spec:
     spec:
       serviceAccountName: node-agent
       hostNetwork: true
+      hostPID: true
       containers:
         - name: agent
           image: in-cluster-image-registry-node-agent

@@ -67,3 +67,45 @@ func TestUpdateHostsConfig(t *testing.T) {
 		t.Errorf("expected updated IP in content: %s", string(content))
 	}
 }
+
+func TestUpdateContainerdConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+
+	initialContent := `[plugins]
+  [plugins."io.containerd.grpc.v1.cri"]
+    sandbox_image = "registry.k8s.io/pause:3.9"
+`
+	if err := os.WriteFile(configPath, []byte(initialContent), 0644); err != nil {
+		t.Fatalf("failed to write initial config: %v", err)
+	}
+
+	changed, err := updateContainerdConfig(configPath)
+	if err != nil {
+		t.Fatalf("updateContainerdConfig failed: %v", err)
+	}
+	if !changed {
+		t.Errorf("expected changed=true, got false")
+	}
+
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("failed to read config.toml: %v", err)
+	}
+
+	if !strings.Contains(string(content), `config_path = "/etc/containerd/certs.d"`) {
+		t.Errorf("expected config_path in content: %s", string(content))
+	}
+	if !strings.Contains(string(content), `[plugins."io.containerd.cri.v1.images".registry]`) {
+		t.Errorf("expected plugin section in content: %s", string(content))
+	}
+
+	// Run again, should not change
+	changed, err = updateContainerdConfig(configPath)
+	if err != nil {
+		t.Fatalf("second updateContainerdConfig failed: %v", err)
+	}
+	if changed {
+		t.Errorf("expected changed=false on second run, got true")
+	}
+}
