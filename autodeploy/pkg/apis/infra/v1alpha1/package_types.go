@@ -22,8 +22,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/scheme"
 )
 
-// AutoDeploySpec defines the desired state of AutoDeploy
-type AutoDeploySpec struct {
+// PackageSpec defines the desired state of Package
+type PackageSpec struct {
 	// Repo is the URL of the git repository to monitor.
 	Repo string `json:"repo"`
 
@@ -44,8 +44,8 @@ type AutoDeploySpec struct {
 	Interval string `json:"interval,omitempty"`
 }
 
-// AutoDeployStatus defines the observed state of AutoDeploy
-type AutoDeployStatus struct {
+// PackageStatus defines the observed state of Package
+type PackageStatus struct {
 	// LastDeployedCommit is the hash of the last successfully deployed commit.
 	LastDeployedCommit string `json:"lastDeployedCommit,omitempty"`
 
@@ -56,28 +56,28 @@ type AutoDeployStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:plural=autodeploys
+// +kubebuilder:resource:plural=packages
 
-// AutoDeploy is the Schema for the autodeploys API
-type AutoDeploy struct {
+// Package is the Schema for the packages API
+type Package struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   AutoDeploySpec   `json:"spec,omitempty"`
-	Status AutoDeployStatus `json:"status,omitempty"`
+	Spec   PackageSpec   `json:"spec,omitempty"`
+	Status PackageStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// AutoDeployList contains a list of AutoDeploy
-type AutoDeployList struct {
+// PackageList contains a list of Package
+type PackageList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []AutoDeploy `json:"items"`
+	Items           []Package `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&AutoDeploy{}, &AutoDeployList{})
+	SchemeBuilder.Register(&Package{}, &PackageList{})
 }
 
 var (

@@ -31,34 +31,34 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// AutoDeployReconciler reconciles an AutoDeploy object
-type AutoDeployReconciler struct {
+// PackageReconciler reconciles a Package object
+type PackageReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	Runner executor.Runner
 }
 
 // Reconcile checks for updates and triggers deployments if necessary.
-func (r *AutoDeployReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	klog.Infof("Reconciling AutoDeploy %s", req.NamespacedName)
+func (r *PackageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	klog.Infof("Reconciling Package %s", req.NamespacedName)
 
-	var ad v1alpha1.AutoDeploy
-	if err := r.Get(ctx, req.NamespacedName, &ad); err != nil {
+	var pkg v1alpha1.Package
+	if err := r.Get(ctx, req.NamespacedName, &pkg); err != nil {
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
 
-	repoURL := ad.Spec.Repo
-	branch := ad.Spec.Branch
+	repoURL := pkg.Spec.Repo
+	branch := pkg.Spec.Branch
 	if branch == "" {
 		branch = "main"
 	}
 
 	pollInterval := 1 * time.Minute
-	if ad.Spec.Interval != "" {
-		if d, err := time.ParseDuration(ad.Spec.Interval); err == nil {
+	if pkg.Spec.Interval != "" {
+		if d, err := time.ParseDuration(pkg.Spec.Interval); err == nil {
 			pollInterval = d
 		}
 	}
@@ -83,7 +83,7 @@ func (r *AutoDeployReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
 
-	if ad.Status.LastDeployedCommit == commit {
+	if pkg.Status.LastDeployedCommit == commit {
 		klog.V(4).Infof("Commit %s already deployed", commit)
 		return ctrl.Result{RequeueAfter: pollInterval}, nil
 	}
@@ -102,8 +102,8 @@ func (r *AutoDeployReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		var args []string
-		if ad.Spec.Directory != "" {
-			args = append(args, "--root="+ad.Spec.Directory)
+		if pkg.Spec.Directory != "" {
+			args = append(args, "--root="+pkg.Spec.Directory)
 		}
 
 		if err := runner.DeployFlow(ctx, tempDir, args...); err != nil {
@@ -111,8 +111,8 @@ func (r *AutoDeployReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		// For now just update status to simulate success
-		ad.Status.LastDeployedCommit = commit
-		if err := r.Status().Update(ctx, &ad); err != nil {
+		pkg.Status.LastDeployedCommit = commit
+		if err := r.Status().Update(ctx, &pkg); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -121,8 +121,8 @@ func (r *AutoDeployReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *AutoDeployReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *PackageReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&v1alpha1.AutoDeploy{}).
+		For(&v1alpha1.Package{}).
 		Complete(r)
 }

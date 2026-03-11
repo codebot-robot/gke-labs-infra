@@ -54,10 +54,10 @@ metadata:
   name: autodeploy-controller-role
 rules:
 - apiGroups: ["infra.labs.gke.io"]
-  resources: ["autodeploys"]
+  resources: ["packages"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 - apiGroups: ["infra.labs.gke.io"]
-  resources: ["autodeploys/status"]
+  resources: ["packages/status"]
   verbs: ["get", "update", "patch"]
 - apiGroups: ["apps"]
   resources: ["deployments"]

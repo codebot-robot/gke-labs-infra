@@ -1,5 +1,5 @@
 apiVersion: infra.labs.gke.io/v1alpha1
-kind: AutoDeploy
+kind: Package
 metadata:
   name: gke-labs-infra
   namespace: default

@@ -44,7 +44,7 @@ func main() {
 		klog.Fatalf("unable to start manager: %v", err)
 	}
 
-	if err = (&controller.AutoDeployReconciler{
+	if err = (&controller.PackageReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
