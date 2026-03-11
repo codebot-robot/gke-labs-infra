@@ -45,6 +45,7 @@ func TestAutodeploy(t *testing.T) {
 	os.Setenv("IMAGE_TAG", imageTag)
 
 	// Build autodeploy
+	runCmd(t, repoRoot, "go", "run", "./ap", "build", "--root=.")
 	runCmd(t, repoRoot, "go", "run", "./ap", "deploy", "--root=autodeploy", "--skip-push")
 
 	// Load images into kind

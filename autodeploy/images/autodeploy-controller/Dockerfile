@@ -12,20 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+ARG IMAGE_PREFIX=images.local
+ARG IMAGE_TAG=latest
+
+FROM ${IMAGE_PREFIX}/ap-golang:${IMAGE_TAG} AS ap-bin
+
 FROM golang:1.26.1-trixie AS builder
 
 WORKDIR /workspace
 COPY . .
 
-# Build ap
-RUN go build -o /usr/local/bin/ap ./ap
-
 # Build autodeploy
-WORKDIR /workspace/autodeploy
 RUN go build -o /usr/local/bin/autodeploy .
 
 FROM golang:1.26.1-trixie
-COPY --from=builder /usr/local/bin/ap /usr/local/bin/ap
+COPY --from=ap-bin /usr/local/bin/ap /usr/local/bin/ap
 COPY --from=builder /usr/local/bin/autodeploy /usr/local/bin/autodeploy
 
 # autodeploy needs git to clone repos and docker CLI to build images

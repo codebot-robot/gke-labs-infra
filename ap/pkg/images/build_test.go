@@ -18,6 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
 func TestHasImages(t *testing.T) {
@@ -74,7 +76,6 @@ func TestHasImages(t *testing.T) {
 			expected: false, // Because the only Dockerfile is inside another ap root
 		},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := filepath.Join(tmpDir, tt.name)
@@ -89,5 +90,45 @@ func TestHasImages(t *testing.T) {
 				t.Errorf("HasImages() = %v, want %v", got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestBuildTasks(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ap-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	os.MkdirAll(filepath.Join(tmpDir, "images", "foo"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "images", "foo", "Dockerfile"), []byte("FROM scratch"), 0644)
+
+	task, err := BuildTasks(tmpDir, false)
+	if err != nil {
+		t.Fatalf("BuildTasks() error = %v", err)
+	}
+
+	group, ok := task.(*tasks.Group)
+	if !ok {
+		t.Fatalf("expected *tasks.Group, got %T", task)
+	}
+
+	found := false
+	for _, child := range group.Tasks {
+		if bt, ok := child.(*DockerBuildTask); ok {
+			if bt.ImageName == "foo" {
+				found = true
+				if bt.Root != tmpDir {
+					t.Errorf("expected Root %s, got %s", tmpDir, bt.Root)
+				}
+				if bt.Dockerfile != filepath.Join("images", "foo", "Dockerfile") {
+					t.Errorf("expected Dockerfile %s, got %s", filepath.Join("images", "foo", "Dockerfile"), bt.Dockerfile)
+				}
+			}
+		}
+	}
+
+	if !found {
+		t.Errorf("did not find DockerBuildTask for foo")
 	}
 }
