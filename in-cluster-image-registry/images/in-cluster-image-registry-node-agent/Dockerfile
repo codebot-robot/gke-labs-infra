@@ -17,7 +17,6 @@ FROM golang:1.26.1-trixie AS builder
 WORKDIR /workspace
 COPY . .
 
-WORKDIR /workspace/in-cluster-image-registry
 RUN go build -o /usr/local/bin/in-cluster-image-registry-node-agent ./cmd/in-cluster-image-registry-node-agent
 
 FROM debian:trixie-slim

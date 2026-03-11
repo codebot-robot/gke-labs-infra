@@ -38,6 +38,9 @@ type DockerBuildTask struct {
 
 func (t *DockerBuildTask) Run(ctx context.Context, _ string) error {
 	imagePrefix := os.Getenv("IMAGE_PREFIX")
+	if imagePrefix == "" {
+		imagePrefix = "images.local"
+	}
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
 		tag = "latest"
@@ -71,12 +74,24 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 	if t.Push {
 		output += ",registry.insecure=true"
 	}
+
+	imagePrefix := os.Getenv("IMAGE_PREFIX")
+	if imagePrefix == "" {
+		imagePrefix = "images.local"
+	}
+	tag := os.Getenv("IMAGE_TAG")
+	if tag == "" {
+		tag = "latest"
+	}
+
 	buildctlArgs := []string{
 		"build",
 		"--frontend", "dockerfile.v0",
 		"--local", "context=.",
 		"--local", "dockerfile=.",
 		"--opt", "filename=" + relDockerfilePath,
+		"--opt", "build-arg:IMAGE_PREFIX=" + imagePrefix,
+		"--opt", "build-arg:IMAGE_TAG=" + tag,
 		"--output", output,
 	}
 	cmd := exec.CommandContext(ctx, "buildctl", buildctlArgs...)
@@ -91,7 +106,24 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 
 func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, relDockerfilePath string) error {
 	klog.Infof("Building image %s from %s using docker", fullImageName, root)
-	args := []string{"build", "-t", fullImageName, "-f", relDockerfilePath, "."}
+
+	imagePrefix := os.Getenv("IMAGE_PREFIX")
+	if imagePrefix == "" {
+		imagePrefix = "images.local"
+	}
+	tag := os.Getenv("IMAGE_TAG")
+	if tag == "" {
+		tag = "latest"
+	}
+
+	args := []string{
+		"build",
+		"-t", fullImageName,
+		"-f", relDockerfilePath,
+		"--build-arg", "IMAGE_PREFIX=" + imagePrefix,
+		"--build-arg", "IMAGE_TAG=" + tag,
+		".",
+	}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	cmd.Dir = root

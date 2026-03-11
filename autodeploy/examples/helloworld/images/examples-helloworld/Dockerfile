@@ -18,7 +18,6 @@ WORKDIR /workspace
 COPY . .
 
 # Build helloworld
-WORKDIR /workspace/autodeploy/examples/helloworld
 RUN go build -o /usr/local/bin/helloworld .
 
 FROM golang:1.26.1-trixie
