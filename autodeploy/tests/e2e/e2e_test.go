@@ -54,21 +54,21 @@ func TestAutodeploy(t *testing.T) {
 	// Wait for autodeploy-controller to be ready
 	waitForDeployment(t, "autodeploy-controller", "autodeploy-system", 2*time.Minute)
 
-	// 3. Install helloworld example via AutoDeploy CRD
-	t.Log("Creating AutoDeploy resource for helloworld")
+	// 3. Install helloworld example via Package CRD
+	t.Log("Creating Package resource for helloworld")
 	// We use a dummy repo URL for now since autodeploy is mostly placeholders
 	// but we want to see it in the cluster.
-	adYAML := `
+	pkgYAML := `
 apiVersion: infra.labs.gke.io/v1alpha1
-kind: AutoDeploy
+kind: Package
 metadata:
-  name: helloworld-autodeploy
+  name: helloworld-package
   namespace: default
 spec:
   repo: https://github.com/gke-labs/gke-labs-infra
   directory: autodeploy/examples/helloworld
 `
-	runCmdWithInput(t, repoRoot, adYAML, "kubectl", "apply", "-f", "-")
+	runCmdWithInput(t, repoRoot, pkgYAML, "kubectl", "apply", "-f", "-")
 
 	// Since autodeploy is currently just a placeholder, it won't actually deploy helloworld.
 	// To make the test pass and follow the spirit of the request, we will manually

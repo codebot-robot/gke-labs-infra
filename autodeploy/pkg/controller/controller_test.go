@@ -85,23 +85,23 @@ func TestReconcile(t *testing.T) {
 		t.Fatalf("failed to add scheme: %v", err)
 	}
 
-	ad := &v1alpha1.AutoDeploy{
+	pkg := &v1alpha1.Package{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-ad",
+			Name:      "test-pkg",
 			Namespace: "default",
 		},
-		Spec: v1alpha1.AutoDeploySpec{
+		Spec: v1alpha1.PackageSpec{
 			Repo:      repoPath,
 			Branch:    "master",
 			Directory: "testdir",
 		},
 	}
 
-	client := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.AutoDeploy{}).WithRuntimeObjects(ad).Build()
+	client := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&v1alpha1.Package{}).WithRuntimeObjects(pkg).Build()
 
 	// 3. Setup Reconciler
 	runner := &mockRunner{}
-	r := &AutoDeployReconciler{
+	r := &PackageReconciler{
 		Client: client,
 		Scheme: scheme,
 		Runner: runner,
@@ -110,7 +110,7 @@ func TestReconcile(t *testing.T) {
 	// 4. Reconcile
 	req := ctrl.Request{
 		NamespacedName: types.NamespacedName{
-			Name:      "test-ad",
+			Name:      "test-pkg",
 			Namespace: "default",
 		},
 	}
@@ -129,12 +129,12 @@ func TestReconcile(t *testing.T) {
 	}
 
 	// Verify status update
-	var updatedAD v1alpha1.AutoDeploy
-	if err := client.Get(ctx, req.NamespacedName, &updatedAD); err != nil {
-		t.Fatalf("failed to get updated AD: %v", err)
+	var updatedPkg v1alpha1.Package
+	if err := client.Get(ctx, req.NamespacedName, &updatedPkg); err != nil {
+		t.Fatalf("failed to get updated Package: %v", err)
 	}
 
-	if updatedAD.Status.LastDeployedCommit != commitHash.String() {
-		t.Errorf("expected LastDeployedCommit to be %s, got %s", commitHash.String(), updatedAD.Status.LastDeployedCommit)
+	if updatedPkg.Status.LastDeployedCommit != commitHash.String() {
+		t.Errorf("expected LastDeployedCommit to be %s, got %s", commitHash.String(), updatedPkg.Status.LastDeployedCommit)
 	}
 }
