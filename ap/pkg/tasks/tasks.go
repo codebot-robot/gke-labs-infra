@@ -37,12 +37,13 @@ type Task interface {
 type TaskScript struct {
 	Name string
 	Path string
+	Root string
 }
 
-func (t *TaskScript) Run(ctx context.Context, root string) error {
+func (t *TaskScript) Run(ctx context.Context, _ string) error {
 	klog.Infof("Running task: %s", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
-	cmd.Dir = root
+	cmd.Dir = t.Root
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -132,6 +133,7 @@ func FindTaskScripts(root string, opts ...FindOption) ([]Task, error) {
 		tasks = append(tasks, &TaskScript{
 			Name: name,
 			Path: filepath.Join(tasksDir, name),
+			Root: root,
 		})
 	}
 
