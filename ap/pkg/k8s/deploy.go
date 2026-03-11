@@ -260,6 +260,23 @@ func (t *KubectlApplyTask) Run(ctx context.Context, root string) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("kubectl apply failed for %s: %w", relPath, err)
 	}
+
+	// If this was a CRD, wait for it to be established
+	crdNames, err := getCRDNames(content)
+	if err != nil {
+		klog.Warningf("Failed to check if %s is a CRD: %v", relPath, err)
+	} else {
+		for _, name := range crdNames {
+			klog.Infof("Waiting for CRD %s to be established...", name)
+			waitCmd := exec.CommandContext(ctx, "kubectl", "wait", "--for=condition=Established", "customresourcedefinition/"+name, "--timeout=60s")
+			waitCmd.Stdout = os.Stdout
+			waitCmd.Stderr = os.Stderr
+			if err := waitCmd.Run(); err != nil {
+				return fmt.Errorf("failed to wait for CRD %s: %w", name, err)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -269,6 +286,50 @@ func (t *KubectlApplyTask) GetName() string {
 
 func (t *KubectlApplyTask) GetChildren() []tasks.Task {
 	return nil
+}
+
+func getCRDNames(content []byte) ([]string, error) {
+	var names []string
+	decoder := yaml.NewDecoder(bytes.NewReader(content))
+	for {
+		var doc yaml.Node
+		if err := decoder.Decode(&doc); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+
+		// Basic check for CRD
+		// We look for kind: CustomResourceDefinition and metadata.name
+		if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
+			root := doc.Content[0]
+			if root.Kind == yaml.MappingNode {
+				isCRD := false
+				name := ""
+				for i := 0; i+1 < len(root.Content); i += 2 {
+					key := root.Content[i].Value
+					val := root.Content[i+1]
+					if key == "kind" && val.Kind == yaml.ScalarNode && val.Value == "CustomResourceDefinition" {
+						isCRD = true
+					}
+					if key == "metadata" && val.Kind == yaml.MappingNode {
+						for j := 0; j+1 < len(val.Content); j += 2 {
+							mKey := val.Content[j].Value
+							mVal := val.Content[j+1]
+							if mKey == "name" && mVal.Kind == yaml.ScalarNode {
+								name = mVal.Value
+							}
+						}
+					}
+				}
+				if isCRD && name != "" {
+					names = append(names, name)
+				}
+			}
+		}
+	}
+	return names, nil
 }
 
 // DeployTasks returns a task group for deploying all k8s manifests found in k8s directories.
