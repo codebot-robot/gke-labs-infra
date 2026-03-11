@@ -144,10 +144,12 @@ func updateHostsConfig(path, ip string) error {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
-	desiredContent := fmt.Sprintf(`[host."http://%s"]
+	desiredContent := fmt.Sprintf(`server = "http://%s"
+
+[host."http://%s"]
   capabilities = ["pull", "resolve"]
   skip_verify = true
-`, ip)
+`, ip, ip)
 
 	currentContent, err := os.ReadFile(path)
 	if err != nil {
