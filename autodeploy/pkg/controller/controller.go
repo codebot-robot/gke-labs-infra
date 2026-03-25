@@ -65,17 +65,19 @@ func (r *PackageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	monitor := git.NewMonitor(repoURL)
 	strat := &strategy.AlwaysDeploy{}
-	runner := r.Runner
-	if runner == nil {
-		runner = &executor.APRunner{
-			ImagePrefix:  os.Getenv("IMAGE_PREFIX"),
-			BuildkitHost: os.Getenv("BUILDKIT_HOST"),
-		}
-	}
 
 	commit, err := monitor.GetLatestCommit(ctx, branch)
 	if err != nil {
 		return ctrl.Result{RequeueAfter: pollInterval}, fmt.Errorf("failed to get latest commit: %w", err)
+	}
+
+	runner := r.Runner
+	if runner == nil {
+		runner = &executor.APRunner{
+			ImagePrefix:  os.Getenv("IMAGE_PREFIX"),
+			ImageTag:     commit,
+			BuildkitHost: os.Getenv("BUILDKIT_HOST"),
+		}
 	}
 
 	if commit == "" {
