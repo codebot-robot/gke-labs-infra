@@ -23,7 +23,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
@@ -77,12 +76,7 @@ func (t *BuiltinGeneratorTask) GetChildren() []tasks.Task {
 }
 
 // GenerateTasks returns a task group for all generation tasks.
-func GenerateTasks(repoRoot string) (tasks.Task, error) {
-	apRoots, err := config.FindAllAPRoots(repoRoot)
-	if err != nil {
-		return nil, err
-	}
-
+func GenerateTasks(repoRoot string, apRoots []string) (tasks.Task, error) {
 	var allTasks []tasks.Task
 
 	for _, apRoot := range apRoots {
@@ -154,8 +148,8 @@ func GenerateTasks(repoRoot string) (tasks.Task, error) {
 	}, nil
 }
 
-func Run(ctx context.Context, repoRoot string) error {
-	t, err := GenerateTasks(repoRoot)
+func Run(ctx context.Context, repoRoot string, apRoots []string) error {
+	t, err := GenerateTasks(repoRoot, apRoots)
 	if err != nil {
 		return err
 	}

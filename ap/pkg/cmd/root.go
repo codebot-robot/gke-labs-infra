@@ -53,7 +53,29 @@ func BuildRootCommand() *cobra.Command {
 					if opt.RootFlag != "" {
 						absRoot := opt.RootFlag
 						if !filepath.IsAbs(absRoot) {
-							absRoot = filepath.Join(repoRoot, opt.RootFlag)
+							// Resolve relative to current working directory
+							wd, err := os.Getwd()
+							if err != nil {
+								return fmt.Errorf("failed to get current working directory: %w", err)
+							}
+							absRoot = filepath.Join(wd, opt.RootFlag)
+						}
+						// Verify that the specified root exists and is an AP root
+						fi, err := os.Stat(absRoot)
+						if err != nil {
+							if os.IsNotExist(err) {
+								return fmt.Errorf("specified root %q does not exist", opt.RootFlag)
+							}
+							return fmt.Errorf("failed to stat specified root %q: %w", opt.RootFlag, err)
+						}
+						if !fi.IsDir() {
+							return fmt.Errorf("specified root %q is not a directory", opt.RootFlag)
+						}
+						if _, err := os.Stat(filepath.Join(absRoot, ".ap")); err != nil {
+							if os.IsNotExist(err) {
+								return fmt.Errorf("specified root %q is not an AP root (missing .ap directory)", opt.RootFlag)
+							}
+							return fmt.Errorf("failed to check for .ap directory in %q: %w", opt.RootFlag, err)
 						}
 						opt.APRoots = []string{absRoot}
 					} else {
@@ -77,6 +99,7 @@ func BuildRootCommand() *cobra.Command {
 	klog.InitFlags(klogFlags)
 	fs.AddGoFlagSet(klogFlags)
 
+	cmd.AddCommand(BuildLsCommand(&opt))
 	cmd.AddCommand(BuildTestCommand(&opt))
 	cmd.AddCommand(BuildE2eCommand(&opt))
 	cmd.AddCommand(BuildLintCommand(&opt))

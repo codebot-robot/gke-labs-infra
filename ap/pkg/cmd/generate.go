@@ -54,17 +54,20 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 
 	var allTasks []tasks.Task
 
-	generateTasks, err := generate.GenerateTasks(opt.RepoRoot)
+	generateTasks, err := generate.GenerateTasks(opt.RepoRoot, opt.APRoots)
 	if err != nil {
 		return err
 	}
 	allTasks = append(allTasks, generateTasks)
 
-	formatTasks, err := format.FormatTasks(opt.RepoRoot)
-	if err != nil {
-		return err
+	// Format tasks are also root-sensitive
+	for _, apRoot := range opt.APRoots {
+		formatTasks, err := format.FormatTasks(apRoot)
+		if err != nil {
+			return err
+		}
+		allTasks = append(allTasks, formatTasks)
 	}
-	allTasks = append(allTasks, formatTasks)
 
 	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }
