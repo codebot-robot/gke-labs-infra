@@ -30,15 +30,16 @@ import (
 
 // CodestyleTask represents a task to run codestyle checks (headers, gofmt, etc).
 type CodestyleTask struct {
+	Root string
 }
 
-func (t *CodestyleTask) Run(ctx context.Context, root string) error {
-	klog.Info("Running codestyle...")
-	if err := fileheaders.Run(ctx, root, nil); err != nil {
-		return fmt.Errorf("fileheaders failed: %w", err)
+func (t *CodestyleTask) Run(ctx context.Context, _ string) error {
+	klog.Infof("Running codestyle in %s...", t.Root)
+	if err := fileheaders.Run(ctx, t.Root, nil); err != nil {
+		return fmt.Errorf("fileheaders failed in %s: %w", t.Root, err)
 	}
-	if err := gostyle.Run(ctx, root, nil); err != nil {
-		return fmt.Errorf("gostyle failed: %w", err)
+	if err := gostyle.Run(ctx, t.Root, nil); err != nil {
+		return fmt.Errorf("gostyle failed in %s: %w", t.Root, err)
 	}
 	return nil
 }
@@ -82,7 +83,7 @@ func FormatTasks(root string) (tasks.Task, error) {
 	var allTasks []tasks.Task
 
 	// 1. Run codestyle (headers, gofmt, etc)
-	allTasks = append(allTasks, &CodestyleTask{})
+	allTasks = append(allTasks, &CodestyleTask{Root: root})
 
 	// 2. Run legacy format scripts
 	tasksDir := filepath.Join(root, "dev", "tasks")

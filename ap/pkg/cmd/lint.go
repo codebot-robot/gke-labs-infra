@@ -60,11 +60,22 @@ func RunLint(ctx context.Context, opt LintOptions) error {
 
 	var allTasks []tasks.Task
 
-	prTask, err := prlinter.LintTasks(opt.RepoRoot)
-	if err != nil {
-		return err
+	// Only run prlinter if we are operating on the repo root
+	isRepoRoot := false
+	for _, apRoot := range opt.APRoots {
+		if apRoot == opt.RepoRoot {
+			isRepoRoot = true
+			break
+		}
 	}
-	allTasks = append(allTasks, prTask)
+
+	if isRepoRoot {
+		prTask, err := prlinter.LintTasks(opt.RepoRoot)
+		if err != nil {
+			return err
+		}
+		allTasks = append(allTasks, prTask)
+	}
 
 	for _, apRoot := range opt.APRoots {
 		group := &tasks.Group{
