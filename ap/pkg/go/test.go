@@ -50,7 +50,7 @@ type GoTestTask struct {
 
 func (t *GoTestTask) Run(ctx context.Context, root string) error {
 	klog.Infof("Running go test in %s", t.Dir)
-	if err := runGoTest(ctx, t.Dir, t.ResultFile); err != nil {
+	if err := RunGoTest(ctx, t.Dir, t.ResultFile, RunGoTestOptions{}); err != nil {
 		return fmt.Errorf("go test failed in %s: %w", t.Dir, err)
 	}
 	return nil
@@ -62,6 +62,49 @@ func (t *GoTestTask) GetName() string {
 
 func (t *GoTestTask) GetChildren() []tasks.Task {
 	return nil
+}
+
+// GoE2eTask represents a task to run go e2e tests.
+type GoE2eTask struct {
+	Dir        string
+	Name       string
+	ResultFile string
+}
+
+func (t *GoE2eTask) Run(ctx context.Context, root string) error {
+	klog.Infof("Running go e2e test in %s", t.Dir)
+	opts := RunGoTestOptions{
+		Env:  []string{"RUN_E2E=1"},
+		Args: []string{"-v", "-count=1", "-timeout", "20m", "./tests/e2e/..."},
+	}
+	if err := RunGoTest(ctx, t.Dir, t.ResultFile, opts); err != nil {
+		return fmt.Errorf("go e2e test failed in %s: %w", t.Dir, err)
+	}
+	return nil
+}
+
+func (t *GoE2eTask) GetName() string {
+	return fmt.Sprintf("go-e2e-%s", t.Name)
+}
+
+func (t *GoE2eTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// HasGoTests returns true if the directory or any subdirectory contains a .go file with a _test.go suffix.
+func HasGoTests(dir string) bool {
+	found := false
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && strings.HasSuffix(info.Name(), "_test.go") {
+			found = true
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return found
 }
 
 // TestTasks returns a task group for running go tests in discovered modules.
@@ -119,15 +162,30 @@ func Test(ctx context.Context, root string) error {
 	return t.Run(ctx, root)
 }
 
-func runGoTest(ctx context.Context, dir string, resultFile string) error {
+// RunGoTestOptions holds options for running go tests.
+type RunGoTestOptions struct {
+	Env  []string
+	Args []string
+}
+
+// RunGoTest runs go tests in the given directory.
+func RunGoTest(ctx context.Context, dir string, resultFile string, opts RunGoTestOptions) error {
 	f, err := os.Create(resultFile)
 	if err != nil {
 		return fmt.Errorf("failed to create result file: %w", err)
 	}
 	defer f.Close()
 
-	cmd := exec.CommandContext(ctx, "go", "test", "-json", "./...")
+	args := []string{"test", "-json"}
+	if len(opts.Args) > 0 {
+		args = append(args, opts.Args...)
+	} else {
+		args = append(args, "./...")
+	}
+
+	cmd := exec.CommandContext(ctx, "go", args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), opts.Env...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -169,17 +227,17 @@ func runGoTest(ctx context.Context, dir string, resultFile string) error {
 				fmt.Printf("%s--- SKIP: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
 			}
 		case "output":
+			out := event.Output
 			if event.Test == "" {
 				// Only print package-level output if it's not the standard PASS/ok/FAIL summary
 				// which is redundant with our PASS: TestFoo output.
-				out := event.Output
 				if out == "PASS\n" || out == "FAIL\n" ||
 					strings.HasPrefix(out, "ok  \t") ||
 					strings.HasPrefix(out, "FAIL\t") {
 					continue
 				}
-				fmt.Print(out)
 			}
+			fmt.Print(out)
 		case "build-output":
 			fmt.Print(event.Output)
 		case "run", "pause", "cont", "bench", "start", "build-fail":

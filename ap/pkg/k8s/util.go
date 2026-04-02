@@ -18,6 +18,9 @@ import "os"
 
 // IsInCluster returns true if the current process is running inside a Kubernetes cluster.
 func IsInCluster() bool {
+	if os.Getenv("KUBERNETES_SERVICE_HOST") == "" {
+		return false
+	}
 	if _, err := os.Stat("/var/run/secrets/kubernetes.io/serviceaccount/token"); err == nil {
 		return true
 	}

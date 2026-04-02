@@ -17,8 +17,11 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
+	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -60,15 +63,64 @@ func RunE2e(ctx context.Context, opt E2eOptions) error {
 			return fmt.Errorf("failed to discover e2e tasks in %s: %w", apRoot, err)
 		}
 
-		if len(e2eScripts) == 0 {
+		if len(e2eScripts) > 0 {
+			group := &tasks.Group{
+				Name:  fmt.Sprintf("e2e-%s", filepath.Base(apRoot)),
+				Tasks: e2eScripts,
+			}
+			allTasks = append(allTasks, group)
 			continue
 		}
 
-		group := &tasks.Group{
-			Name:  fmt.Sprintf("e2e-%s", filepath.Base(apRoot)),
-			Tasks: e2eScripts,
+		// Auto-detect tests/e2e
+		err = filepath.Walk(apRoot, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				return nil
+			}
+
+			// If this is not the root we're walking, and it has a .ap directory, skip it.
+			if path != apRoot {
+				if _, err := os.Stat(filepath.Join(path, ".ap")); err == nil {
+					return filepath.SkipDir
+				}
+			}
+
+			if info.Name() == "tests" {
+				parentDir := filepath.Dir(path)
+				e2eDir := filepath.Join(path, "e2e")
+				if golang.HasGoTests(e2eDir) {
+					buildDir := filepath.Join(opt.RepoRoot, ".build", "test-results", "go")
+					if err := os.MkdirAll(buildDir, 0755); err != nil {
+						return fmt.Errorf("failed to create build dir: %w", err)
+					}
+					rel, err := filepath.Rel(opt.RepoRoot, parentDir)
+					if err != nil {
+						return err
+					}
+					name := rel
+					if name == "." {
+						name = "root"
+					}
+					// Replace path separators with dashes for the filename
+					filename := filepath.ToSlash(name)
+					filename = strings.ReplaceAll(filename, "/", "-")
+
+					resultFile := filepath.Join(buildDir, filename+"-e2e.json")
+					allTasks = append(allTasks, &golang.GoE2eTask{
+						Dir:        parentDir, // Run test in the directory containing 'tests'
+						Name:       name,
+						ResultFile: resultFile,
+					})
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed to walk %s for e2e tests: %w", apRoot, err)
 		}
-		allTasks = append(allTasks, group)
 	}
 
 	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})

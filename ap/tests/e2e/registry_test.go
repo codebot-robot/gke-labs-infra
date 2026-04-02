@@ -40,12 +40,12 @@ func TestInClusterRegistry(t *testing.T) {
 	os.Setenv("IMAGE_TAG", "e2e")
 
 	// 1. Build and push image
-	// We'll build the ap-golang image
-	h.RunCmd("go", "run", "./ap", "build", "--root=ap", "--push")
+	// We'll build the examples-helloworld image
+	h.RunCmd("go", "run", "./ap", "build", "--root=autodeploy/examples/helloworld", "--push")
 
 	// 2. Deploy using the image
 	// We'll create a simple manifest that uses the image
-	// ap-golang:latest is a placeholder that ap deploy will replace.
+	// examples-helloworld:latest is a placeholder that ap deploy will replace.
 	manifest := `
 apiVersion: v1
 kind: Pod
@@ -55,7 +55,7 @@ metadata:
 spec:
   containers:
   - name: test
-    image: ap-golang:latest
+    image: examples-helloworld:latest
     command: ["/bin/sh", "-c", "echo hello"]
 `
 
@@ -88,7 +88,7 @@ spec:
 
 	// 3. Verify the pod was created and has the correct image
 	image := h.RunCmd("kubectl", "get", "pod", "test-pod", "-n", "default", "-o", "jsonpath={.spec.containers[0].image}")
-	expectedImage := "images.local/ap-golang:e2e"
+	expectedImage := "images.local/examples-helloworld:e2e"
 	if image != expectedImage {
 		t.Errorf("expected image %q, got %q", expectedImage, image)
 	}
