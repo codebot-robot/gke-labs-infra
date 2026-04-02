@@ -220,6 +220,7 @@ func (h *Harness) FindRepoRoot() string {
 
 func (h *Harness) runCmd(name string, args ...string) string {
 	h.t.Helper()
+	h.t.Logf("Running command: %s %v", name, args)
 	cmd := exec.Command(name, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

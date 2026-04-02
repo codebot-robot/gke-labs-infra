@@ -227,17 +227,17 @@ func RunGoTest(ctx context.Context, dir string, resultFile string, opts RunGoTes
 				fmt.Printf("%s--- SKIP: %s (%.2fs)\n", indent, event.Test, event.Elapsed)
 			}
 		case "output":
+			out := event.Output
 			if event.Test == "" {
 				// Only print package-level output if it's not the standard PASS/ok/FAIL summary
 				// which is redundant with our PASS: TestFoo output.
-				out := event.Output
 				if out == "PASS\n" || out == "FAIL\n" ||
 					strings.HasPrefix(out, "ok  \t") ||
 					strings.HasPrefix(out, "FAIL\t") {
 					continue
 				}
-				fmt.Print(out)
 			}
+			fmt.Print(out)
 		case "build-output":
 			fmt.Print(event.Output)
 		case "run", "pause", "cont", "bench", "start", "build-fail":
