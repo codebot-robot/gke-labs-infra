@@ -36,7 +36,7 @@ func TestInClusterRegistry(t *testing.T) {
 	}
 
 	// Set up environment for ap
-	os.Setenv("IMAGE_PREFIX", "images.local")
+	os.Setenv("IMAGE_PREFIX", "registry.internal")
 	os.Setenv("IMAGE_TAG", "e2e")
 
 	// 1. Build and push image
@@ -88,7 +88,7 @@ spec:
 
 	// 3. Verify the pod was created and has the correct image
 	image := h.RunCmd("kubectl", "get", "pod", "test-pod", "-n", "default", "-o", "jsonpath={.spec.containers[0].image}")
-	expectedImage := "images.local/examples-helloworld:e2e"
+	expectedImage := "registry.internal/examples-helloworld:e2e"
 	if image != expectedImage {
 		t.Errorf("expected image %q, got %q", expectedImage, image)
 	}
