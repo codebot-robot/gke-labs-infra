@@ -40,7 +40,7 @@ spec:
         - name: BUILDKIT_HOST
           value: tcp://buildkit:2375
         - name: IMAGE_PREFIX
-          value: images.local
+          value: registry.internal
 ---
 apiVersion: v1
 kind: ServiceAccount

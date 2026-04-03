@@ -32,7 +32,7 @@ import (
 const (
 	certsDPath           = "/etc/containerd/certs.d"
 	containerdConfigPath = "/etc/containerd/config.toml"
-	registryHost         = "images.local"
+	registryHost         = "registry.internal"
 	namespace            = "in-cluster-image-registry-system"
 	serviceName          = "in-cluster-image-registry"
 )
