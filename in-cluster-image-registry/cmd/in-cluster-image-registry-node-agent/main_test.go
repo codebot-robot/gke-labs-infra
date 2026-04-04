@@ -40,7 +40,6 @@ func TestUpdateHostsConfig(t *testing.T) {
 
 [host."http://10.96.0.10"]
   capabilities = ["pull", "resolve"]
-  skip_verify = true
 `
 	if string(content) != expected {
 		t.Errorf("unexpected content:\ngot:\n%s\nwant:\n%s", string(content), expected)

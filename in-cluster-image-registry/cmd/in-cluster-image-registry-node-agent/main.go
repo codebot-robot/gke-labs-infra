@@ -153,7 +153,6 @@ func updateHostsConfig(path, ip string) error {
 
 [host."http://%s"]
   capabilities = ["pull", "resolve"]
-  skip_verify = true
 `, urlHost, urlHost)
 
 	currentContent, err := os.ReadFile(path)
