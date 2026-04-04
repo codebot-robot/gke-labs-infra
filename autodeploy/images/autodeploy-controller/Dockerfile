@@ -37,10 +37,12 @@ RUN apt-get update && apt-get install -y git ca-certificates curl gnupg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian trixie stable" | \
     tee /etc/apt/sources.list.d/docker.list > /dev/null && \
     apt-get update && apt-get install -y docker-ce-cli && \
-    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$(dpkg --print-architecture)/kubectl" && \
+    curl -LO --retry 5 "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$(dpkg --print-architecture)/kubectl" && \
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
     rm kubectl && \
-    curl -L "https://github.com/moby/buildkit/releases/download/v0.28.0/buildkit-v0.28.0.linux-$(dpkg --print-architecture).tar.gz" | tar -xz -C /usr/local/bin --strip-components=1 bin/buildctl && \
+    curl -L --retry 5 "https://github.com/moby/buildkit/releases/download/v0.28.0/buildkit-v0.28.0.linux-$(dpkg --print-architecture).tar.gz" -o buildkit.tar.gz && \
+    tar -xz -C /usr/local/bin --strip-components=1 bin/buildctl -f buildkit.tar.gz && \
+    rm buildkit.tar.gz && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
