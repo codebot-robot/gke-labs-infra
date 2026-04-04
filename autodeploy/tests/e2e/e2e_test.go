@@ -44,21 +44,29 @@ func TestAutodeploy(t *testing.T) {
 	os.Setenv("IMAGE_PREFIX", imagePrefix)
 	os.Setenv("IMAGE_TAG", imageTag)
 
-	// Build autodeploy
-	runCmd(t, repoRoot, "go", "run", "./ap", "build", "--root=.")
+	// Build all components
+	runCmd(t, repoRoot, "go", "run", "./ap", "build")
 	runCmd(t, repoRoot, "go", "run", "./ap", "deploy", "--root=autodeploy", "--skip-push")
+	runCmd(t, repoRoot, "go", "run", "./ap", "deploy", "--root=in-cluster-image-registry", "--skip-push")
 
 	// Load images into kind
-	// We need to know which images to load. autodeploy-controller is the main one.
-	runCmd(t, repoRoot, "kind", "load", "docker-image", fmt.Sprintf("%s/autodeploy-controller:%s", imagePrefix, imageTag), "--name", clusterName)
+	imagesToLoad := []string{
+		"autodeploy-controller",
+		"in-cluster-image-registry-node-agent",
+	}
+	for _, img := range imagesToLoad {
+		runCmd(t, repoRoot, "kind", "load", "docker-image", fmt.Sprintf("%s/%s:%s", imagePrefix, img, imageTag), "--name", clusterName)
+	}
 
-	// Wait for autodeploy-controller to be ready
+	// Wait for components to be ready
+	waitForDeployment(t, "buildkit", "autodeploy-system", 2*time.Minute)
 	waitForDeployment(t, "autodeploy-controller", "autodeploy-system", 2*time.Minute)
+	waitForStatefulSet(t, "in-cluster-image-registry", "in-cluster-image-registry-system", 2*time.Minute)
+	waitForDaemonSet(t, "node-agent", "in-cluster-image-registry-system", 2*time.Minute)
 
 	// 3. Install helloworld example via Package CRD
 	t.Log("Creating Package resource for helloworld")
-	// We use a dummy repo URL for now since autodeploy is mostly placeholders
-	// but we want to see it in the cluster.
+	// We use the actual repo URL since autodeploy will clone it.
 	pkgYAML := `
 apiVersion: infra.labs.gke.io/v1alpha1
 kind: Package
@@ -70,14 +78,6 @@ spec:
   directory: autodeploy/examples/helloworld
 `
 	runCmdWithInput(t, repoRoot, pkgYAML, "kubectl", "apply", "-f", "-")
-
-	// Since autodeploy is currently just a placeholder, it won't actually deploy helloworld.
-	// To make the test pass and follow the spirit of the request, we will manually
-	// deploy helloworld for now, simulating what autodeploy SHOULD do.
-	// In a future PR, once autodeploy is implemented, we can remove this manual step.
-	t.Log("Manually deploying helloworld (simulating autodeploy)")
-	runCmd(t, repoRoot, "go", "run", "./ap", "deploy", "--root=autodeploy/examples/helloworld", "--skip-push")
-	runCmd(t, repoRoot, "kind", "load", "docker-image", fmt.Sprintf("%s/examples-helloworld:%s", imagePrefix, imageTag), "--name", clusterName)
 
 	// 4. Verify helloworld is deployed
 	waitForDeployment(t, "helloworld", "default", 2*time.Minute)
@@ -160,6 +160,54 @@ func waitForDeployment(t *testing.T, name, namespace string, timeout time.Durati
 			ready := strings.TrimSpace(stdout.String())
 			if ready != "" && ready != "0" {
 				t.Logf("Deployment %s is ready", name)
+				return
+			}
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+}
+
+func waitForStatefulSet(t *testing.T, name, namespace string, timeout time.Duration) {
+	t.Helper()
+	t.Logf("Waiting for statefulset %s in namespace %s", name, namespace)
+	start := time.Now()
+	for {
+		if time.Since(start) > timeout {
+			t.Fatalf("timeout waiting for statefulset %s", name)
+		}
+
+		cmd := exec.Command("kubectl", "get", "statefulset", name, "-n", namespace, "-o", "jsonpath={.status.readyReplicas}")
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+		if err := cmd.Run(); err == nil {
+			ready := strings.TrimSpace(stdout.String())
+			if ready != "" && ready != "0" {
+				t.Logf("StatefulSet %s is ready", name)
+				return
+			}
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+}
+
+func waitForDaemonSet(t *testing.T, name, namespace string, timeout time.Duration) {
+	t.Helper()
+	t.Logf("Waiting for daemonset %s in namespace %s", name, namespace)
+	start := time.Now()
+	for {
+		if time.Since(start) > timeout {
+			t.Fatalf("timeout waiting for daemonset %s", name)
+		}
+
+		cmd := exec.Command("kubectl", "get", "daemonset", name, "-n", namespace, "-o", "jsonpath={.status.numberReady}")
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+		if err := cmd.Run(); err == nil {
+			ready := strings.TrimSpace(stdout.String())
+			if ready != "" && ready != "0" {
+				t.Logf("DaemonSet %s is ready", name)
 				return
 			}
 		}
