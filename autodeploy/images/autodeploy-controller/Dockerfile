@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG IMAGE_PREFIX=registry.internal
+ARG IMAGE_PREFIX=images.local
 ARG IMAGE_TAG=latest
 
 FROM ${IMAGE_PREFIX}/ap-golang:${IMAGE_TAG} AS ap-bin
