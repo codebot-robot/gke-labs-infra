@@ -39,7 +39,7 @@ type DockerBuildTask struct {
 func (t *DockerBuildTask) Run(ctx context.Context, _ string) error {
 	imagePrefix := os.Getenv("IMAGE_PREFIX")
 	if imagePrefix == "" {
-		imagePrefix = "registry.internal"
+		imagePrefix = "images.local"
 	}
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
@@ -47,7 +47,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, _ string) error {
 	}
 
 	actualImagePrefix := imagePrefix
-	if imagePrefix == "registry.internal" && t.Push {
+	if imagePrefix == "images.local" && t.Push {
 		if k8s.IsInCluster() {
 			actualImagePrefix = "in-cluster-image-registry.in-cluster-image-registry-system.svc.cluster.local:80"
 		} else {
@@ -77,7 +77,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 
 	imagePrefix := os.Getenv("IMAGE_PREFIX")
 	if imagePrefix == "" {
-		imagePrefix = "registry.internal"
+		imagePrefix = "images.local"
 	}
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
@@ -109,7 +109,7 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, re
 
 	imagePrefix := os.Getenv("IMAGE_PREFIX")
 	if imagePrefix == "" {
-		imagePrefix = "registry.internal"
+		imagePrefix = "images.local"
 	}
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
@@ -190,7 +190,7 @@ func BuildTasks(root string, push bool) (tasks.Task, error) {
 		Tasks: buildTasks,
 	}
 
-	if push && os.Getenv("IMAGE_PREFIX") == "registry.internal" {
+	if push && os.Getenv("IMAGE_PREFIX") == "images.local" {
 		rootTask = &k8s.PortForwardTask{
 			Child:      rootTask,
 			Service:    "in-cluster-image-registry",

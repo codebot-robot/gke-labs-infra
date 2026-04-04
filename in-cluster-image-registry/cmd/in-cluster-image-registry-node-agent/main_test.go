@@ -23,7 +23,7 @@ import (
 
 func TestUpdateHostsConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	hostsPath := filepath.Join(tmpDir, "registry.internal", "hosts.toml")
+	hostsPath := filepath.Join(tmpDir, "images.local", "hosts.toml")
 	ip := "10.96.0.10"
 
 	err := updateHostsConfig(hostsPath, ip)
