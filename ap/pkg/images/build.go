@@ -43,7 +43,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, repoRoot string) error {
 		return err
 	}
 	imagePrefix := cfg.ImageRepo()
-	
+
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
 		tag = "latest"
