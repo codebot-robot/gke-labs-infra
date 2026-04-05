@@ -31,11 +31,11 @@ import (
 
 // DockerBuildTask represents a task to build a single docker image.
 type DockerBuildTask struct {
-	ImageName  string
-	Dockerfile string
-	Root       string
-	Push       bool
-	Buildkit   string
+	ImageName    string
+	Dockerfile   string
+	Root         string
+	Push         bool
+	BuildkitHost string
 }
 
 func (t *DockerBuildTask) Run(ctx context.Context, repoRoot string) error {
@@ -66,7 +66,11 @@ func (t *DockerBuildTask) Run(ctx context.Context, repoRoot string) error {
 		fullImageName = fmt.Sprintf("%s:%s", t.ImageName, tag)
 	}
 
-	if t.Buildkit != "" || os.Getenv("BUILDKIT_HOST") != "" {
+	if t.BuildkitHost == "" {
+		t.BuildkitHost = os.Getenv("BUILDKIT_HOST")
+	}
+
+	if t.BuildkitHost != "" {
 		return t.runBuildctl(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix)
 	}
 	return t.runDocker(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix)
@@ -94,6 +98,34 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 		"--opt", "build-arg:IMAGE_TAG=" + tag,
 		"--output", output,
 	}
+
+	if strings.HasPrefix(t.BuildkitHost, "k8s://") {
+		// handle port forward
+		parts := strings.Split(strings.TrimPrefix(t.BuildkitHost, "k8s://"), "/")
+		if len(parts) != 2 {
+			return fmt.Errorf("invalid buildkit host: %s, expected k8s://namespace/service", t.BuildkitHost)
+		}
+		namespace, service := parts[0], parts[1]
+
+		pfTask := &k8s.PortForwardTask{
+			Service:   service,
+			Namespace: namespace,
+			LocalPort: 8888,
+			RemotePort: 8888, // Assuming 8888 for buildkit
+		}
+
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		if err := pfTask.Start(ctx); err != nil {
+			return err
+		}
+
+		os.Setenv("BUILDKIT_HOST", "tcp://localhost:8888")
+	} else {
+		os.Setenv("BUILDKIT_HOST", t.BuildkitHost)
+	}
+
 	cmd := exec.CommandContext(ctx, "buildctl", buildctlArgs...)
 	cmd.Dir = root
 	cmd.Stdout = os.Stdout
@@ -151,10 +183,14 @@ func (t *DockerBuildTask) GetChildren() []tasks.Task {
 }
 
 // BuildTasks returns a task group for building all docker images found in images/<name>/Dockerfile.
-func BuildTasks(root string, push bool, buildkit string) (tasks.Task, error) {
+func BuildTasks(root string, push bool, buildkitHost string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
+	}
+
+	if buildkitHost == "k8s" {
+		buildkitHost = "k8s://autodeploy-system/buildkit"
 	}
 
 	dockerfiles, err := findDockerfiles(root)
@@ -175,11 +211,11 @@ func BuildTasks(root string, push bool, buildkit string) (tasks.Task, error) {
 		}
 
 		buildTasks = append(buildTasks, &DockerBuildTask{
-			ImageName:  name,
-			Dockerfile: relPath,
-			Root:       root,
-			Push:       push,
-			Buildkit:   buildkit,
+			ImageName:    name,
+			Dockerfile:   relPath,
+			Root:         root,
+			Push:         push,
+			BuildkitHost: buildkitHost,
 		})
 	}
 
@@ -202,8 +238,8 @@ func BuildTasks(root string, push bool, buildkit string) (tasks.Task, error) {
 }
 
 // Build builds docker images found in images/<name>/Dockerfile.
-func Build(ctx context.Context, root string, push bool, buildkit string) error {
-	t, err := BuildTasks(root, push, buildkit)
+func Build(ctx context.Context, root string, push bool, buildkitHost string) error {
+	t, err := BuildTasks(root, push, buildkitHost)
 	if err != nil {
 		return err
 	}

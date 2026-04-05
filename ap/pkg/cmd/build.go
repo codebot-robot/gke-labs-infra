@@ -8,7 +8,7 @@
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either expressGoogle LLC or its affiliates. All rights reserved.
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
@@ -17,6 +17,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
@@ -27,8 +28,8 @@ import (
 // BuildOptions holds the configuration for the "build" command.
 type BuildOptions struct {
 	*RootOptions
-	Push     bool
-	Buildkit string
+	Push         bool
+	BuildkitHost string
 }
 
 // BuildBuildCommand constructs the cobra command for "build".
@@ -47,7 +48,7 @@ func BuildBuildCommand(rootOpt *RootOptions) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&opt.Push, "push", false, "Push images to registry")
-	cmd.Flags().StringVar(&opt.Buildkit, "buildkit", "docker", "Buildkit backend to use (docker, k8s)")
+	cmd.Flags().StringVar(&opt.BuildkitHost, "buildkit-host", os.Getenv("BUILDKIT_HOST"), "Buildkit host to use (e.g. k8s://namespace/service)")
 
 	return cmd
 }
@@ -64,7 +65,12 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 			Name: fmt.Sprintf("build-%s", filepath.Base(apRoot)),
 		}
 
-		imageTasks, err := images.BuildTasks(apRoot, opt.Push, opt.Buildkit)
+		buildkitHost := opt.BuildkitHost
+		if buildkitHost == "k8s" {
+			buildkitHost = "k8s://autodeploy-system/buildkit"
+		}
+
+		imageTasks, err := images.BuildTasks(apRoot, opt.Push, buildkitHost)
 		if err != nil {
 			return err
 		}
