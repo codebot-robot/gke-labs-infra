@@ -73,7 +73,7 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		}
 
 		// Deploy typically also builds
-		buildTasks, err := images.BuildTasks(apRoot, !opt.SkipPush)
+		buildTasks, err := images.BuildTasks(apRoot, !opt.SkipPush, "")
 		if err != nil {
 			return fmt.Errorf("build failed during deploy for %s: %w", apRoot, err)
 		}

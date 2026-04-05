@@ -33,6 +33,24 @@ type Task interface {
 	GetChildren() []Task
 }
 
+// DummyTask represents a task that just runs a function.
+type DummyTask struct {
+	Name  string
+	RunFn func(ctx context.Context, root string) error
+}
+
+func (t *DummyTask) Run(ctx context.Context, root string) error {
+	return t.RunFn(ctx, root)
+}
+
+func (t *DummyTask) GetName() string {
+	return t.Name
+}
+
+func (t *DummyTask) GetChildren() []Task {
+	return nil
+}
+
 // TaskScript represents a discoverable task script.
 type TaskScript struct {
 	Name string
