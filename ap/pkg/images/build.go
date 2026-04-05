@@ -99,37 +99,39 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 		"--output", output,
 	}
 
-	if strings.HasPrefix(t.BuildkitHost, "k8s://") {
+	if host, ok := strings.CutPrefix(t.BuildkitHost, "k8s://"); ok {
 		// handle port forward
-		parts := strings.Split(strings.TrimPrefix(t.BuildkitHost, "k8s://"), "/")
+		parts := strings.Split(host, "/")
 		if len(parts) != 2 {
 			return fmt.Errorf("invalid buildkit host: %s, expected k8s://namespace/service", t.BuildkitHost)
 		}
 		namespace, service := parts[0], parts[1]
 
 		pfTask := &k8s.PortForwardTask{
-			Service:   service,
-			Namespace: namespace,
-			LocalPort: 8888,
-			RemotePort: 8888, // Assuming 8888 for buildkit
+			Child: &tasks.DummyTask{
+				Name: "run-buildctl",
+				RunFn: func(ctx context.Context, root string) error {
+					cmd := exec.CommandContext(ctx, "buildctl", buildctlArgs...)
+					cmd.Dir = root
+					cmd.Stdout = os.Stdout
+					cmd.Stderr = os.Stderr
+					cmd.Env = append(os.Environ(), "BUILDKIT_HOST=tcp://localhost:2375")
+					return cmd.Run()
+				},
+			},
+			Service:    service,
+			Namespace:  namespace,
+			LocalPort:  2375,
+			RemotePort: 2375,
 		}
-
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-
-		if err := pfTask.Start(ctx); err != nil {
-			return err
-		}
-
-		os.Setenv("BUILDKIT_HOST", "tcp://localhost:8888")
-	} else {
-		os.Setenv("BUILDKIT_HOST", t.BuildkitHost)
+		return pfTask.Run(ctx, root)
 	}
 
 	cmd := exec.CommandContext(ctx, "buildctl", buildctlArgs...)
 	cmd.Dir = root
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "BUILDKIT_HOST="+t.BuildkitHost)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
 	}
