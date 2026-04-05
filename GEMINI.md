@@ -42,6 +42,9 @@ ap generate
 ap lint
 ```
 
+Always ensure `ap generate` is run before sending a PR, as it may regenerate CI configuration files.
+
+
 Additionally, you should run the following commands to ensure that your changes do not introduce any regressions:
 
 ```bash

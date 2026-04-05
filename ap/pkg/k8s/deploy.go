@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
 	"gopkg.in/yaml.v3"
@@ -230,7 +231,11 @@ type KubectlApplyTask struct {
 }
 
 func (t *KubectlApplyTask) Run(ctx context.Context, root string) error {
-	imageRepository := os.Getenv("IMAGE_PREFIX")
+	cfg, err := config.Load(root)
+	if err != nil {
+		return err
+	}
+	imageRepository := cfg.ImageRepo()
 	if imageRepository == "" {
 		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for deploy")
 	}
