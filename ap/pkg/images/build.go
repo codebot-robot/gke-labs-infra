@@ -52,7 +52,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, repoRoot string) error {
 
 	actualImagePrefix := imagePrefix
 	if imagePrefix == "images.local" && t.Push {
-		if k8s.IsInCluster() {
+		if k8s.IsInCluster() || strings.HasPrefix(t.BuildkitHost, "k8s://") {
 			actualImagePrefix = "in-cluster-image-registry.in-cluster-image-registry-system.svc.cluster.local:80"
 		} else {
 			actualImagePrefix = "localhost:5000"
@@ -78,7 +78,17 @@ func (t *DockerBuildTask) Run(ctx context.Context, repoRoot string) error {
 
 func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, relDockerfilePath, imagePrefix string) error {
 	klog.Infof("Building image %s from %s using buildctl", fullImageName, root)
-	output := fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push)
+
+	buildctlImageName := fullImageName
+	if imagePrefix == "images.local" && t.Push && strings.HasPrefix(t.BuildkitHost, "k8s://") {
+		tag := os.Getenv("IMAGE_TAG")
+		if tag == "" {
+			tag = "latest"
+		}
+		buildctlImageName = fmt.Sprintf("in-cluster-image-registry.in-cluster-image-registry-system.svc.cluster.local:80/%s:%s", t.ImageName, tag)
+	}
+
+	output := fmt.Sprintf("type=image,name=%s,push=%t", buildctlImageName, t.Push)
 	if t.Push {
 		output += ",registry.insecure=true"
 	}
