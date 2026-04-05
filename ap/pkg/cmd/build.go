@@ -27,7 +27,8 @@ import (
 // BuildOptions holds the configuration for the "build" command.
 type BuildOptions struct {
 	*RootOptions
-	Push bool
+	Push     bool
+	Buildkit string
 }
 
 // BuildBuildCommand constructs the cobra command for "build".
@@ -46,6 +47,7 @@ func BuildBuildCommand(rootOpt *RootOptions) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&opt.Push, "push", false, "Push images to registry")
+	cmd.Flags().StringVar(&opt.Buildkit, "buildkit", "docker", "Buildkit backend to use (docker, k8s)")
 
 	return cmd
 }
@@ -62,7 +64,7 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 			Name: fmt.Sprintf("build-%s", filepath.Base(apRoot)),
 		}
 
-		imageTasks, err := images.BuildTasks(apRoot, opt.Push)
+		imageTasks, err := images.BuildTasks(apRoot, opt.Push, opt.Buildkit)
 		if err != nil {
 			return err
 		}

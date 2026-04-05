@@ -103,7 +103,7 @@ func TestBuildTasks(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "images", "foo"), 0755)
 	os.WriteFile(filepath.Join(tmpDir, "images", "foo", "Dockerfile"), []byte("FROM scratch"), 0644)
 
-	task, err := BuildTasks(tmpDir, false)
+	task, err := BuildTasks(tmpDir, false, "")
 	if err != nil {
 		t.Fatalf("BuildTasks() error = %v", err)
 	}

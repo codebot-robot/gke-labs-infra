@@ -35,6 +35,7 @@ type DockerBuildTask struct {
 	Dockerfile string
 	Root       string
 	Push       bool
+	Buildkit   string
 }
 
 func (t *DockerBuildTask) Run(ctx context.Context, repoRoot string) error {
@@ -65,7 +66,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, repoRoot string) error {
 		fullImageName = fmt.Sprintf("%s:%s", t.ImageName, tag)
 	}
 
-	if os.Getenv("BUILDKIT_HOST") != "" {
+	if t.Buildkit != "" || os.Getenv("BUILDKIT_HOST") != "" {
 		return t.runBuildctl(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix)
 	}
 	return t.runDocker(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix)
@@ -150,7 +151,7 @@ func (t *DockerBuildTask) GetChildren() []tasks.Task {
 }
 
 // BuildTasks returns a task group for building all docker images found in images/<name>/Dockerfile.
-func BuildTasks(root string, push bool) (tasks.Task, error) {
+func BuildTasks(root string, push bool, buildkit string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
@@ -178,6 +179,7 @@ func BuildTasks(root string, push bool) (tasks.Task, error) {
 			Dockerfile: relPath,
 			Root:       root,
 			Push:       push,
+			Buildkit:   buildkit,
 		})
 	}
 
@@ -200,8 +202,8 @@ func BuildTasks(root string, push bool) (tasks.Task, error) {
 }
 
 // Build builds docker images found in images/<name>/Dockerfile.
-func Build(ctx context.Context, root string, push bool) error {
-	t, err := BuildTasks(root, push)
+func Build(ctx context.Context, root string, push bool, buildkit string) error {
+	t, err := BuildTasks(root, push, buildkit)
 	if err != nil {
 		return err
 	}

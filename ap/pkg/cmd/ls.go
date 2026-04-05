@@ -84,7 +84,7 @@ func discoverTasks(root string) ([]tasks.Task, error) {
 	var all []tasks.Task
 
 	// Build tasks
-	buildTasks, err := images.BuildTasks(root, false)
+	buildTasks, err := images.BuildTasks(root, false, "")
 	if err == nil && buildTasks != nil {
 		all = append(all, buildTasks)
 	}
