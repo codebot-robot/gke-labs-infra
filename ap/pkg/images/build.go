@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
@@ -36,11 +37,13 @@ type DockerBuildTask struct {
 	Push       bool
 }
 
-func (t *DockerBuildTask) Run(ctx context.Context, _ string) error {
-	imagePrefix := os.Getenv("IMAGE_PREFIX")
-	if imagePrefix == "" {
-		imagePrefix = "images.local"
+func (t *DockerBuildTask) Run(ctx context.Context, repoRoot string) error {
+	cfg, err := config.Load(repoRoot)
+	if err != nil {
+		return err
 	}
+	imagePrefix := cfg.ImageRepo()
+	
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
 		tag = "latest"
@@ -63,22 +66,18 @@ func (t *DockerBuildTask) Run(ctx context.Context, _ string) error {
 	}
 
 	if os.Getenv("BUILDKIT_HOST") != "" {
-		return t.runBuildctl(ctx, t.Root, fullImageName, t.Dockerfile)
+		return t.runBuildctl(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix)
 	}
-	return t.runDocker(ctx, t.Root, fullImageName, t.Dockerfile)
+	return t.runDocker(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix)
 }
 
-func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, relDockerfilePath string) error {
+func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, relDockerfilePath, imagePrefix string) error {
 	klog.Infof("Building image %s from %s using buildctl", fullImageName, root)
 	output := fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push)
 	if t.Push {
 		output += ",registry.insecure=true"
 	}
 
-	imagePrefix := os.Getenv("IMAGE_PREFIX")
-	if imagePrefix == "" {
-		imagePrefix = "images.local"
-	}
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
 		tag = "latest"
@@ -104,13 +103,9 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 	return nil
 }
 
-func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, relDockerfilePath string) error {
+func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, relDockerfilePath, imagePrefix string) error {
 	klog.Infof("Building image %s from %s using docker", fullImageName, root)
 
-	imagePrefix := os.Getenv("IMAGE_PREFIX")
-	if imagePrefix == "" {
-		imagePrefix = "images.local"
-	}
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
 		tag = "latest"
@@ -156,8 +151,9 @@ func (t *DockerBuildTask) GetChildren() []tasks.Task {
 
 // BuildTasks returns a task group for building all docker images found in images/<name>/Dockerfile.
 func BuildTasks(root string, push bool) (tasks.Task, error) {
-	if push && os.Getenv("IMAGE_PREFIX") == "" {
-		return nil, fmt.Errorf("IMAGE_PREFIX is not set; it is required for pushing images")
+	cfg, err := config.Load(root)
+	if err != nil {
+		return nil, err
 	}
 
 	dockerfiles, err := findDockerfiles(root)
@@ -190,7 +186,7 @@ func BuildTasks(root string, push bool) (tasks.Task, error) {
 		Tasks: buildTasks,
 	}
 
-	if push && os.Getenv("IMAGE_PREFIX") == "images.local" {
+	if push && cfg.ImageRepo() == "images.local" {
 		rootTask = &k8s.PortForwardTask{
 			Child:      rootTask,
 			Service:    "in-cluster-image-registry",

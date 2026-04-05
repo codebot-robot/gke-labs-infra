@@ -17,9 +17,9 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -58,7 +58,11 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	if os.Getenv("IMAGE_PREFIX") == "" {
+	cfg, err := config.Load(opt.RepoRoot)
+	if err != nil {
+		return err
+	}
+	if cfg.ImageRepo() == "" {
 		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for deploy")
 	}
 

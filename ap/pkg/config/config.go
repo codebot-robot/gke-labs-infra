@@ -151,3 +151,12 @@ func (c *Config) IsReplaceEmptyInterfaceWithAnyEnabled() bool {
 	}
 	return true
 }
+
+// ImageRepo returns the image repository to use, defaulting to "images.local".
+func (c *Config) ImageRepo() string {
+	repo := os.Getenv("IMAGE_PREFIX")
+	if repo == "" {
+		return "images.local"
+	}
+	return repo
+}
