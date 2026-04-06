@@ -395,45 +395,40 @@ cd "${REPO_ROOT}"
 }
 
 func runApE2eGenerator(_ context.Context, repoRoot string, apRoots []string) error {
-	// Check if any apRoot has any e2e tasks
-	hasE2e := false
+	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
+
+	// Remove the global ap-e2e script if it exists
+	globalTargetFile := filepath.Join(presubmitsDir, "ap-e2e")
+	if _, err := os.Stat(globalTargetFile); err == nil {
+		klog.Infof("Removing global %s", globalTargetFile)
+		if err := os.Remove(globalTargetFile); err != nil {
+			return fmt.Errorf("failed to remove %s: %w", globalTargetFile, err)
+		}
+	}
+
 	for _, apRoot := range apRoots {
 		e2eTasks, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("test-e2e"))
 		if err != nil {
 			return fmt.Errorf("failed to discover e2e tasks in %s: %w", apRoot, err)
 		}
-		if len(e2eTasks) > 0 {
-			hasE2e = true
-			break
+		if len(e2eTasks) == 0 {
+			continue
 		}
-	}
 
-	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
-	targetFile := filepath.Join(presubmitsDir, "ap-e2e")
+		suffix := getSuffix(repoRoot, apRoot)
+		targetFile := filepath.Join(presubmitsDir, "ap-e2e"+suffix)
+		klog.Infof("Generating %s", targetFile)
 
-	// If no e2e tasks, we should remove the file if it exists
-	if !hasE2e {
-		if _, err := os.Stat(targetFile); err == nil {
-			klog.Infof("Removing %s as no e2e tasks found", targetFile)
-			if err := os.Remove(targetFile); err != nil {
-				return fmt.Errorf("failed to remove %s: %w", targetFile, err)
-			}
+		if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+			return fmt.Errorf("failed to create presubmits dir: %w", err)
 		}
-		return nil
-	}
 
-	klog.Infof("Generating %s", targetFile)
+		apCmd, err := GetApCommand(repoRoot, apRoot)
+		if err != nil {
+			return err
+		}
 
-	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
-		return fmt.Errorf("failed to create presubmits dir: %w", err)
-	}
-
-	apCmd, err := GetApCommand(repoRoot, repoRoot)
-	if err != nil {
-		return err
-	}
-
-	content := fmt.Sprintf(`#!/bin/bash
+		content := fmt.Sprintf(`#!/bin/bash
 
 # Copyright 2026 Google LLC
 #
@@ -457,10 +452,11 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 # Run e2e tests
-%s e2e
-`, apCmd)
-	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
-		return fmt.Errorf("failed to write %s: %w", targetFile, err)
+%s --root %s e2e
+`, apCmd, apRoot)
+		if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
+			return fmt.Errorf("failed to write %s: %w", targetFile, err)
+		}
 	}
 
 	return nil
