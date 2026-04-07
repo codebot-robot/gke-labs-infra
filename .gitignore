@@ -1,0 +1,3 @@
+.build/
+autodeploy/.build/
+in-cluster-image-registry/.build/
