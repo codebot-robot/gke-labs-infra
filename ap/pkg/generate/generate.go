@@ -428,6 +428,10 @@ func runApE2eGenerator(_ context.Context, repoRoot string, apRoots []string) err
 			return err
 		}
 
+		relApRoot, err := filepath.Rel(repoRoot, apRoot)
+		if err != nil {
+			return fmt.Errorf("failed to get relative path: %w", err)
+		}
 		content := fmt.Sprintf(`#!/bin/bash
 
 # Copyright 2026 Google LLC
@@ -453,7 +457,7 @@ cd "${REPO_ROOT}"
 
 # Run e2e tests
 %s --root %s e2e
-`, apCmd, apRoot)
+`, apCmd, relApRoot)
 		if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 			return fmt.Errorf("failed to write %s: %w", targetFile, err)
 		}
