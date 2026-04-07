@@ -1,3 +1,0 @@
-{"Time":"2026-04-06T19:17:24.321777811Z","Action":"start","Package":"github.com/gke-labs/gke-labs-infra/autodeploy/examples/helloworld"}
-{"Time":"2026-04-06T19:17:24.321863521Z","Action":"output","Package":"github.com/gke-labs/gke-labs-infra/autodeploy/examples/helloworld","Output":"?   \tgithub.com/gke-labs/gke-labs-infra/autodeploy/examples/helloworld\t[no test files]\n"}
-{"Time":"2026-04-06T19:17:24.321870431Z","Action":"skip","Package":"github.com/gke-labs/gke-labs-infra/autodeploy/examples/helloworld","Elapsed":0}
