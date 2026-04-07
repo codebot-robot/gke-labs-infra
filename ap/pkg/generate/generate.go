@@ -584,15 +584,7 @@ func GetApCommand(repoRoot, apRoot string) (string, error) {
 	}
 
 	if config.Version == "!self" {
-		rel, err := filepath.Rel(apRoot, repoRoot)
-		if err != nil {
-			return "go run ./ap", nil
-		}
-		apDir := filepath.Join(rel, "ap")
-		if !strings.HasPrefix(apDir, ".") && !filepath.IsAbs(apDir) {
-			apDir = "./" + apDir
-		}
-		return fmt.Sprintf("go run %s", apDir), nil
+		return "go run ./ap", nil
 	}
 
 	return defaultCmd, nil
