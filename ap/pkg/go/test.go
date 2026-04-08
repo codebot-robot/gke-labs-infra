@@ -48,7 +48,7 @@ type GoTestTask struct {
 	ResultFile string
 }
 
-func (t *GoTestTask) Run(ctx context.Context, root string) error {
+func (t *GoTestTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running go test in %s", t.Dir)
 	if err := RunGoTest(ctx, t.Dir, t.ResultFile, RunGoTestOptions{}); err != nil {
 		return fmt.Errorf("go test failed in %s: %w", t.Dir, err)
@@ -71,7 +71,7 @@ type GoE2eTask struct {
 	ResultFile string
 }
 
-func (t *GoE2eTask) Run(ctx context.Context, root string) error {
+func (t *GoE2eTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running go e2e test in %s", t.Dir)
 	opts := RunGoTestOptions{
 		Env:  []string{"RUN_E2E=1"},
@@ -159,7 +159,7 @@ func Test(ctx context.Context, root string) error {
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, root)
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
 }
 
 // RunGoTestOptions holds options for running go tests.

@@ -38,7 +38,7 @@ type LegacyScriptTask struct {
 	Dir  string
 }
 
-func (t *LegacyScriptTask) Run(ctx context.Context, _ string) error {
+func (t *LegacyScriptTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running legacy generate script: %s", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = t.Dir
@@ -64,9 +64,9 @@ type BuiltinGeneratorTask struct {
 	RunFunc func(ctx context.Context, repoRoot string) error
 }
 
-func (t *BuiltinGeneratorTask) Run(ctx context.Context, repoRoot string) error {
+func (t *BuiltinGeneratorTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running built-in generator: %s", t.Name)
-	return t.RunFunc(ctx, repoRoot)
+	return t.RunFunc(ctx, scope.RepoRoot)
 }
 
 func (t *BuiltinGeneratorTask) GetName() string {
@@ -78,10 +78,11 @@ func (t *BuiltinGeneratorTask) GetChildren() []tasks.Task {
 }
 
 // GenerateTasks returns a task group for all generation tasks.
-func GenerateTasks(repoRoot string, apRoots []string) (tasks.Task, error) {
+func GenerateTasks(repoRoot string, scopes []*tasks.APScope) (tasks.Task, error) {
 	var allTasks []tasks.Task
 
-	for _, apRoot := range apRoots {
+	for _, scope := range scopes {
+		apRoot := scope.Dir
 		group := &tasks.Group{
 			Name: fmt.Sprintf("generate-%s", filepath.Base(apRoot)),
 		}
@@ -128,19 +129,19 @@ func GenerateTasks(repoRoot string, apRoots []string) (tasks.Task, error) {
 	allTasks = append(allTasks, &BuiltinGeneratorTask{
 		Name: "ap-build",
 		RunFunc: func(ctx context.Context, repoRoot string) error {
-			return runApBuildGenerator(ctx, repoRoot, apRoots)
+			return runApBuildGenerator(ctx, repoRoot, scopes)
 		},
 	})
 	allTasks = append(allTasks, &BuiltinGeneratorTask{
 		Name: "ap-e2e",
 		RunFunc: func(ctx context.Context, repoRoot string) error {
-			return runApE2eGenerator(ctx, repoRoot, apRoots)
+			return runApE2eGenerator(ctx, repoRoot, scopes)
 		},
 	})
 	allTasks = append(allTasks, &BuiltinGeneratorTask{
 		Name: "github-actions",
 		RunFunc: func(ctx context.Context, repoRoot string) error {
-			return runGithubActionsGenerator(ctx, repoRoot, apRoots)
+			return runGithubActionsGenerator(ctx, repoRoot, scopes)
 		},
 	})
 
@@ -150,12 +151,12 @@ func GenerateTasks(repoRoot string, apRoots []string) (tasks.Task, error) {
 	}, nil
 }
 
-func Run(ctx context.Context, repoRoot string, apRoots []string) error {
-	t, err := GenerateTasks(repoRoot, apRoots)
+func Run(ctx context.Context, repoRoot string, scopes []*tasks.APScope) error {
+	t, err := GenerateTasks(repoRoot, scopes)
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, repoRoot)
+	return t.Run(ctx, &tasks.APScope{RepoRoot: repoRoot, Dir: repoRoot})
 }
 
 func getSuffix(repoRoot, apRoot string) string {
@@ -309,18 +310,19 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApBuildGenerator(_ context.Context, repoRoot string, apRoots []string) error {
+func runApBuildGenerator(_ context.Context, repoRoot string, scopes []*tasks.APScope) error {
 	// Check if any apRoot has any images to build OR any build-* scripts
 	hasBuild := false
-	for _, apRoot := range apRoots {
+	for _, scope := range scopes {
+		apRoot := scope.Dir
 		ok, err := images.HasImages(apRoot)
 		if err == nil && ok {
 			hasBuild = true
 			break
 		}
 
-		buildTasks, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("build-"))
-		if err == nil && len(buildTasks) > 0 {
+		buildTasks := scope.BuildTasks
+		if len(buildTasks) > 0 {
 			hasBuild = true
 			break
 		}
@@ -380,7 +382,7 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApE2eGenerator(_ context.Context, repoRoot string, apRoots []string) error {
+func runApE2eGenerator(_ context.Context, repoRoot string, scopes []*tasks.APScope) error {
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 
 	// Remove the global ap-e2e script if it exists
@@ -392,17 +394,23 @@ func runApE2eGenerator(_ context.Context, repoRoot string, apRoots []string) err
 		}
 	}
 
-	for _, apRoot := range apRoots {
-		e2eTasks, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("test-e2e"))
-		if err != nil {
-			return fmt.Errorf("failed to discover e2e tasks in %s: %w", apRoot, err)
-		}
-		if len(e2eTasks) == 0 {
-			continue
-		}
+	for _, scope := range scopes {
+		apRoot := scope.Dir
+		e2eTasks := scope.E2ETasks
 
 		suffix := getSuffix(repoRoot, apRoot)
 		targetFile := filepath.Join(presubmitsDir, "ap-e2e"+suffix)
+
+		if len(e2eTasks) == 0 {
+			if _, err := os.Stat(targetFile); err == nil {
+				klog.Infof("Removing %s as no e2e tasks found", targetFile)
+				if err := os.Remove(targetFile); err != nil {
+					return fmt.Errorf("failed to remove %s: %w", targetFile, err)
+				}
+			}
+			continue
+		}
+
 		klog.Infof("Generating %s", targetFile)
 
 		if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
@@ -448,7 +456,7 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runGithubActionsGenerator(_ context.Context, repoRoot string, apRoots []string) error {
+func runGithubActionsGenerator(_ context.Context, repoRoot string, scopes []*tasks.APScope) error {
 	workflowsDir := filepath.Join(repoRoot, ".github", "workflows")
 	outputFile := filepath.Join(workflowsDir, "ci-presubmits.yaml")
 
@@ -478,7 +486,8 @@ on:
 jobs:
 `)
 
-	for _, apRoot := range apRoots {
+	for _, scope := range scopes {
+		apRoot := scope.Dir
 		suffix := getSuffix(repoRoot, apRoot)
 		presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
 		entries, err := os.ReadDir(presubmitsDir)

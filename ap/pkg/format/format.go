@@ -33,7 +33,7 @@ type CodestyleTask struct {
 	Root string
 }
 
-func (t *CodestyleTask) Run(ctx context.Context, _ string) error {
+func (t *CodestyleTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running codestyle in %s...", t.Root)
 	if err := fileheaders.Run(ctx, t.Root, nil); err != nil {
 		return fmt.Errorf("fileheaders failed in %s: %w", t.Root, err)
@@ -58,10 +58,10 @@ type LegacyFormatScriptTask struct {
 	Path string
 }
 
-func (t *LegacyFormatScriptTask) Run(ctx context.Context, root string) error {
+func (t *LegacyFormatScriptTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running legacy format script: %s", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
-	cmd.Dir = root
+	cmd.Dir = scope.Dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -111,5 +111,5 @@ func Run(ctx context.Context, root string) error {
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, root)
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
 }

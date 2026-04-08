@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -54,17 +53,21 @@ func RunFormat(ctx context.Context, opt FormatOptions) error {
 		return err
 	}
 
-	var allTasks []tasks.Task
-	for _, apRoot := range opt.APRoots {
-		group, err := format.FormatTasks(apRoot)
-		if err != nil {
-			return err
-		}
-		if g, ok := group.(*tasks.Group); ok {
-			g.Name = fmt.Sprintf("format-%s", filepath.Base(apRoot))
-		}
-		allTasks = append(allTasks, group)
+	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots)
+	if err != nil {
+		return err
 	}
 
-	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	var allTasks []tasks.Task
+	for _, scope := range scopes {
+		if len(scope.FormatTasks) > 0 {
+			group := &tasks.Group{
+				Name:  fmt.Sprintf("format-%s", filepath.Base(scope.Dir)),
+				Tasks: scope.FormatTasks,
+			}
+			allTasks = append(allTasks, group)
+		}
+	}
+
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

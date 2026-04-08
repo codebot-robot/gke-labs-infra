@@ -35,10 +35,10 @@ type PortForwardTask struct {
 	RemotePort int
 }
 
-func (t *PortForwardTask) Run(ctx context.Context, root string) error {
+func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	if IsInCluster() {
 		klog.Infof("Running in-cluster, skipping port-forward to %s/%s", t.Namespace, t.Service)
-		return t.Child.Run(ctx, root)
+		return t.Child.Run(ctx, scope)
 	}
 
 	klog.Infof("Starting port-forward to %s/%s (%d:%d)...", t.Namespace, t.Service, t.LocalPort, t.RemotePort)
@@ -86,7 +86,7 @@ func (t *PortForwardTask) Run(ctx context.Context, root string) error {
 	}
 
 	klog.Infof("Port-forward ready, running child task %s", t.Child.GetName())
-	return t.Child.Run(ctx, root)
+	return t.Child.Run(ctx, scope)
 }
 
 func (t *PortForwardTask) GetName() string {

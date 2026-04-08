@@ -32,7 +32,7 @@ type GoVetTask struct {
 	Dir string
 }
 
-func (t *GoVetTask) Run(ctx context.Context, root string) error {
+func (t *GoVetTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running go vet in %s", t.Dir)
 	vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
 	vetCmd.Dir = t.Dir
@@ -57,7 +57,7 @@ type GovulncheckTask struct {
 	Dir string
 }
 
-func (t *GovulncheckTask) Run(ctx context.Context, root string) error {
+func (t *GovulncheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running govulncheck in %s", t.Dir)
 	vulnCmd := exec.CommandContext(ctx, "go", "run", "golang.org/x/vuln/cmd/govulncheck@latest", "./...")
 	vulnCmd.Dir = t.Dir
@@ -83,7 +83,7 @@ type UnusedCheckTask struct {
 	CheckParameters bool
 }
 
-func (t *UnusedCheckTask) Run(ctx context.Context, root string) error {
+func (t *UnusedCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running unused check in %s", t.Dir)
 	apPath, err := os.Executable()
 	if err != nil {
@@ -120,7 +120,7 @@ type TestContextCheckTask struct {
 	IsError bool
 }
 
-func (t *TestContextCheckTask) Run(ctx context.Context, root string) error {
+func (t *TestContextCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running testcontext check in %s", t.Dir)
 	apPath, err := os.Executable()
 	if err != nil {
@@ -153,7 +153,7 @@ type ReplaceEmptyInterfaceWithAnyTask struct {
 	Dir string
 }
 
-func (t *ReplaceEmptyInterfaceWithAnyTask) Run(ctx context.Context, root string) error {
+func (t *ReplaceEmptyInterfaceWithAnyTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running replace-empty-interface-with-any check in %s", t.Dir)
 	apPath, err := os.Executable()
 	if err != nil {
@@ -251,7 +251,7 @@ func Lint(ctx context.Context, root string) error {
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, root)
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
 }
 
 // hasGoFiles returns true if the directory or any of its subdirectories

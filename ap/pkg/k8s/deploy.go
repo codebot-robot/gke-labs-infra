@@ -230,8 +230,8 @@ type KubectlApplyTask struct {
 	ManifestPath string
 }
 
-func (t *KubectlApplyTask) Run(ctx context.Context, root string) error {
-	cfg, err := config.Load(root)
+func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error {
+	cfg, err := config.Load(scope.RepoRoot)
 	if err != nil {
 		return err
 	}
@@ -244,7 +244,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, root string) error {
 		tag = "latest"
 	}
 
-	relPath, _ := filepath.Rel(root, t.ManifestPath)
+	relPath, _ := filepath.Rel(scope.RepoRoot, t.ManifestPath)
 	klog.Infof("Applying manifest %s", relPath)
 
 	content, err := os.ReadFile(t.ManifestPath)
@@ -363,7 +363,7 @@ func Deploy(ctx context.Context, root string) error {
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, root)
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
 }
 
 func findManifests(root string) ([]string, error) {
