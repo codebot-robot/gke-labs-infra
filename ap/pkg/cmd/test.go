@@ -35,10 +35,13 @@ func BuildTestCommand(rootOpt *RootOptions) *cobra.Command {
 	}
 
 	cmd := &cobra.Command{
-		Use:   "test",
+		Use:   "test [path...]",
 		Short: "Run tests",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := opt.Resolve(args); err != nil {
+				return err
+			}
 			return RunTest(cmd.Context(), opt)
 		},
 	}

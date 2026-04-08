@@ -39,10 +39,13 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 	}
 
 	cmd := &cobra.Command{
-		Use:   "deploy",
+		Use:   "deploy [path...]",
 		Short: "Deploy artifacts",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := opt.Resolve(args); err != nil {
+				return err
+			}
 			return RunDeploy(cmd.Context(), opt)
 		},
 	}

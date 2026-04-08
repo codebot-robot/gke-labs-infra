@@ -33,10 +33,13 @@ func BuildVersionBumpCommand(rootOpt *RootOptions) *cobra.Command {
 	}
 
 	cmd := &cobra.Command{
-		Use:   "versionbump",
+		Use:   "versionbump [path...]",
 		Short: "Bump project versions (e.g. Go)",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := opt.Resolve(args); err != nil {
+				return err
+			}
 			return RunVersionBump(cmd.Context(), opt)
 		},
 	}

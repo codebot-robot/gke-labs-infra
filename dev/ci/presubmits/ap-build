@@ -22,4 +22,4 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 # Run build
-go run ./ap build
+go run ./ap build //...
