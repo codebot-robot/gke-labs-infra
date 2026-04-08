@@ -17,7 +17,7 @@ package cmd
 import (
 	"os"
 
-	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/testcontext"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/testcontext"
 	"github.com/spf13/cobra"
 	"golang.org/x/tools/go/analysis/multichecker"
 )
