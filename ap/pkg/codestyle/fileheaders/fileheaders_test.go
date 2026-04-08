@@ -15,7 +15,6 @@
 package fileheaders
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,7 +63,7 @@ metadata:
 	}
 
 	// Run fileheaders
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := Run(ctx, tmpDir, nil); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
@@ -123,7 +122,7 @@ metadata:
 	}
 
 	// Run fileheaders with explicit file
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := Run(ctx, tmpDir, []string{targetFile}); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
@@ -180,7 +179,7 @@ package main
 	}
 
 	// Run fileheaders
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := Run(ctx, tmpDir, []string{targetFile}); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}

@@ -15,7 +15,6 @@
 package sandbox
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,7 +30,7 @@ func TestServerWriteRead(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	s := &server{root: tmpDir}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Test WriteFile
 	testPath := "test.txt"

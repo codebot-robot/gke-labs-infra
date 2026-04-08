@@ -15,7 +15,6 @@
 package gostyle
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,7 +28,7 @@ func TestRun_NoConfig(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Run should succeed (do nothing) when no config exists
 	err = Run(ctx, tmpDir, nil)
@@ -68,7 +67,7 @@ gofmt:
 		t.Fatalf("Failed to write bad.go: %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := Run(ctx, tmpDir, nil); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
