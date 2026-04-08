@@ -17,7 +17,7 @@ ARG IMAGE_TAG=latest
 
 FROM ${IMAGE_PREFIX}/ap-golang:${IMAGE_TAG} AS ap-bin
 
-FROM golang:1.26.1-trixie AS builder
+FROM golang:1.26.2-trixie AS builder
 
 WORKDIR /workspace
 COPY . .
@@ -25,7 +25,7 @@ COPY . .
 # Build autodeploy
 RUN go build -o /usr/local/bin/autodeploy .
 
-FROM golang:1.26.1-trixie
+FROM golang:1.26.2-trixie
 COPY --from=ap-bin /usr/local/bin/ap /usr/local/bin/ap
 COPY --from=builder /usr/local/bin/autodeploy /usr/local/bin/autodeploy
 

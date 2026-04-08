@@ -23,6 +23,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileheaders"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
@@ -183,22 +185,18 @@ func runGenerateVerifierGenerator(_ context.Context, repoRoot string) error {
 		return err
 	}
 
+	headers, err := config.LoadHeaders(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to load headers: %w", err)
+	}
+	headerContent, err := fileheaders.GenerateHeader(headers, "#")
+	if err != nil {
+		return fmt.Errorf("failed to generate header: %w", err)
+	}
+
 	content := fmt.Sprintf(`#!/bin/bash
 
-# Copyright 2026 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+%s
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -216,7 +214,7 @@ if [[ -n $(git status --porcelain) ]]; then
   git status
   exit 1
 fi
-`, apCmd, apCmd)
+`, headerContent, apCmd, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -239,22 +237,18 @@ func runApTestGenerator(_ context.Context, repoRoot string) error {
 		return err
 	}
 
+	headers, err := config.LoadHeaders(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to load headers: %w", err)
+	}
+	headerContent, err := fileheaders.GenerateHeader(headers, "#")
+	if err != nil {
+		return fmt.Errorf("failed to generate header: %w", err)
+	}
+
 	content := fmt.Sprintf(`#!/bin/bash
 
-# Copyright 2026 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+%s
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -264,7 +258,7 @@ cd "${REPO_ROOT}"
 
 # Run tests
 %s test
-`, apCmd)
+`, headerContent, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -287,22 +281,18 @@ func runApLintGenerator(_ context.Context, repoRoot string) error {
 		return err
 	}
 
+	headers, err := config.LoadHeaders(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to load headers: %w", err)
+	}
+	headerContent, err := fileheaders.GenerateHeader(headers, "#")
+	if err != nil {
+		return fmt.Errorf("failed to generate header: %w", err)
+	}
+
 	content := fmt.Sprintf(`#!/bin/bash
 
-# Copyright 2026 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+%s
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -312,7 +302,7 @@ cd "${REPO_ROOT}"
 
 # Run linting
 %s lint
-`, apCmd)
+`, headerContent, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -363,22 +353,18 @@ func runApBuildGenerator(_ context.Context, repoRoot string, scopes []*tasks.APS
 		return err
 	}
 
+	headers, err := config.LoadHeaders(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to load headers: %w", err)
+	}
+	headerContent, err := fileheaders.GenerateHeader(headers, "#")
+	if err != nil {
+		return fmt.Errorf("failed to generate header: %w", err)
+	}
+
 	content := fmt.Sprintf(`#!/bin/bash
 
-# Copyright 2026 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+%s
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -388,7 +374,7 @@ cd "${REPO_ROOT}"
 
 # Run build
 %s build
-`, apCmd)
+`, headerContent, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -440,22 +426,18 @@ func runApE2eGenerator(_ context.Context, repoRoot string, scopes []*tasks.APSco
 		if err != nil {
 			return fmt.Errorf("failed to get relative path: %w", err)
 		}
+		headers, err := config.LoadHeaders(repoRoot)
+		if err != nil {
+			return fmt.Errorf("failed to load headers: %w", err)
+		}
+		headerContent, err := fileheaders.GenerateHeader(headers, "#")
+		if err != nil {
+			return fmt.Errorf("failed to generate header: %w", err)
+		}
+
 		content := fmt.Sprintf(`#!/bin/bash
 
-# Copyright 2026 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
+%s
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -465,7 +447,7 @@ cd "${REPO_ROOT}"
 
 # Run e2e tests
 %s --root %s e2e
-`, apCmd, relApRoot)
+`, headerContent, apCmd, relApRoot)
 		if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 			return fmt.Errorf("failed to write %s: %w", targetFile, err)
 		}
@@ -481,21 +463,16 @@ func runGithubActionsGenerator(_ context.Context, repoRoot string, scopes []*tas
 	klog.Infof("Generating %s", outputFile)
 
 	var sb strings.Builder
-	sb.WriteString(`# Copyright 2026 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-# Generated by ap generate. DO NOT EDIT.
+	headers, err := config.LoadHeaders(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to load headers: %w", err)
+	}
+	headerContent, err := fileheaders.GenerateHeader(headers, "#")
+	if err != nil {
+		return fmt.Errorf("failed to generate header: %w", err)
+	}
+	sb.WriteString(headerContent)
+	sb.WriteString(`# Generated by ap generate. DO NOT EDIT.
 
 name: CI Presubmits
 
@@ -559,6 +536,17 @@ jobs:
         with:
           go-version-file: '%s'
 `, relGoMod))
+			}
+
+			if scriptName == "ap-build" {
+				cleanupTaskPath := filepath.Join(apRoot, "dev", "tasks", "free-disk-space-on-github-actions-runner")
+				if _, err := os.Stat(cleanupTaskPath); err == nil {
+					relCleanupTask, _ := filepath.Rel(repoRoot, cleanupTaskPath)
+					sb.WriteString(fmt.Sprintf(`
+      - name: Free disk space
+        run: ./%s
+`, relCleanupTask))
+				}
 			}
 
 			sb.WriteString(fmt.Sprintf(`

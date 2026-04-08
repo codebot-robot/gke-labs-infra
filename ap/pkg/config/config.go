@@ -160,3 +160,33 @@ func (c *Config) ImageRepo() string {
 	}
 	return repo
 }
+
+type HeadersConfig struct {
+	License         string   `json:"license"`
+	CopyrightHolder string   `json:"copyrightHolder"`
+	Skip            []string `json:"skip"`
+	SkipGenerated   *bool    `json:"skipGenerated"`
+}
+
+func LoadHeaders(repoRoot string) (*HeadersConfig, error) {
+	configFile := filepath.Join(repoRoot, ".ap/headers.yaml")
+	var config HeadersConfig
+	if _, err := os.Stat(configFile); err == nil {
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			return nil, fmt.Errorf("error reading %s: %w", configFile, err)
+		}
+
+		if err := yaml.Unmarshal(data, &config); err != nil {
+			return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("error checking %s: %w", configFile, err)
+	}
+
+	if config.SkipGenerated == nil {
+		t := true
+		config.SkipGenerated = &t
+	}
+	return &config, nil
+}

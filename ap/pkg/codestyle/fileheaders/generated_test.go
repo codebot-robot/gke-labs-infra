@@ -15,7 +15,6 @@
 package fileheaders
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,7 +62,7 @@ func main() {}
 	}
 
 	// Run fileheaders
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := Run(ctx, tmpDir, nil); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
@@ -116,7 +115,7 @@ func main() {}
 	}
 
 	// Run fileheaders
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := Run(ctx, tmpDir, nil); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
@@ -161,7 +160,7 @@ func main() {}
 	}
 
 	// Run fileheaders
-	ctx := context.Background()
+	ctx := t.Context()
 	if err := Run(ctx, tmpDir, nil); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}

@@ -15,9 +15,9 @@
 package main
 
 import (
-	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/any"
-	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/testcontext"
-	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/unused"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/any"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/testcontext"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/unused"
 	"golang.org/x/tools/go/analysis/multichecker"
 )
 
