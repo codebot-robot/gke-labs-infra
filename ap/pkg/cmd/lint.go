@@ -19,8 +19,6 @@ import (
 	"fmt"
 	"path/filepath"
 
-	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/prlinter"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -58,38 +56,21 @@ func RunLint(ctx context.Context, opt LintOptions) error {
 		return err
 	}
 
+	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots)
+	if err != nil {
+		return err
+	}
+
 	var allTasks []tasks.Task
-
-	// Only run prlinter if we are operating on the repo root
-	isRepoRoot := false
-	for _, apRoot := range opt.APRoots {
-		if apRoot == opt.RepoRoot {
-			isRepoRoot = true
-			break
+	for _, scope := range scopes {
+		if len(scope.LintTasks) > 0 {
+			group := &tasks.Group{
+				Name:  fmt.Sprintf("lint-%s", filepath.Base(scope.Dir)),
+				Tasks: scope.LintTasks,
+			}
+			allTasks = append(allTasks, group)
 		}
 	}
 
-	if isRepoRoot {
-		prTask, err := prlinter.LintTasks(opt.RepoRoot)
-		if err != nil {
-			return err
-		}
-		allTasks = append(allTasks, prTask)
-	}
-
-	for _, apRoot := range opt.APRoots {
-		group := &tasks.Group{
-			Name: fmt.Sprintf("lint-%s", filepath.Base(apRoot)),
-		}
-
-		goTasks, err := golang.LintTasks(apRoot)
-		if err != nil {
-			return err
-		}
-		group.Tasks = append(group.Tasks, goTasks)
-
-		allTasks = append(allTasks, group)
-	}
-
-	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

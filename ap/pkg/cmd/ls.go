@@ -20,7 +20,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
@@ -55,7 +54,13 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 		return err
 	}
 
-	for _, apRoot := range opt.APRoots {
+	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots)
+	if err != nil {
+		return err
+	}
+
+	for _, scope := range scopes {
+		apRoot := scope.Dir
 		rel, err := filepath.Rel(opt.RepoRoot, apRoot)
 		name := rel
 		if err != nil {
@@ -65,54 +70,43 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 		}
 		fmt.Printf("%s\n", name)
 
-		// Discover tasks
-		allTasks, err := discoverTasks(apRoot)
-		if err != nil {
-			fmt.Printf("  Error discovering tasks: %v\n", err)
-			continue
+		var all []tasks.Task
+
+		// Build tasks
+		buildTasks, err := images.BuildTasks(apRoot, false, "")
+		if err == nil && buildTasks != nil {
+			all = append(all, buildTasks)
+		}
+		if len(scope.BuildTasks) > 0 {
+			all = append(all, &tasks.Group{Name: "build-scripts", Tasks: scope.BuildTasks})
 		}
 
-		for _, task := range allTasks {
+		// Test tasks
+		if len(scope.TestTasks) > 0 {
+			all = append(all, &tasks.Group{Name: "test-tasks", Tasks: scope.TestTasks})
+		}
+
+		// E2E tasks
+		if len(scope.E2ETasks) > 0 {
+			all = append(all, &tasks.Group{Name: "e2e-tasks", Tasks: scope.E2ETasks})
+		}
+
+		// Lint tasks
+		if len(scope.LintTasks) > 0 {
+			all = append(all, &tasks.Group{Name: "lint-tasks", Tasks: scope.LintTasks})
+		}
+
+		// Format tasks
+		if len(scope.FormatTasks) > 0 {
+			all = append(all, &tasks.Group{Name: "format-tasks", Tasks: scope.FormatTasks})
+		}
+
+		for _, task := range all {
 			printTask(task, 1)
 		}
 	}
 
 	return nil
-}
-
-func discoverTasks(root string) ([]tasks.Task, error) {
-	var all []tasks.Task
-
-	// Build tasks
-	buildTasks, err := images.BuildTasks(root, false, "")
-	if err == nil && buildTasks != nil {
-		all = append(all, buildTasks)
-	}
-
-	// Test tasks
-	goTestTasks, err := golang.TestTasks(root)
-	if err == nil && goTestTasks != nil {
-		all = append(all, goTestTasks)
-	}
-
-	testScripts, err := tasks.FindTaskScripts(root, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
-	if err == nil && len(testScripts) > 0 {
-		all = append(all, &tasks.Group{Name: "test-scripts", Tasks: testScripts})
-	}
-
-	// E2e tasks
-	e2eScripts, err := tasks.FindTaskScripts(root, tasks.WithPrefix("test-e2e"))
-	if err == nil && len(e2eScripts) > 0 {
-		all = append(all, &tasks.Group{Name: "e2e-scripts", Tasks: e2eScripts})
-	}
-
-	// Build scripts
-	buildScripts, err := tasks.FindTaskScripts(root, tasks.WithPrefix("build-"))
-	if err == nil && len(buildScripts) > 0 {
-		all = append(all, &tasks.Group{Name: "build-scripts", Tasks: buildScripts})
-	}
-
-	return all, nil
 }
 
 func printTask(t tasks.Task, indent int) {

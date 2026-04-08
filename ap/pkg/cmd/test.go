@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"path/filepath"
 
-	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -53,27 +52,21 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 		return err
 	}
 
-	var allTasks []tasks.Task
-	for _, apRoot := range opt.APRoots {
-		group := &tasks.Group{
-			Name: fmt.Sprintf("test-%s", filepath.Base(apRoot)),
-		}
-
-		goTasks, err := golang.TestTasks(apRoot)
-		if err != nil {
-			return err
-		}
-		group.Tasks = append(group.Tasks, goTasks)
-
-		// Run test-* scripts (excluding test-e2e*)
-		testScripts, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
-		if err != nil {
-			return fmt.Errorf("failed to discover test tasks in %s: %w", apRoot, err)
-		}
-		group.Tasks = append(group.Tasks, testScripts...)
-
-		allTasks = append(allTasks, group)
+	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots)
+	if err != nil {
+		return err
 	}
 
-	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	var allTasks []tasks.Task
+	for _, scope := range scopes {
+		if len(scope.TestTasks) > 0 {
+			group := &tasks.Group{
+				Name:  fmt.Sprintf("test-%s", filepath.Base(scope.Dir)), // Just to compile, I'll fix formatting next
+				Tasks: scope.TestTasks,
+			}
+			allTasks = append(allTasks, group)
+		}
+	}
+
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

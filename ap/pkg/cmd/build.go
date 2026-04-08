@@ -59,10 +59,15 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		return err
 	}
 
+	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots)
+	if err != nil {
+		return err
+	}
+
 	var allTasks []tasks.Task
-	for _, apRoot := range opt.APRoots {
+	for _, scope := range scopes {
 		group := &tasks.Group{
-			Name: fmt.Sprintf("build-%s", filepath.Base(apRoot)),
+			Name: fmt.Sprintf("build-%s", filepath.Base(scope.Dir)),
 		}
 
 		buildkitHost := opt.BuildkitHost
@@ -70,21 +75,20 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 			buildkitHost = "k8s://autodeploy-system/buildkit"
 		}
 
-		imageTasks, err := images.BuildTasks(apRoot, opt.Push, buildkitHost)
+		imageTasks, err := images.BuildTasks(scope.Dir, opt.Push, buildkitHost)
 		if err != nil {
 			return err
 		}
-		group.Tasks = append(group.Tasks, imageTasks)
-
-		// Run build-* scripts
-		buildScripts, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("build-"))
-		if err != nil {
-			return fmt.Errorf("failed to discover build tasks in %s: %w", apRoot, err)
+		if imageTasks != nil {
+			group.Tasks = append(group.Tasks, imageTasks)
 		}
-		group.Tasks = append(group.Tasks, buildScripts...)
 
-		allTasks = append(allTasks, group)
+		group.Tasks = append(group.Tasks, scope.BuildTasks...)
+
+		if len(group.Tasks) > 0 {
+			allTasks = append(allTasks, group)
+		}
 	}
 
-	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

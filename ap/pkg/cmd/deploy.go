@@ -88,5 +88,5 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		allTasks = append(allTasks, group)
 	}
 
-	return tasks.Run(ctx, opt.RepoRoot, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

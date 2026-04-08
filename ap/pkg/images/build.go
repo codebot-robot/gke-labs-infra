@@ -38,8 +38,8 @@ type DockerBuildTask struct {
 	BuildkitHost string
 }
 
-func (t *DockerBuildTask) Run(ctx context.Context, repoRoot string) error {
-	cfg, err := config.Load(repoRoot)
+func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
+	cfg, err := config.Load(scope.RepoRoot)
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 		pfTask := &k8s.PortForwardTask{
 			Child: &tasks.DummyTask{
 				Name: "run-buildctl",
-				RunFn: func(ctx context.Context, root string) error {
+				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
 					cmd := exec.CommandContext(ctx, "buildctl", buildctlArgs...)
 					cmd.Dir = root
 					cmd.Stdout = os.Stdout
@@ -134,7 +134,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 			LocalPort:  2375,
 			RemotePort: 2375,
 		}
-		return pfTask.Run(ctx, root)
+		return pfTask.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
 	}
 
 	cmd := exec.CommandContext(ctx, "buildctl", buildctlArgs...)
@@ -255,7 +255,7 @@ func Build(ctx context.Context, root string, push bool, buildkitHost string) err
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, root)
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
 }
 
 // HasImages returns true if there are any images to build under root.

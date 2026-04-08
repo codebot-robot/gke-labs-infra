@@ -26,9 +26,23 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// APScope represents the context for an ap root directory
+type APScope struct {
+	RepoRoot string
+	Dir      string
+
+	// Discovered Tasks
+	BuildTasks    []Task
+	E2ETasks      []Task
+	TestTasks     []Task
+	LintTasks     []Task
+	GenerateTasks []Task
+	FormatTasks   []Task
+}
+
 // Task is the interface that all tasks must implement.
 type Task interface {
-	Run(ctx context.Context, root string) error
+	Run(ctx context.Context, scope *APScope) error
 	GetName() string
 	GetChildren() []Task
 }
@@ -36,11 +50,11 @@ type Task interface {
 // DummyTask represents a task that just runs a function.
 type DummyTask struct {
 	Name  string
-	RunFn func(ctx context.Context, root string) error
+	RunFn func(ctx context.Context, scope *APScope) error
 }
 
-func (t *DummyTask) Run(ctx context.Context, root string) error {
-	return t.RunFn(ctx, root)
+func (t *DummyTask) Run(ctx context.Context, scope *APScope) error {
+	return t.RunFn(ctx, scope)
 }
 
 func (t *DummyTask) GetName() string {
@@ -58,7 +72,7 @@ type TaskScript struct {
 	Root string
 }
 
-func (t *TaskScript) Run(ctx context.Context, _ string) error {
+func (t *TaskScript) Run(ctx context.Context, scope *APScope) error {
 	klog.Infof("Running task: %s", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = t.Root
@@ -84,9 +98,9 @@ type Group struct {
 	Tasks []Task
 }
 
-func (g *Group) Run(ctx context.Context, root string) error {
+func (g *Group) Run(ctx context.Context, scope *APScope) error {
 	for _, t := range g.Tasks {
-		if err := t.Run(ctx, root); err != nil {
+		if err := t.Run(ctx, scope); err != nil {
 			return err
 		}
 	}
@@ -169,15 +183,15 @@ type RunOptions struct {
 }
 
 // Run executes a list of tasks.
-func Run(ctx context.Context, root string, tasks []Task, opts RunOptions) error {
+func Run(ctx context.Context, scope *APScope, ts []Task, opts RunOptions) error {
 	if opts.DryRun {
-		for _, task := range tasks {
+		for _, task := range ts {
 			PrintTree(task, 0)
 		}
 		return nil
 	}
-	for _, task := range tasks {
-		if err := task.Run(ctx, root); err != nil {
+	for _, task := range ts {
+		if err := task.Run(ctx, scope); err != nil {
 			return err
 		}
 	}
