@@ -25,19 +25,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/yaml"
 )
 
 var generatedCodeRegexp = regexp.MustCompile(`Code generated .* DO NOT EDIT`)
-
-type Config struct {
-	License         string   `json:"license"`
-	CopyrightHolder string   `json:"copyrightHolder"`
-	Skip            []string `json:"skip"`
-	SkipGenerated   *bool    `json:"skipGenerated"`
-}
 
 type FileHeadersOptions struct {
 	IgnoreFiles []string `json:"ignore"`
@@ -56,7 +49,7 @@ func (o *FileHeadersOptions) InitDefaults() {
 
 // processor handles file processing
 type processor struct {
-	config     *Config
+	config     *config.HeadersConfig
 	ignoreList *walker.IgnoreList
 }
 
@@ -78,7 +71,7 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 		return nil
 	}
 
-	config, err := loadConfig(configFile)
+	config, err := config.LoadHeaders(repoRoot)
 	if err != nil {
 		return err
 	}
@@ -131,22 +124,6 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 	return errors.Join(errs...)
 }
 
-func loadConfig(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var config Config
-	if err := yaml.Unmarshal(data, &config); err != nil {
-		return nil, err
-	}
-	if config.SkipGenerated == nil {
-		t := true
-		config.SkipGenerated = &t
-	}
-	return &config, nil
-}
-
 func (p *processor) processFile(ctx context.Context, absPath, relPath string) error {
 	log := klog.FromContext(ctx)
 
@@ -194,7 +171,7 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 
 	log.Info("Adding file header", "file", relPath)
 
-	header, err := p.generateHeader(commentStyle)
+	header, err := GenerateHeader(p.config, commentStyle)
 	if err != nil {
 		return err
 	}
@@ -232,15 +209,15 @@ func getCommentStyle(name, ext string) string {
 	return ""
 }
 
-func (p *processor) generateHeader(style string) (string, error) {
+func GenerateHeader(cfg *config.HeadersConfig, style string) (string, error) {
 	year := time.Now().Year()
 
-	if p.config.License != "apache-2.0" {
-		return "", fmt.Errorf("unsupported license: %s", p.config.License)
+	if cfg.License != "apache-2.0" {
+		return "", fmt.Errorf("unsupported license: %s", cfg.License)
 	}
 
 	var lines []string
-	lines = append(lines, fmt.Sprintf("%s Copyright %d %s", style, year, p.config.CopyrightHolder))
+	lines = append(lines, fmt.Sprintf("%s Copyright %d %s", style, year, cfg.CopyrightHolder))
 	lines = append(lines, style)
 	lines = append(lines, fmt.Sprintf("%s Licensed under the Apache License, Version 2.0 (the \"License\");", style))
 	lines = append(lines, fmt.Sprintf("%s you may not use this file except in compliance with the License.", style))

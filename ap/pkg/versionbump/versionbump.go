@@ -26,7 +26,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/walker"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"k8s.io/klog/v2"
 )
 

@@ -22,9 +22,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileheaders"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/gostyle"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/fileheaders"
-	"github.com/gke-labs/gke-labs-infra/codestyle/pkg/gostyle"
 	"k8s.io/klog/v2"
 )
 
