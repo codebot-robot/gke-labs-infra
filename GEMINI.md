@@ -35,19 +35,18 @@ When `DryRun` is true, `tasks.Run` will print the task tree instead of executing
 
 ### Verifying changes
 
-Before submitting a Pull Request, you MUST run `ap generate` and `ap lint` to verify that your changes follow the project's style and quality guidelines.
+Before submitting a Pull Request, you MUST run `ap generate`, `ap lint`, and `ap test` to verify that your changes follow the project's style and quality guidelines. Coding agents MUST ensure they run these commands before sending PRs.
 
 ```bash
 ap generate
 ap lint
+ap test
 ```
 
 Always ensure `ap generate` is run before sending a PR, as it may regenerate CI configuration files.
 
-
 Additionally, you should run the following commands to ensure that your changes do not introduce any regressions:
 
 ```bash
-ap test
 ap e2e
 ```

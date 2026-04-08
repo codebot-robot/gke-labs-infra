@@ -529,6 +529,17 @@ jobs:
 `, relGoMod))
 			}
 
+			if scriptName == "ap-build" {
+				cleanupTaskPath := filepath.Join(apRoot, "dev", "tasks", "free-disk-space-on-github-actions-runner")
+				if _, err := os.Stat(cleanupTaskPath); err == nil {
+					relCleanupTask, _ := filepath.Rel(repoRoot, cleanupTaskPath)
+					sb.WriteString(fmt.Sprintf(`
+      - name: Free disk space
+        run: ./%s
+`, relCleanupTask))
+				}
+			}
+
 			sb.WriteString(fmt.Sprintf(`
       - name: Run %s
         run: ./%s/%s
