@@ -416,15 +416,15 @@ func runApE2eGenerator(_ context.Context, repoRoot string, scopes []*tasks.APSco
 		targetFile := filepath.Join(presubmitsDir, "ap-e2e"+suffix)
 
 		if len(e2eTasks) == 0 {
-		        if _, err := os.Stat(targetFile); err == nil {
-		                klog.Infof("Removing %s as no e2e tasks found", targetFile)
-		                if err := os.Remove(targetFile); err != nil {
-		                        return fmt.Errorf("failed to remove %s: %w", targetFile, err)
-		                }
-		        }
-		        continue
+			if _, err := os.Stat(targetFile); err == nil {
+				klog.Infof("Removing %s as no e2e tasks found", targetFile)
+				if err := os.Remove(targetFile); err != nil {
+					return fmt.Errorf("failed to remove %s: %w", targetFile, err)
+				}
+			}
+			continue
 		}
-		
+
 		klog.Infof("Generating %s", targetFile)
 
 		if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
