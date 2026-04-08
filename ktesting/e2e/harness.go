@@ -50,6 +50,9 @@ func (h *Harness) CreateTempNamespace(prefix string) string {
 	h.RunCommand("kubectl", "create", "namespace", ns)
 	h.TrackNamespace(ns)
 	h.t.Cleanup(func() {
+		if h.t.Failed() {
+			return
+		}
 		h.RunCommand("kubectl", "delete", "namespace", ns, "--ignore-not-found")
 	})
 	return ns
@@ -107,6 +110,9 @@ func (h *Harness) Setup() {
 	h.RunCommand("kubectl", "config", "set-context", "--current", "--namespace="+h.Namespace)
 
 	h.t.Cleanup(func() {
+		if h.t.Failed() {
+			h.CollectArtifacts(h.t.Name())
+		}
 		h.Teardown()
 	})
 }
