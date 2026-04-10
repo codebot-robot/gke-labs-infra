@@ -525,7 +525,7 @@ jobs:
       ARTIFACTS: /tmp/artifacts
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 `, jobName))
 
 			if goModExists {
@@ -558,7 +558,7 @@ jobs:
 				sb.WriteString(fmt.Sprintf(`
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: artifacts-%s
           path: /tmp/artifacts
