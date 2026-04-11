@@ -96,6 +96,9 @@ func DiscoverScopes(repoRoot string, apRoots []string) ([]*tasks.APScope, error)
 				e2eDir := filepath.Join(path, "e2e")
 				if golang.HasGoTests(e2eDir) {
 					buildDir := filepath.Join(repoRoot, ".build", "test-results", "go")
+					if artifactsDir := os.Getenv("ARTIFACTS"); artifactsDir != "" {
+						buildDir = filepath.Join(artifactsDir, "test-results", "go")
+					}
 					if err := os.MkdirAll(buildDir, 0755); err != nil {
 						return fmt.Errorf("failed to create build dir: %w", err)
 					}

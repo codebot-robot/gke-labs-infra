@@ -119,6 +119,9 @@ func TestTasks(root string) (tasks.Task, error) {
 	}
 
 	buildDir := filepath.Join(root, ".build", "test-results", "go")
+	if artifactsDir := os.Getenv("ARTIFACTS"); artifactsDir != "" {
+		buildDir = filepath.Join(artifactsDir, "test-results", "go")
+	}
 	if err := os.MkdirAll(buildDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create build dir: %w", err)
 	}
