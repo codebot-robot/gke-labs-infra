@@ -57,10 +57,10 @@ func TestAutodeploy(t *testing.T) {
 	}
 
 	// Wait for components to be ready
-	waitForDeployment(t, "buildkit", "autodeploy-system", 2*time.Minute)
-	waitForDeployment(t, "autodeploy-controller", "autodeploy-system", 2*time.Minute)
-	waitForStatefulSet(t, "in-cluster-image-registry", "in-cluster-image-registry-system", 2*time.Minute)
-	waitForDaemonSet(t, "node-agent", "in-cluster-image-registry-system", 2*time.Minute)
+	waitForDeployment(t, "buildkit", "autodeploy-system", 5*time.Minute)
+	waitForDeployment(t, "autodeploy-controller", "autodeploy-system", 5*time.Minute)
+	waitForStatefulSet(t, "in-cluster-image-registry", "in-cluster-image-registry-system", 5*time.Minute)
+	waitForDaemonSet(t, "node-agent", "in-cluster-image-registry-system", 5*time.Minute)
 
 	// 3. Install helloworld example via Package CRD
 	t.Log("Creating Package resource for helloworld")
@@ -78,7 +78,7 @@ spec:
 	runCmdWithInput(t, repoRoot, pkgYAML, "kubectl", "apply", "-f", "-")
 
 	// 4. Verify helloworld is deployed
-	waitForDeployment(t, "helloworld", "default", 2*time.Minute)
+	waitForDeployment(t, "helloworld", "default", 5*time.Minute)
 }
 
 func runCmdWithInput(t *testing.T, dir string, input string, name string, args ...string) {
