@@ -45,11 +45,7 @@ type APRunner struct {
 func (r *APRunner) DeployFlow(ctx context.Context, pkg *v1alpha1.Package, commit string, args ...string) error {
 	image := "images.local/ap-golang:latest"
 	if r.ImagePrefix != "" {
-		tag := r.ImageTag
-		if tag == "" {
-			tag = "latest"
-		}
-		image = fmt.Sprintf("%s/ap-golang:%s", r.ImagePrefix, tag)
+		image = fmt.Sprintf("%s/ap-golang:latest", r.ImagePrefix)
 	}
 
 	argStr := strings.Join(args, " ")

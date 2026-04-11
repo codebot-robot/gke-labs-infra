@@ -51,9 +51,14 @@ func TestAutodeploy(t *testing.T) {
 	imagesToLoad := []string{
 		"autodeploy-controller",
 		"in-cluster-image-registry-node-agent",
+		"ap-golang",
 	}
 	for _, img := range imagesToLoad {
 		runCmd(t, repoRoot, "kind", "load", "docker-image", fmt.Sprintf("%s/%s:%s", imagePrefix, img, imageTag), "--name", clusterName)
+		if img == "ap-golang" {
+			runCmd(t, repoRoot, "docker", "tag", fmt.Sprintf("%s/%s:%s", imagePrefix, img, imageTag), "images.local/ap-golang:latest")
+			runCmd(t, repoRoot, "kind", "load", "docker-image", "images.local/ap-golang:latest", "--name", clusterName)
+		}
 	}
 
 	// Wait for components to be ready
@@ -61,6 +66,9 @@ func TestAutodeploy(t *testing.T) {
 	waitForDeployment(t, "autodeploy-controller", "autodeploy-system", 5*time.Minute)
 	waitForStatefulSet(t, "in-cluster-image-registry", "in-cluster-image-registry-system", 5*time.Minute)
 	waitForDaemonSet(t, "node-agent", "in-cluster-image-registry-system", 5*time.Minute)
+
+	// Grant cluster-admin to default service account in default namespace for the Job
+	runCmd(t, repoRoot, "kubectl", "create", "clusterrolebinding", "default-admin", "--clusterrole=cluster-admin", "--serviceaccount=default:default")
 
 	// 3. Install helloworld example via Package CRD
 	t.Log("Creating Package resource for helloworld")
