@@ -16,64 +16,85 @@ package executor
 
 import (
 	"context"
-	"os"
-	"os/exec"
+	"fmt"
+	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/apis/infra/v1alpha1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Runner defines the interface for running 'ap' commands.
 type Runner interface {
-	RunAP(ctx context.Context, dir string, args ...string) error
-	DeployFlow(ctx context.Context, dir string, args ...string) error
+	DeployFlow(ctx context.Context, pkg *v1alpha1.Package, commit string, args ...string) error
 }
 
 // APRunner handles execution of 'ap' commands.
 type APRunner struct {
+	Client       client.Client
 	ImagePrefix  string
 	ImageTag     string
 	BuildkitHost string
 }
 
-// RunAP executes an 'ap' command in the given directory.
-func (r *APRunner) RunAP(ctx context.Context, dir string, args ...string) error {
-	klog.Infof("Running ap %v in %s", args, dir)
-
-	// TODO: When running in K8s, this should probably create a K8s Job
-	// for now we'll just use exec.Command as a placeholder.
-
-	cmd := exec.CommandContext(ctx, "ap", args...)
-	cmd.Dir = dir
-	cmd.Env = os.Environ()
+// DeployFlow runs the full build-test-deploy flow by creating a Kubernetes Job.
+func (r *APRunner) DeployFlow(ctx context.Context, pkg *v1alpha1.Package, commit string, args ...string) error {
+	image := "images.local/ap-golang:latest"
 	if r.ImagePrefix != "" {
-		cmd.Env = append(cmd.Env, "IMAGE_PREFIX="+r.ImagePrefix)
-	}
-	if r.ImageTag != "" {
-		cmd.Env = append(cmd.Env, "IMAGE_TAG="+r.ImageTag)
-	}
-	if r.BuildkitHost != "" {
-		cmd.Env = append(cmd.Env, "BUILDKIT_HOST="+r.BuildkitHost)
+		tag := r.ImageTag
+		if tag == "" {
+			tag = "latest"
+		}
+		image = fmt.Sprintf("%s/ap-golang:%s", r.ImagePrefix, tag)
 	}
 
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		klog.Errorf("ap command failed: %v, output: %s", err, string(output))
-		return err
+	argStr := strings.Join(args, " ")
+	script := fmt.Sprintf("git clone %s /src && cd /src && git checkout %s && ap build %s && ap test %s && ap deploy %s",
+		pkg.Spec.Repo, commit, argStr, argStr, argStr)
+
+	// Keep job name under 63 chars
+	jobName := fmt.Sprintf("deploy-%s-%s", pkg.Name, commit)
+	if len(jobName) > 63 {
+		jobName = jobName[:63]
 	}
 
-	return nil
-}
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      jobName,
+			Namespace: pkg.Namespace,
+		},
+		Spec: batchv1.JobSpec{
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers: []corev1.Container{
+						{
+							Name:    "ap",
+							Image:   image,
+							Command: []string{"sh", "-c", script},
+							Env: []corev1.EnvVar{
+								{Name: "IMAGE_PREFIX", Value: r.ImagePrefix},
+								{Name: "IMAGE_TAG", Value: r.ImageTag},
+								{Name: "BUILDKIT_HOST", Value: r.BuildkitHost},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
 
-// DeployFlow runs the full build-test-deploy flow.
-func (r *APRunner) DeployFlow(ctx context.Context, dir string, args ...string) error {
-	if err := r.RunAP(ctx, dir, append([]string{"build"}, args...)...); err != nil {
-		return err
+	klog.Infof("Creating Job %s in namespace %s for package %s (commit %s)", jobName, pkg.Namespace, pkg.Name, commit)
+	if err := r.Client.Create(ctx, job); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return fmt.Errorf("failed to create Job: %w", err)
+		}
+		klog.Infof("Job %s already exists", jobName)
 	}
-	if err := r.RunAP(ctx, dir, append([]string{"test"}, args...)...); err != nil {
-		return err
-	}
-	if err := r.RunAP(ctx, dir, append([]string{"deploy"}, args...)...); err != nil {
-		return err
-	}
+
 	return nil
 }
