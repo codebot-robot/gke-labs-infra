@@ -23,7 +23,9 @@ WORKDIR /workspace
 COPY . .
 
 # Build autodeploy
-RUN go build -o /usr/local/bin/autodeploy .
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -o /usr/local/bin/autodeploy .
 
 FROM golang:1.26.2-trixie
 COPY --from=ap-bin /usr/local/bin/ap /usr/local/bin/ap
