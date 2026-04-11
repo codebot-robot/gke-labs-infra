@@ -61,12 +61,13 @@ func (r *APRunner) DeployFlow(ctx context.Context, pkg *v1alpha1.Package, commit
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
-			Namespace: pkg.Namespace,
+			Namespace: "autodeploy-system",
 		},
 		Spec: batchv1.JobSpec{
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyNever,
+					RestartPolicy:      corev1.RestartPolicyNever,
+					ServiceAccountName: "autodeploy-controller",
 					Containers: []corev1.Container{
 						{
 							Name:    "ap",
@@ -84,7 +85,7 @@ func (r *APRunner) DeployFlow(ctx context.Context, pkg *v1alpha1.Package, commit
 		},
 	}
 
-	klog.Infof("Creating Job %s in namespace %s for package %s (commit %s)", jobName, pkg.Namespace, pkg.Name, commit)
+	klog.Infof("Creating Job %s in namespace autodeploy-system for package %s (commit %s)", jobName, pkg.Name, commit)
 	if err := r.Client.Create(ctx, job); err != nil {
 		if !errors.IsAlreadyExists(err) {
 			return fmt.Errorf("failed to create Job: %w", err)

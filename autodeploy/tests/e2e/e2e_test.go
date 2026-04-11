@@ -68,7 +68,7 @@ func TestAutodeploy(t *testing.T) {
 	waitForDaemonSet(t, "node-agent", "in-cluster-image-registry-system", 5*time.Minute)
 
 	// Grant cluster-admin to default service account in default namespace for the Job
-	runCmd(t, repoRoot, "kubectl", "create", "clusterrolebinding", "default-admin", "--clusterrole=cluster-admin", "--serviceaccount=default:default")
+	// Removed clusterrolebinding since Job runs as autodeploy-controller now
 
 	// 3. Install helloworld example via Package CRD
 	t.Log("Creating Package resource for helloworld")

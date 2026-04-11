@@ -38,7 +38,8 @@ spec:
         image: autodeploy-controller
         env:
         - name: BUILDKIT_HOST
-          value: tcp://buildkit:2375
+          value: tcp://buildkit.autodeploy-system.svc:2375
+          # Fully qualify BUILDKIT_HOST so Jobs in other namespaces can reach it
         - name: IMAGE_PREFIX
           value: images.local
 ---
