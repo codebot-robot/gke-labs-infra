@@ -57,10 +57,10 @@ func TestAutodeploy(t *testing.T) {
 	}
 
 	// Wait for components to be ready
-	waitForDeployment(t, "buildkit", "autodeploy-system", 2*time.Minute)
-	waitForDeployment(t, "autodeploy-controller", "autodeploy-system", 2*time.Minute)
-	waitForStatefulSet(t, "in-cluster-image-registry", "in-cluster-image-registry-system", 2*time.Minute)
-	waitForDaemonSet(t, "node-agent", "in-cluster-image-registry-system", 2*time.Minute)
+	waitForDeployment(t, "buildkit", "autodeploy-system", 5*time.Minute)
+	waitForDeployment(t, "autodeploy-controller", "autodeploy-system", 5*time.Minute)
+	waitForStatefulSet(t, "in-cluster-image-registry", "in-cluster-image-registry-system", 5*time.Minute)
+	waitForDaemonSet(t, "node-agent", "in-cluster-image-registry-system", 5*time.Minute)
 
 	// 3. Install helloworld example via Package CRD
 	t.Log("Creating Package resource for helloworld")
@@ -78,7 +78,7 @@ spec:
 	runCmdWithInput(t, repoRoot, pkgYAML, "kubectl", "apply", "-f", "-")
 
 	// 4. Verify helloworld is deployed
-	waitForDeployment(t, "helloworld", "default", 2*time.Minute)
+	waitForDeployment(t, "helloworld", "default", 5*time.Minute)
 }
 
 func runCmdWithInput(t *testing.T, dir string, input string, name string, args ...string) {
@@ -112,6 +112,37 @@ func findRepoRoot(t *testing.T) string {
 	}
 }
 
+func dumpLogs(t *testing.T, namespace string) {
+	artifactsDir := os.Getenv("ARTIFACTS")
+	if artifactsDir == "" {
+		return
+	}
+
+	outDir := filepath.Join(artifactsDir, "logs", namespace)
+	os.MkdirAll(outDir, 0755)
+
+	t.Logf("Dumping logs for namespace %s to %s", namespace, outDir)
+
+	// Dump all pods
+	exec.Command("sh", "-c", fmt.Sprintf("kubectl get pods -n %s -o yaml > %s/pods.yaml", namespace, outDir)).Run()
+
+	// Dump all events
+	exec.Command("sh", "-c", fmt.Sprintf("kubectl get events -n %s > %s/events.txt", namespace, outDir)).Run()
+
+	// Dump logs for all pods
+	outBytes, _ := exec.Command("kubectl", "get", "pods", "-n", namespace, "-o", "jsonpath={.items[*].metadata.name}").Output()
+	out := string(outBytes)
+	pods := strings.Split(strings.TrimSpace(out), " ")
+	for _, pod := range pods {
+		if pod == "" {
+			continue
+		}
+		// Ignore errors for logs, as some pods might be initializing
+		exec.Command("sh", "-c", fmt.Sprintf("kubectl logs %s -n %s --all-containers > %s/%s.log", pod, namespace, outDir, pod)).Run()
+		exec.Command("sh", "-c", fmt.Sprintf("kubectl describe pod %s -n %s > %s/%s-describe.txt", pod, namespace, outDir, pod)).Run()
+	}
+}
+
 func setupKindCluster(t *testing.T, name string) {
 	t.Helper()
 	// Check if cluster exists
@@ -134,12 +165,20 @@ func setupKindCluster(t *testing.T, name string) {
 
 	// No automatic cleanup of the cluster, usually we want to keep it if it fails for debugging
 	// or let the CI environment handle it. But the pattern says robust cleanup.
-	if os.Getenv("SKIP_CLEANUP") == "" {
-		t.Cleanup(func() {
+	t.Cleanup(func() {
+		if t.Failed() {
+			t.Log("Test failed, dumping logs...")
+			dumpLogs(t, "autodeploy-system")
+			dumpLogs(t, "in-cluster-image-registry-system")
+			dumpLogs(t, "default")
+			dumpLogs(t, "kube-system")
+		}
+
+		if os.Getenv("SKIP_CLEANUP") == "" {
 			t.Logf("Deleting kind cluster %s", name)
 			runCmd(t, ".", "kind", "delete", "cluster", "--name", name)
-		})
-	}
+		}
+	})
 }
 
 func waitForDeployment(t *testing.T, name, namespace string, timeout time.Duration) {

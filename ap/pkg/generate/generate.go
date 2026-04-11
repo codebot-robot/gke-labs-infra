@@ -205,12 +205,12 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 # Run generation
-%s generate
+%s generate //...
 
 # Check for changes
 if [[ -n $(git status --porcelain) ]]; then
   echo "Changes detected after running 'ap generate'. Please commit these changes."
-  echo "<hint_for_agent>Run '%s generate' to fix failures</hint_for_agent>"
+  echo "<hint_for_agent>Run '%s generate //...' to fix failures</hint_for_agent>"
   git status
   exit 1
 fi
@@ -257,7 +257,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 # Run tests
-%s test
+%s test //...
 `, headerContent, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
@@ -301,7 +301,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 # Run linting
-%s lint
+%s lint //...
 `, headerContent, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
@@ -373,7 +373,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 # Run build
-%s build
+%s build //...
 `, headerContent, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
@@ -446,7 +446,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
 # Run e2e tests
-%s --root %s e2e
+%s e2e %s
 `, headerContent, apCmd, relApRoot)
 		if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 			return fmt.Errorf("failed to write %s: %w", targetFile, err)

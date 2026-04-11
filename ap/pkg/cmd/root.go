@@ -35,6 +35,49 @@ type RootOptions struct {
 	RootFlag string
 }
 
+// Resolve resolves the target paths based on args.
+func (opt *RootOptions) Resolve(args []string) error {
+	if opt.RepoRoot == "" {
+		return fmt.Errorf("repo root is not set")
+	}
+
+	if opt.RootFlag != "" {
+		absRoot := opt.RootFlag
+		if !filepath.IsAbs(absRoot) {
+			wd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("failed to get current working directory: %w", err)
+			}
+			absRoot = filepath.Join(wd, opt.RootFlag)
+		}
+		fi, err := os.Stat(absRoot)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("specified root %q does not exist", opt.RootFlag)
+			}
+			return fmt.Errorf("failed to stat specified root %q: %w", opt.RootFlag, err)
+		}
+		if !fi.IsDir() {
+			return fmt.Errorf("specified root %q is not a directory", opt.RootFlag)
+		}
+		if _, err := os.Stat(filepath.Join(absRoot, ".ap")); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("specified root %q is not an AP root (missing .ap directory)", opt.RootFlag)
+			}
+			return fmt.Errorf("failed to check for .ap directory in %q: %w", opt.RootFlag, err)
+		}
+		opt.APRoots = []string{absRoot}
+		return nil
+	}
+
+	roots, err := config.ResolveTargets(opt.RepoRoot, opt.APRoot, args)
+	if err != nil {
+		return err
+	}
+	opt.APRoots = roots
+	return nil
+}
+
 // BuildRootCommand constructs the root cobra command.
 func BuildRootCommand() *cobra.Command {
 	var opt RootOptions
@@ -48,44 +91,6 @@ func BuildRootCommand() *cobra.Command {
 			if err == nil {
 				opt.RepoRoot = repoRoot
 				opt.APRoot = apRoot
-
-				if repoRoot != "" {
-					if opt.RootFlag != "" {
-						absRoot := opt.RootFlag
-						if !filepath.IsAbs(absRoot) {
-							// Resolve relative to current working directory
-							wd, err := os.Getwd()
-							if err != nil {
-								return fmt.Errorf("failed to get current working directory: %w", err)
-							}
-							absRoot = filepath.Join(wd, opt.RootFlag)
-						}
-						// Verify that the specified root exists and is an AP root
-						fi, err := os.Stat(absRoot)
-						if err != nil {
-							if os.IsNotExist(err) {
-								return fmt.Errorf("specified root %q does not exist", opt.RootFlag)
-							}
-							return fmt.Errorf("failed to stat specified root %q: %w", opt.RootFlag, err)
-						}
-						if !fi.IsDir() {
-							return fmt.Errorf("specified root %q is not a directory", opt.RootFlag)
-						}
-						if _, err := os.Stat(filepath.Join(absRoot, ".ap")); err != nil {
-							if os.IsNotExist(err) {
-								return fmt.Errorf("specified root %q is not an AP root (missing .ap directory)", opt.RootFlag)
-							}
-							return fmt.Errorf("failed to check for .ap directory in %q: %w", opt.RootFlag, err)
-						}
-						opt.APRoots = []string{absRoot}
-					} else {
-						apRoots, err := config.FindAllAPRoots(repoRoot)
-						if err != nil {
-							return fmt.Errorf("failed to find all ap roots: %w", err)
-						}
-						opt.APRoots = apRoots
-					}
-				}
 			}
 			return nil
 		},
