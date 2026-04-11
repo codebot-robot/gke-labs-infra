@@ -36,13 +36,7 @@ type mockRunner struct {
 	args     []string
 }
 
-func (m *mockRunner) RunAP(ctx context.Context, dir string, args ...string) error {
-	m.runCount++
-	m.args = args
-	return nil
-}
-
-func (m *mockRunner) DeployFlow(ctx context.Context, dir string, args ...string) error {
+func (m *mockRunner) DeployFlow(ctx context.Context, pkg *v1alpha1.Package, commit string, args ...string) error {
 	m.runCount++
 	m.args = args
 	return nil

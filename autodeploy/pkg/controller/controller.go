@@ -74,6 +74,7 @@ func (r *PackageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	runner := r.Runner
 	if runner == nil {
 		runner = &executor.APRunner{
+			Client:       r.Client,
 			ImagePrefix:  os.Getenv("IMAGE_PREFIX"),
 			ImageTag:     commit,
 			BuildkitHost: os.Getenv("BUILDKIT_HOST"),
@@ -93,22 +94,12 @@ func (r *PackageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if strat.ShouldDeploy(commit, branch, nil) {
 		klog.Infof("Triggering deployment for commit %s", commit)
 
-		tempDir, err := os.MkdirTemp("", "autodeploy-*")
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to create temp dir: %w", err)
-		}
-		defer os.RemoveAll(tempDir)
-
-		if err := monitor.Clone(ctx, branch, tempDir); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to clone repo: %w", err)
-		}
-
 		var args []string
 		if pkg.Spec.Directory != "" {
 			args = append(args, "--root="+pkg.Spec.Directory)
 		}
 
-		if err := runner.DeployFlow(ctx, tempDir, args...); err != nil {
+		if err := runner.DeployFlow(ctx, &pkg, commit, args...); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to run deploy flow: %w", err)
 		}
 
