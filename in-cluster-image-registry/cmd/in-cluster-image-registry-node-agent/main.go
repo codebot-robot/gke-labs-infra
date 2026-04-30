@@ -101,11 +101,18 @@ func updateContainerdConfig(path string) (bool, error) {
 
 	strContent := string(content)
 	lines := strings.Split(strContent, "\n")
+	version2 := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "config_path") && !strings.HasPrefix(trimmed, "#") {
 			if strings.Contains(trimmed, certsDPath) {
 				return false, nil
+			}
+		}
+		if strings.HasPrefix(trimmed, "version") && !strings.HasPrefix(trimmed, "#") {
+			parts := strings.SplitN(trimmed, "=", 2)
+			if len(parts) == 2 && strings.TrimSpace(parts[1]) == "2" {
+				version2 = true
 			}
 		}
 	}
@@ -115,7 +122,11 @@ func updateContainerdConfig(path string) (bool, error) {
 	if !strings.HasSuffix(newContent, "\n") {
 		newContent += "\n"
 	}
-	newContent += "\n[plugins.\"io.containerd.cri.v1.images\".registry]\n"
+	if version2 {
+		newContent += "\n[plugins.\"io.containerd.grpc.v1.cri\".registry]\n"
+	} else {
+		newContent += "\n[plugins.\"io.containerd.cri.v1.images\".registry]\n"
+	}
 	newContent += fmt.Sprintf("  config_path = %q\n", certsDPath)
 
 	klog.Infof("Updating %s to enable certs.d support", path)
