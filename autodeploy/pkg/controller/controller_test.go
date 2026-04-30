@@ -24,9 +24,12 @@ import (
 	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/apis/infra/v1alpha1"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -78,6 +81,9 @@ func TestReconcile(t *testing.T) {
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("failed to add scheme: %v", err)
 	}
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add clientgoscheme: %v", err)
+	}
 
 	pkg := &v1alpha1.Package{
 		ObjectMeta: metav1.ObjectMeta{
@@ -114,7 +120,7 @@ func TestReconcile(t *testing.T) {
 		t.Fatalf("Reconcile failed: %v", err)
 	}
 
-	// 5. Verify
+	// 5. Verify first reconcile triggered job
 	if runner.runCount != 1 {
 		t.Errorf("expected 1 ap run, got %d", runner.runCount)
 	}
@@ -122,8 +128,44 @@ func TestReconcile(t *testing.T) {
 		t.Errorf("expected [--root=testdir], got %v", runner.args)
 	}
 
-	// Verify status update
+	// Verify status is not yet updated
 	var updatedPkg v1alpha1.Package
+	if err := client.Get(ctx, req.NamespacedName, &updatedPkg); err != nil {
+		t.Fatalf("failed to get updated Package: %v", err)
+	}
+	if updatedPkg.Status.LastDeployedCommit == commitHash.String() {
+		t.Errorf("expected LastDeployedCommit to not be set yet")
+	}
+
+	// 6. Mock Job completion and reconcile again
+	jobName := "deploy-test-pkg-" + commitHash.String()
+	if len(jobName) > 63 {
+		jobName = jobName[:63]
+	}
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      jobName,
+			Namespace: "autodeploy-system",
+		},
+		Status: batchv1.JobStatus{
+			Conditions: []batchv1.JobCondition{
+				{
+					Type:   batchv1.JobComplete,
+					Status: corev1.ConditionTrue,
+				},
+			},
+		},
+	}
+	if err := client.Create(ctx, job); err != nil {
+		t.Fatalf("failed to create mock job: %v", err)
+	}
+
+	_, err = r.Reconcile(ctx, req)
+	if err != nil {
+		t.Fatalf("Second Reconcile failed: %v", err)
+	}
+
+	// Verify status update
 	if err := client.Get(ctx, req.NamespacedName, &updatedPkg); err != nil {
 		t.Fatalf("failed to get updated Package: %v", err)
 	}

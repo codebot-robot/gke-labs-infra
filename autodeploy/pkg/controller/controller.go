@@ -24,8 +24,11 @@ import (
 	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/executor"
 	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/git"
 	"github.com/gke-labs/gke-labs-infra/autodeploy/pkg/strategy"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -92,21 +95,53 @@ func (r *PackageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	if strat.ShouldDeploy(commit, branch, nil) {
-		klog.Infof("Triggering deployment for commit %s", commit)
+		jobName := executor.JobName(pkg.Name, commit)
+		var job batchv1.Job
+		err := r.Get(ctx, types.NamespacedName{Name: jobName, Namespace: "autodeploy-system"}, &job)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				klog.Infof("Triggering deployment for commit %s", commit)
+				var args []string
+				if pkg.Spec.Directory != "" {
+					args = append(args, "--root="+pkg.Spec.Directory)
+				}
 
-		var args []string
-		if pkg.Spec.Directory != "" {
-			args = append(args, "--root="+pkg.Spec.Directory)
+				if err := runner.DeployFlow(ctx, &pkg, commit, args...); err != nil {
+					return ctrl.Result{}, fmt.Errorf("failed to run deploy flow: %w", err)
+				}
+				return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+			}
+			return ctrl.Result{}, fmt.Errorf("failed to get job %s: %w", jobName, err)
 		}
 
-		if err := runner.DeployFlow(ctx, &pkg, commit, args...); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to run deploy flow: %w", err)
+		finished := false
+		success := false
+		for _, cond := range job.Status.Conditions {
+			if cond.Type == batchv1.JobComplete && cond.Status == corev1.ConditionTrue {
+				finished = true
+				success = true
+				break
+			}
+			if cond.Type == batchv1.JobFailed && cond.Status == corev1.ConditionTrue {
+				finished = true
+				success = false
+				break
+			}
 		}
 
-		// For now just update status to simulate success
-		pkg.Status.LastDeployedCommit = commit
-		if err := r.Status().Update(ctx, &pkg); err != nil {
-			return ctrl.Result{}, err
+		if !finished {
+			klog.V(4).Infof("Job %s is still running", jobName)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		}
+
+		if success {
+			klog.Infof("Job %s completed successfully", jobName)
+			pkg.Status.LastDeployedCommit = commit
+			if err := r.Status().Update(ctx, &pkg); err != nil {
+				return ctrl.Result{}, err
+			}
+		} else {
+			klog.Warningf("Job %s failed", jobName)
 		}
 	}
 

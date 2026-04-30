@@ -41,6 +41,15 @@ type APRunner struct {
 	BuildkitHost string
 }
 
+// JobName computes the name of the job for a given package and commit.
+func JobName(pkgName, commit string) string {
+	jobName := fmt.Sprintf("deploy-%s-%s", pkgName, commit)
+	if len(jobName) > 63 {
+		jobName = jobName[:63]
+	}
+	return jobName
+}
+
 // DeployFlow runs the full build-test-deploy flow by creating a Kubernetes Job.
 func (r *APRunner) DeployFlow(ctx context.Context, pkg *v1alpha1.Package, commit string, args ...string) error {
 	image := "images.local/ap-golang:latest"
@@ -53,10 +62,7 @@ func (r *APRunner) DeployFlow(ctx context.Context, pkg *v1alpha1.Package, commit
 		pkg.Spec.Repo, commit, argStr, argStr, argStr)
 
 	// Keep job name under 63 chars
-	jobName := fmt.Sprintf("deploy-%s-%s", pkg.Name, commit)
-	if len(jobName) > 63 {
-		jobName = jobName[:63]
-	}
+	jobName := JobName(pkg.Name, commit)
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
