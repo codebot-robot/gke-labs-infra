@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.26.2-trixie AS builder
+FROM golang:1.26.3-trixie AS builder
 
 WORKDIR /workspace
 COPY . .
@@ -20,7 +20,7 @@ COPY . .
 # Build autodeploy
 RUN go build -o /usr/local/bin/autodeploy .
 
-FROM golang:1.26.2-trixie
+FROM golang:1.26.3-trixie
 COPY --from=builder /usr/local/bin/autodeploy /usr/local/bin/autodeploy
 
 # autodeploy needs git to clone repos
