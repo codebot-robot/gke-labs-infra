@@ -186,23 +186,6 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 		}
 	}
 
-	// Validate against the expected copyright header format
-	regex, err := makeExpectedHeaderRegex(commentStyle, p.config.CopyrightHolder)
-	if err != nil {
-		return err
-	}
-
-	if regex.Match(content) {
-		return nil
-	}
-
-	log.Info("Updating or adding file header", "file", relPath)
-
-	header, err := GenerateHeader(p.config, commentStyle)
-	if err != nil {
-		return err
-	}
-
 	lines := strings.Split(string(content), "\n")
 
 	// Find the start index for comments (skipping shebang and empty lines)
@@ -242,9 +225,30 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 		}
 	}
 
+	joinedComments := ""
+	if len(commentLines) > 0 {
+		joinedComments = strings.Join(commentLines, "\n")
+	}
+
+	// Validate strictly against the contiguous leading comment block at the top of the file
+	regex, err := makeExpectedHeaderRegex(commentStyle, p.config.CopyrightHolder)
+	if err != nil {
+		return err
+	}
+
+	if regex.MatchString(joinedComments) {
+		return nil
+	}
+
+	log.Info("Updating or adding file header", "file", relPath)
+
+	header, err := GenerateHeader(p.config, commentStyle)
+	if err != nil {
+		return err
+	}
+
 	foundHeaderBlock := false
 	if len(commentLines) > 0 {
-		joinedComments := strings.Join(commentLines, "\n")
 		if strings.Contains(strings.ToLower(joinedComments), "copyright") {
 			foundHeaderBlock = true
 		}
