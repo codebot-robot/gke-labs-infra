@@ -47,10 +47,25 @@ func TestAutodeploy(t *testing.T) {
 	runCmd(t, repoRoot, "go", "run", "./ap", "deploy", "--root=autodeploy", "--skip-push")
 	runCmd(t, repoRoot, "go", "run", "./ap", "deploy", "--root=in-cluster-image-registry", "--skip-push")
 
-	// Load images into kind
+	// 1. Load only the node-agent image first so the DaemonSet can start.
+	// We wait for the DaemonSet to become ready and containerd to stabilize
+	// BEFORE loading other images, as node-agent updates the containerd config
+	// and restarts containerd, which would wipe or corrupt other loaded images.
+	runCmd(t, repoRoot, "kind", "load", "docker-image", fmt.Sprintf("%s/%s:%s", imagePrefix, "in-cluster-image-registry-node-agent", imageTag), "--name", clusterName)
+
+	// Wait for the DaemonSet to start up initially
+	waitForDaemonSet(t, "node-agent", "in-cluster-image-registry-system", 5*time.Minute)
+
+	// Wait for node-agent to modify config and restart containerd
+	t.Log("Waiting for containerd to restart and stabilize...")
+	time.Sleep(15 * time.Second)
+
+	// Wait for the DaemonSet to be ready again after containerd restarted
+	waitForDaemonSet(t, "node-agent", "in-cluster-image-registry-system", 5*time.Minute)
+
+	// 2. Load the remaining images now that containerd is stable and configured
 	imagesToLoad := []string{
 		"autodeploy-controller",
-		"in-cluster-image-registry-node-agent",
 		"ap-golang",
 	}
 	for _, img := range imagesToLoad {
@@ -61,11 +76,10 @@ func TestAutodeploy(t *testing.T) {
 		}
 	}
 
-	// Wait for components to be ready
+	// Wait for other components to be ready
 	waitForDeployment(t, "buildkit", "autodeploy-system", 5*time.Minute)
 	waitForDeployment(t, "autodeploy-controller", "autodeploy-system", 5*time.Minute)
 	waitForStatefulSet(t, "in-cluster-image-registry", "in-cluster-image-registry-system", 5*time.Minute)
-	waitForDaemonSet(t, "node-agent", "in-cluster-image-registry-system", 5*time.Minute)
 
 	// Grant cluster-admin to default service account in default namespace for the Job
 	// Removed clusterrolebinding since Job runs as autodeploy-controller now
