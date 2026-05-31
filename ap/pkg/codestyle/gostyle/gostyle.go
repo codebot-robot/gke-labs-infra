@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/cache"
@@ -59,27 +58,17 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 
 func runGofmt(ctx context.Context, repoRoot string, files []string, skip []string, cm *cache.Manager) error {
 	log := klog.FromContext(ctx)
+
+	ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
+	expandedFiles, err := walker.ExpandPaths(repoRoot, files, ignoreList)
+	if err != nil {
+		return err
+	}
+
 	var filesToFormat []string
-	if len(files) > 0 {
-		for _, f := range files {
-			if strings.HasSuffix(f, ".go") {
-				absPath := f
-				if !filepath.IsAbs(f) {
-					absPath = filepath.Join(repoRoot, f)
-				}
-				filesToFormat = append(filesToFormat, absPath)
-			}
-		}
-	} else {
-		fv := walker.NewFileView(repoRoot, append([]string{"vendor", ".git"}, skip...))
-		err := fv.Walk(func(f walker.File) error {
-			if strings.HasSuffix(f.Path, ".go") {
-				filesToFormat = append(filesToFormat, f.Path)
-			}
-			return nil
-		})
-		if err != nil {
-			return fmt.Errorf("error walking for go files: %w", err)
+	for _, f := range expandedFiles {
+		if strings.HasSuffix(f, ".go") {
+			filesToFormat = append(filesToFormat, f)
 		}
 	}
 

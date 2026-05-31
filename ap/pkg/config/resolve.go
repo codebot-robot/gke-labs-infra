@@ -50,6 +50,9 @@ func ResolveTargets(repoRoot, currentAPRoot string, args []string) ([]string, er
 				if err != nil {
 					return nil, fmt.Errorf("failed to find AP roots in %s: %w", currentAPRoot, err)
 				}
+				if len(resolved) == 0 {
+					resolved = []string{currentAPRoot}
+				}
 				// If the currentAPRoot itself is an AP root, FindAllAPRoots will include it
 				// because FindAllAPRoots includes the root if it has a .ap directory.
 			}
@@ -58,6 +61,9 @@ func ResolveTargets(repoRoot, currentAPRoot string, args []string) ([]string, er
 				resolved, err = FindAllAPRoots(repoRoot)
 				if err != nil {
 					return nil, fmt.Errorf("failed to find AP roots in %s: %w", repoRoot, err)
+				}
+				if len(resolved) == 0 {
+					resolved = []string{repoRoot}
 				}
 			}
 		case strings.HasPrefix(arg, "//"):
@@ -78,6 +84,9 @@ func ResolveTargets(repoRoot, currentAPRoot string, args []string) ([]string, er
 				if err != nil {
 					return nil, fmt.Errorf("failed to find AP roots in %s: %w", basePath, err)
 				}
+				if len(resolved) == 0 {
+					resolved = []string{basePath}
+				}
 			} else {
 				// Should we check if it's an AP root?
 				// Just add it and let the caller or discovery handle if it's invalid
@@ -96,6 +105,9 @@ func ResolveTargets(repoRoot, currentAPRoot string, args []string) ([]string, er
 				if err != nil {
 					return nil, fmt.Errorf("failed to find AP roots in %s: %w", basePath, err)
 				}
+				if len(resolved) == 0 {
+					resolved = []string{basePath}
+				}
 			} else {
 				resolved = []string{path}
 			}
@@ -111,6 +123,9 @@ func ResolveTargets(repoRoot, currentAPRoot string, args []string) ([]string, er
 				resolved, err = FindAllAPRoots(basePath)
 				if err != nil {
 					return nil, fmt.Errorf("failed to find AP roots in %s: %w", basePath, err)
+				}
+				if len(resolved) == 0 {
+					resolved = []string{basePath}
 				}
 			} else {
 				resolved = []string{path}
