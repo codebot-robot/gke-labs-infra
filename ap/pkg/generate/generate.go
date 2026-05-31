@@ -532,7 +532,7 @@ jobs:
 				relGoMod, _ := filepath.Rel(repoRoot, filepath.Join(apRoot, "go.mod"))
 				sb.WriteString(fmt.Sprintf(`
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: '%s'
 `, relGoMod))
