@@ -18,61 +18,61 @@ updates:
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     open-pull-requests-limit: 10
 
   - package-ecosystem: "gomod"
     directory: "/autodeploy"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     open-pull-requests-limit: 10
 
   - package-ecosystem: "gomod"
     directory: "/autodeploy/examples/helloworld"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     open-pull-requests-limit: 10
 
   - package-ecosystem: "gomod"
     directory: "/in-cluster-image-registry"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     open-pull-requests-limit: 10
 
   - package-ecosystem: "gomod"
     directory: "/ktesting"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     open-pull-requests-limit: 10
 
   # Docker base images
   - package-ecosystem: "docker"
     directory: "/ap/images/ap-golang"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     open-pull-requests-limit: 10
 
   - package-ecosystem: "docker"
     directory: "/autodeploy/images/autodeploy-controller"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     open-pull-requests-limit: 10
 
   - package-ecosystem: "docker"
     directory: "/autodeploy/examples/helloworld/images/examples-helloworld"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     open-pull-requests-limit: 10
 
   - package-ecosystem: "docker"
     directory: "/in-cluster-image-registry/images/in-cluster-image-registry-node-agent"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     open-pull-requests-limit: 10
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "daily"
     open-pull-requests-limit: 10
