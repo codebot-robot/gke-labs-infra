@@ -70,9 +70,10 @@ func (r *APRunner) DeployFlow(ctx context.Context, pkg *v1alpha1.Package, commit
 					ServiceAccountName: "autodeploy-controller",
 					Containers: []corev1.Container{
 						{
-							Name:    "ap",
-							Image:   image,
-							Command: []string{"sh", "-c", script},
+							Name:            "ap",
+							Image:           image,
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Command:         []string{"sh", "-c", script},
 							Env: []corev1.EnvVar{
 								{Name: "IMAGE_PREFIX", Value: r.ImagePrefix},
 								{Name: "IMAGE_TAG", Value: r.ImageTag},
