@@ -15,7 +15,6 @@
 package fileheaders
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -124,6 +123,29 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 	return errors.Join(errs...)
 }
 
+func makeExpectedHeaderRegex(style string, copyrightHolder string) (*regexp.Regexp, error) {
+	s := regexp.QuoteMeta(style)
+	holder := regexp.QuoteMeta(copyrightHolder)
+
+	var patternParts []string
+	patternParts = append(patternParts, s+`\s+Copyright\s+[0-9,\s-]+\s+`+holder)
+	patternParts = append(patternParts, s)
+	patternParts = append(patternParts, s+`\s+Licensed under the Apache License, Version 2.0 \(the "License"\);`)
+	patternParts = append(patternParts, s+`\s+[yY]ou may not use this file except in compliance with the License\.`)
+	patternParts = append(patternParts, s+`\s+[yY]ou may obtain a copy of the License at`)
+	patternParts = append(patternParts, s)
+	patternParts = append(patternParts, s+`\s+http://www\.apache\.org/licenses/LICENSE-2.0`)
+	patternParts = append(patternParts, s)
+	patternParts = append(patternParts, s+`\s+Unless required by applicable law or agreed to in writing, software`)
+	patternParts = append(patternParts, s+`\s+distributed under the License is distributed on an "AS IS" BASIS,`)
+	patternParts = append(patternParts, s+`\s+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied\.`)
+	patternParts = append(patternParts, s+`\s+See the License for the specific language governing permissions and`)
+	patternParts = append(patternParts, s+`\s+limitations under the License\.`)
+
+	pattern := `(?m)^\s*` + strings.Join(patternParts, `\s*(?:\r?\n)\s*`) + `\s*$`
+	return regexp.Compile(pattern)
+}
+
 func (p *processor) processFile(ctx context.Context, absPath, relPath string) error {
 	log := klog.FromContext(ctx)
 
@@ -155,11 +177,6 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 		}
 	}
 
-	expectedCopyright := commentStyle + " Copyright"
-	if bytes.Contains(checkBuf, []byte(expectedCopyright)) {
-		return nil
-	}
-
 	// Check for K8s style block headers in Go files
 	if ext == ".go" {
 		// Look for /* ... Copyright ... */ pattern
@@ -169,28 +186,87 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 		}
 	}
 
-	log.Info("Adding file header", "file", relPath)
+	// Validate against the expected copyright header format
+	regex, err := makeExpectedHeaderRegex(commentStyle, p.config.CopyrightHolder)
+	if err != nil {
+		return err
+	}
+
+	if regex.Match(content) {
+		return nil
+	}
+
+	log.Info("Updating or adding file header", "file", relPath)
 
 	header, err := GenerateHeader(p.config, commentStyle)
 	if err != nil {
 		return err
 	}
+
 	lines := strings.Split(string(content), "\n")
-	var newLines []string
 
-	hasShebang := len(lines) > 0 && strings.HasPrefix(lines[0], "#!")
-
-	if hasShebang {
-		newLines = append(newLines, lines[0])
-		newLines = append(newLines, "")
-		newLines = append(newLines, header)
-		if len(lines) > 1 {
-			newLines = append(newLines, lines[1:]...)
-		}
-	} else {
-		newLines = append(newLines, header)
-		newLines = append(newLines, lines...)
+	// Find the start index for comments (skipping shebang and empty lines)
+	startIdx := 0
+	if len(lines) > 0 && strings.HasPrefix(lines[0], "#!") {
+		startIdx = 1
 	}
+	for startIdx < len(lines) && strings.TrimSpace(lines[startIdx]) == "" {
+		startIdx++
+	}
+
+	// Now locate a potential copyright header block starting from startIdx
+	var commentLines []string
+	headerStartIdx := -1
+	headerEndIdx := -1
+
+	for i := startIdx; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if len(commentLines) > 0 {
+				break
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, commentStyle) {
+			if len(commentLines) == 0 {
+				headerStartIdx = i
+			}
+			commentLines = append(commentLines, line)
+			headerEndIdx = i + 1
+		} else {
+			if len(commentLines) > 0 {
+				break
+			}
+			break
+		}
+	}
+
+	foundHeaderBlock := false
+	if len(commentLines) > 0 {
+		joinedComments := strings.Join(commentLines, "\n")
+		if strings.Contains(strings.ToLower(joinedComments), "copyright") {
+			foundHeaderBlock = true
+		}
+	}
+
+	if !foundHeaderBlock {
+		headerStartIdx = startIdx
+		headerEndIdx = startIdx
+	} else {
+		// Replace the invalid copyright header block.
+		// If there is an empty line immediately following the old header, skip it
+		// because the generated header already ends with a trailing newline (blank line).
+		if headerEndIdx < len(lines) && strings.TrimSpace(lines[headerEndIdx]) == "" {
+			headerEndIdx++
+		}
+	}
+
+	var newLines []string
+	newLines = append(newLines, lines[:headerStartIdx]...)
+	headerLines := strings.Split(header, "\n")
+	newLines = append(newLines, headerLines...)
+	newLines = append(newLines, lines[headerEndIdx:]...)
 
 	output := strings.Join(newLines, "\n")
 	return os.WriteFile(absPath, []byte(output), 0644)

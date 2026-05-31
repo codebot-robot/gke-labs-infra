@@ -157,23 +157,23 @@ copyrightHolder: Google LLC
 	// Create a go file with K8s style header
 	targetFile := filepath.Join(tmpDir, "k8s.go")
 	fileContent := `/*
-Copyright 2018 The Kubernetes Authors.
+	Copyright 2018 The Kubernetes Authors.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+	Licensed under the Apache License, Version 2.0 (the "License");
+	you may not use this file except in compliance with the License.
+	You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+	Unless required by applicable law or agreed to in writing, software
+	distributed under the License is distributed on an "AS IS" BASIS,
+	WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+	See the License for the specific language governing permissions and
+	limitations under the License.
+	*/
 
-package main
-`
+	package main
+	`
 	if err := os.WriteFile(targetFile, []byte(fileContent), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -191,5 +191,129 @@ package main
 	}
 	if string(content) != fileContent {
 		t.Errorf("File was modified but should have been skipped. Content:\n%s", string(content))
+	}
+}
+
+func TestRun_FixCorruptedHeader(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create config
+	configDir := filepath.Join(tmpDir, ".ap")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configFile := filepath.Join(configDir, "headers.yaml")
+	configContent := `license: apache-2.0
+copyrightHolder: Google LLC
+`
+	if err := os.WriteFile(configFile, []byte(configContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name        string
+		filename    string
+		initContent string
+	}{
+		{
+			name:     "corrupted url",
+			filename: "corrupted_url.go",
+			initContent: `// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.01
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+func main() {}
+`,
+		},
+		{
+			name:     "spelling error in license name",
+			filename: "spelling_error.go",
+			initContent: `// Copyright 2026 Google LLC
+//
+// Licensed under the Apashe License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+func main() {}
+`,
+		},
+		{
+			name:     "missing a license line",
+			filename: "missing_line.go",
+			initContent: `// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+func main() {}
+`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			targetFile := filepath.Join(tmpDir, tc.filename)
+			if err := os.WriteFile(targetFile, []byte(tc.initContent), 0644); err != nil {
+				t.Fatal(err)
+			}
+
+			// Run fileheaders
+			ctx := t.Context()
+			if err := Run(ctx, tmpDir, []string{targetFile}); err != nil {
+				t.Fatalf("Run failed: %v", err)
+			}
+
+			// Verify file was modified to have the correct header
+			content, err := os.ReadFile(targetFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			contentStr := string(content)
+			if !strings.Contains(contentStr, "Apache License, Version 2.0") {
+				t.Errorf("File did not contain valid Apache license header. Content:\n%s", contentStr)
+			}
+			if strings.Contains(contentStr, "http://www.apache.org/licenses/LICENSE-2.01") {
+				t.Errorf("File still contained corrupted URL. Content:\n%s", contentStr)
+			}
+			if strings.Contains(contentStr, "Apashe") {
+				t.Errorf("File still contained spelling error 'Apashe'. Content:\n%s", contentStr)
+			}
+			if !strings.Contains(contentStr, "package main") {
+				t.Errorf("File code (package main) was lost! Content:\n%s", contentStr)
+			}
+		})
 	}
 }
