@@ -16,9 +16,8 @@ package cmd
 
 import (
 	"context"
-	"fmt"
-	"path/filepath"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -35,10 +34,10 @@ func BuildFormatCommand(rootOpt *RootOptions) *cobra.Command {
 	}
 
 	cmd := &cobra.Command{
-		Use:     "format",
+		Use:     "format [path...]",
 		Aliases: []string{"fmt"},
 		Short:   "Run formatting tasks",
-		Args:    cobra.NoArgs,
+		Args:    cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := opt.Resolve(args); err != nil {
 				return err
@@ -56,20 +55,14 @@ func RunFormat(ctx context.Context, opt FormatOptions) error {
 		return err
 	}
 
-	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots)
+	t, err := format.FormatTasks(opt.RepoRoot, opt.APRoots...)
 	if err != nil {
 		return err
 	}
 
 	var allTasks []tasks.Task
-	for _, scope := range scopes {
-		if len(scope.FormatTasks) > 0 {
-			group := &tasks.Group{
-				Name:  fmt.Sprintf("format-%s", filepath.Base(scope.Dir)),
-				Tasks: scope.FormatTasks,
-			}
-			allTasks = append(allTasks, group)
-		}
+	if t != nil {
+		allTasks = append(allTasks, t)
 	}
 
 	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})

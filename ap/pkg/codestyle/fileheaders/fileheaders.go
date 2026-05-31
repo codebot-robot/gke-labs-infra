@@ -85,40 +85,22 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 		ignoreList: ignoreList,
 	}
 
-	if len(files) == 0 {
-		fv := walker.NewFileView(repoRoot, allIgnores)
-		err := fv.Walk(func(f walker.File) error {
-			// f.RelPath is already relative to repoRoot
-			if err := processor.processFile(ctx, f.Path, f.RelPath); err != nil {
-				log.Error(err, "Error processing file", "file", f.RelPath)
-				// We don't abort walk on individual file error usually, but Walk signature expects error.
-				// We should collect errors.
-				errs = append(errs, fmt.Errorf("error processing %s: %w", f.RelPath, err))
-			}
-			return nil
-		})
+	expandedFiles, err := walker.ExpandPaths(repoRoot, files, ignoreList)
+	if err != nil {
+		return err
+	}
+
+	for _, absPath := range expandedFiles {
+		relPath, err := filepath.Rel(repoRoot, absPath)
 		if err != nil {
-			return fmt.Errorf("error walking directory: %w", err)
+			log.Error(err, "Skipping file outside repo root", "file", absPath)
+			errs = append(errs, fmt.Errorf("skipping file outside repo root %s: %w", absPath, err))
+			continue
 		}
-	} else {
-		// Ensure we use absolute paths for IO, but relative paths for ignore checks.
-		for _, file := range files {
-			absPath := file
-			if !filepath.IsAbs(file) {
-				absPath = filepath.Join(repoRoot, file)
-			}
 
-			relPath, err := filepath.Rel(repoRoot, absPath)
-			if err != nil {
-				log.Error(err, "Skipping file outside repo root", "file", file)
-				errs = append(errs, fmt.Errorf("skipping file outside repo root %s: %w", file, err))
-				continue
-			}
-
-			if err := processor.processFile(ctx, absPath, relPath); err != nil {
-				log.Error(err, "Error processing file", "file", file)
-				errs = append(errs, fmt.Errorf("error processing %s: %w", file, err))
-			}
+		if err := processor.processFile(ctx, absPath, relPath); err != nil {
+			log.Error(err, "Error processing file", "file", absPath)
+			errs = append(errs, fmt.Errorf("error processing %s: %w", absPath, err))
 		}
 	}
 	return errors.Join(errs...)
