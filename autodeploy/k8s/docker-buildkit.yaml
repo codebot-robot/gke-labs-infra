@@ -37,6 +37,25 @@ spec:
         - containerPort: 2375
         securityContext:
           privileged: true
+        volumeMounts:
+        - name: buildkit-state
+          mountPath: /var/lib/buildkit
+      volumes:
+      - name: buildkit-state
+        persistentVolumeClaim:
+          claimName: buildkit-state
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: buildkit-state
+  namespace: autodeploy-system
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
 ---
 apiVersion: v1
 kind: Service
