@@ -47,6 +47,7 @@ type LintConfig struct {
 	TestContext                  *TestContextConfig                  `json:"testcontext"`
 	UnusedParameters             *UnusedParametersConfig             `json:"unusedparameters"`
 	ReplaceEmptyInterfaceWithAny *ReplaceEmptyInterfaceWithAnyConfig `json:"replaceEmptyInterfaceWithAny"`
+	GoConst                      *GoConstConfig                      `json:"goconst"`
 }
 
 type UnusedConfig struct {
@@ -54,6 +55,10 @@ type UnusedConfig struct {
 }
 
 type ReplaceEmptyInterfaceWithAnyConfig struct {
+	Enabled *bool `json:"enabled"`
+}
+
+type GoConstConfig struct {
 	Enabled *bool `json:"enabled"`
 }
 
@@ -148,6 +153,14 @@ func (c *Config) IsTestContextError() bool {
 func (c *Config) IsReplaceEmptyInterfaceWithAnyEnabled() bool {
 	if c.Lint != nil && c.Lint.ReplaceEmptyInterfaceWithAny != nil && c.Lint.ReplaceEmptyInterfaceWithAny.Enabled != nil {
 		return *c.Lint.ReplaceEmptyInterfaceWithAny.Enabled
+	}
+	return true
+}
+
+// IsGoConstEnabled returns true if the goconst linter is enabled in the config (defaulting to true).
+func (c *Config) IsGoConstEnabled() bool {
+	if c.Lint != nil && c.Lint.GoConst != nil && c.Lint.GoConst.Enabled != nil {
+		return *c.Lint.GoConst.Enabled
 	}
 	return true
 }

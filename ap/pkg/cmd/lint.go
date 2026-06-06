@@ -49,6 +49,7 @@ func BuildLintCommand(rootOpt *RootOptions) *cobra.Command {
 	cmd.AddCommand(BuildUnusedCommand())
 	cmd.AddCommand(BuildTestContextCommand())
 	cmd.AddCommand(BuildReplaceEmptyInterfaceWithAnyCommand())
+	cmd.AddCommand(BuildGoConstCommand())
 
 	return cmd
 }
