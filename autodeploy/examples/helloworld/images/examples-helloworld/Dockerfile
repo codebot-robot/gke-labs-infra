@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Copyright 2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,7 +19,9 @@ WORKDIR /workspace
 COPY . .
 
 # Build helloworld
-RUN go build -o /usr/local/bin/helloworld .
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -o /usr/local/bin/helloworld .
 
 FROM golang:1.26.3-trixie
 COPY --from=builder /usr/local/bin/helloworld /usr/local/bin/helloworld

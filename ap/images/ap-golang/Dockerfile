@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Copyright 2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,7 +17,9 @@ FROM golang:1.26.3-trixie AS builder
 
 WORKDIR /workspace
 COPY . .
-RUN go build -o /usr/local/bin/ap ./ap
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    go build -o /usr/local/bin/ap ./ap
 
 FROM golang:1.26.3-trixie
 COPY --from=builder /usr/local/bin/ap /usr/local/bin/ap
