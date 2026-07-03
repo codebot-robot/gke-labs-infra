@@ -100,7 +100,8 @@ func fetchLatestGoVersion(ctx context.Context) (string, error) {
 }
 
 var (
-	goModRegex = regexp.MustCompile(`(?m)^go\s+(\d+\.\d+(?:\.\d+)?)$`)
+	goModRegex     = regexp.MustCompile(`(?m)^go\s+(\d+\.\d+(?:\.\d+)?)$`)
+	toolchainRegex = regexp.MustCompile(`(?m)^toolchain\s+go\d+\.\d+(?:\.\d+)?$`)
 	// In Dockerfiles, look for images like golang:1.26.1-trixie, golang:1.26-trixie, golang:1.26.1-bookworm, golang:1.26-bookworm
 	dockerfileRegex = regexp.MustCompile(`golang:(\d+\.\d+(?:\.\d+)?)(-[a-z0-9]+)?`)
 )
@@ -127,7 +128,14 @@ func bumpContent(filename string, content []byte, version string) ([]byte, bool)
 	changed := false
 	if filename == "go.mod" {
 		if goModRegex.Match(content) {
-			newContent = goModRegex.ReplaceAllString(newContent, "go "+version)
+			goVersion := getGoDirectiveVersion(version)
+			newContent = goModRegex.ReplaceAllString(newContent, "go "+goVersion)
+			if toolchainRegex.MatchString(newContent) {
+				newContent = toolchainRegex.ReplaceAllString(newContent, "toolchain go"+version)
+			} else {
+				targetGoLine := "go " + goVersion
+				newContent = strings.Replace(newContent, targetGoLine, targetGoLine+"\n\ntoolchain go"+version, 1)
+			}
 			changed = newContent != string(content)
 		}
 	} else if strings.Contains(filename, "Dockerfile") {
@@ -142,4 +150,18 @@ func bumpContent(filename string, content []byte, version string) ([]byte, bool)
 	}
 
 	return []byte(newContent), changed
+}
+
+func getGoDirectiveVersion(version string) string {
+	parts := strings.Split(version, ".")
+	if len(parts) == 3 {
+		var patch int
+		if _, err := fmt.Sscanf(parts[2], "%d", &patch); err == nil {
+			if patch > 0 {
+				return fmt.Sprintf("%s.%s.%d", parts[0], parts[1], patch-1)
+			}
+		}
+		return fmt.Sprintf("%s.%s", parts[0], parts[1])
+	}
+	return version
 }
