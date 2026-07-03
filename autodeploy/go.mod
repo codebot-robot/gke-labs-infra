@@ -2,6 +2,8 @@ module github.com/gke-labs/gke-labs-infra/autodeploy
 
 go 1.26.3
 
+toolchain go1.26.4
+
 require (
 	github.com/go-git/go-git/v5 v5.19.1
 	k8s.io/api v0.36.1
