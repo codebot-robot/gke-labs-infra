@@ -525,7 +525,7 @@ jobs:
       ARTIFACTS: /tmp/artifacts
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 `, jobName))
 
 			if goModExists {
