@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -56,9 +57,16 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.APScope) error {
 		return fmt.Errorf("failed to start port-forward: %w", err)
 	}
 
+	var hasProxy bool
 	defer func() {
 		if pfCmd.Process != nil {
 			pfCmd.Process.Kill()
+		}
+		if hasProxy {
+			klog.Infof("Stopping docker registry proxy container...")
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			exec.CommandContext(cleanupCtx, "docker", "rm", "-f", "ap-registry-proxy").Run()
 		}
 	}()
 
@@ -83,6 +91,27 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.APScope) error {
 			klog.Errorf("kubectl port-forward stderr: %s", stderr.String())
 		}
 		return fmt.Errorf("port-forward did not become ready")
+	}
+
+	if runtime.GOOS == "darwin" && t.LocalPort == 5000 {
+		if _, err := exec.LookPath("docker"); err == nil {
+			klog.Infof("macOS detected with port 5000, starting docker registry proxy container...")
+			// Clean up any existing proxy container
+			exec.CommandContext(ctx, "docker", "rm", "-f", "ap-registry-proxy").Run()
+
+			// Start the proxy container using alpine/socat
+			proxyCmd := exec.CommandContext(ctx, "docker", "run", "-d",
+				"--name", "ap-registry-proxy",
+				"-p", "127.0.0.1:5000:5000",
+				"alpine/socat",
+				"TCP-LISTEN:5000,fork,reuseaddr", "TCP:host.docker.internal:5000")
+			if err := proxyCmd.Run(); err != nil {
+				klog.Warningf("Failed to start docker registry proxy: %v. docker push might fail.", err)
+			} else {
+				hasProxy = true
+				klog.Infof("Docker registry proxy container started successfully.")
+			}
+		}
 	}
 
 	klog.Infof("Port-forward ready, running child task %s", t.Child.GetName())
