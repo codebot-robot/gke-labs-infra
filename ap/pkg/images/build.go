@@ -29,6 +29,8 @@ import (
 	"k8s.io/klog/v2"
 )
 
+var execCommandContext = exec.CommandContext
+
 // DockerBuildTask represents a task to build a single docker image.
 type DockerBuildTask struct {
 	ImageName    string
@@ -44,6 +46,12 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 		return err
 	}
 	imagePrefix := cfg.ImageRepo()
+
+	imagesCfg, err := config.LoadImagesConfig(scope.RepoRoot)
+	if err != nil {
+		return err
+	}
+	platforms := imagesCfg.GetPlatforms()
 
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
@@ -71,12 +79,70 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	}
 
 	if t.BuildkitHost != "" {
-		return t.runBuildctl(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix)
+		return t.runBuildctl(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix, platforms)
 	}
-	return t.runDocker(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix)
+
+	// If we are pushing and have requested multiple platforms, but the current Docker driver
+	// doesn't support multi-platform builds (e.g., standard default docker driver), we first
+	// attempt to use or create a multi-platform capable buildx builder (ap-builder).
+	// If it still cannot support multi-platform builds, we treat this as an error and provide hints.
+	// If we are building locally without pushing, we fall back to the host's native platform
+	// so local developer builds don't fail due to repository-wide multi-platform settings.
+	if t.Push && len(platforms) > 1 {
+		if !t.supportsMultiPlatform(ctx) {
+			_ = t.ensureMultiPlatformBuilder(ctx)
+		}
+		if !t.supportsMultiPlatform(ctx) {
+			return fmt.Errorf("multi-platform build (platforms: %v) is not supported for the default docker driver. "+
+				"To build for multiple platforms, please switch to a different driver (e.g., docker-container, kubernetes) "+
+				"by running 'docker buildx create --use', or configure a single platform in '.ap/images.yaml'", platforms)
+		}
+	} else if !t.Push && len(platforms) > 1 {
+		klog.Infof("Building locally without pushing; falling back to native platform")
+		platforms = nil
+	}
+
+	return t.runDocker(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix, platforms)
 }
 
-func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, relDockerfilePath, imagePrefix string) error {
+func (t *DockerBuildTask) ensureMultiPlatformBuilder(ctx context.Context) error {
+	if t.supportsMultiPlatform(ctx) {
+		return nil
+	}
+	// Try to use existing ap-builder
+	useCmd := execCommandContext(ctx, "docker", "buildx", "use", "ap-builder")
+	if err := useCmd.Run(); err == nil && t.supportsMultiPlatform(ctx) {
+		return nil
+	}
+	// Create new ap-builder with docker-container driver and host networking
+	createCmd := execCommandContext(ctx, "docker", "buildx", "create", "--name", "ap-builder", "--driver", "docker-container", "--driver-opt", "network=host", "--use")
+	if err := createCmd.Run(); err == nil && t.supportsMultiPlatform(ctx) {
+		return nil
+	}
+	return nil
+}
+
+func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context) bool {
+	cmd := execCommandContext(ctx, "docker", "buildx", "inspect")
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	// Parse the output to check the driver
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToLower(line), "driver:") {
+			val := strings.TrimSpace(line[7:])
+			if strings.ToLower(val) == "docker" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, relDockerfilePath, imagePrefix string, platforms []string) error {
 	klog.Infof("Building image %s from %s using buildctl", fullImageName, root)
 
 	buildctlImageName := fullImageName
@@ -109,6 +175,10 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 		"--output", output,
 	}
 
+	if len(platforms) > 0 {
+		buildctlArgs = append(buildctlArgs, "--opt", "platform="+strings.Join(platforms, ","))
+	}
+
 	if host, ok := strings.CutPrefix(t.BuildkitHost, "k8s://"); ok {
 		// handle port forward
 		parts := strings.Split(host, "/")
@@ -121,7 +191,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 			Child: &tasks.DummyTask{
 				Name: "run-buildctl",
 				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
-					cmd := exec.CommandContext(ctx, "buildctl", buildctlArgs...)
+					cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 					cmd.Dir = root
 					cmd.Stdout = os.Stdout
 					cmd.Stderr = os.Stderr
@@ -137,7 +207,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 		return pfTask.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
 	}
 
-	cmd := exec.CommandContext(ctx, "buildctl", buildctlArgs...)
+	cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 	cmd.Dir = root
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -148,8 +218,8 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 	return nil
 }
 
-func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, relDockerfilePath, imagePrefix string) error {
-	klog.Infof("Building image %s from %s using docker", fullImageName, root)
+func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, relDockerfilePath, imagePrefix string, platforms []string) error {
+	klog.Infof("Building image %s from %s using docker buildx", fullImageName, root)
 
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
@@ -157,15 +227,30 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, re
 	}
 
 	args := []string{
-		"build",
+		"buildx", "build",
 		"-t", fullImageName,
 		"-f", relDockerfilePath,
 		"--build-arg", "IMAGE_PREFIX=" + imagePrefix,
 		"--build-arg", "IMAGE_TAG=" + tag,
-		".",
 	}
 
-	cmd := exec.CommandContext(ctx, "docker", args...)
+	if t.Push {
+		args = append(args, "--push")
+		if len(platforms) > 0 {
+			args = append(args, "--platform", strings.Join(platforms, ","))
+		}
+	} else {
+		// When building locally without pushing, use --load to load the built image
+		// into the local Docker daemon image store. Multi-platform is not supported with --load
+		// because the daemon image store cannot hold images for different platforms.
+		args = append(args, "--load")
+		if len(platforms) == 1 {
+			args = append(args, "--platform", platforms[0])
+		}
+	}
+	args = append(args, ".")
+
+	cmd := execCommandContext(ctx, "docker", args...)
 	cmd.Dir = root
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -173,16 +258,6 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, re
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
 	}
 
-	if t.Push {
-		klog.Infof("Pushing image %s", fullImageName)
-		pushCmd := exec.CommandContext(ctx, "docker", "push", fullImageName)
-		pushCmd.Dir = root
-		pushCmd.Stdout = os.Stdout
-		pushCmd.Stderr = os.Stderr
-		if err := pushCmd.Run(); err != nil {
-			return fmt.Errorf("docker push failed for %s: %w", t.ImageName, err)
-		}
-	}
 	return nil
 }
 
