@@ -15,8 +15,12 @@
 package images
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -130,5 +134,163 @@ func TestBuildTasks(t *testing.T) {
 
 	if !found {
 		t.Errorf("did not find DockerBuildTask for foo")
+	}
+}
+
+func TestDockerBuildTask_Platforms(t *testing.T) {
+	// 1. Setup temporary workspace
+	tmpDir, err := os.MkdirTemp("", "ap-platforms-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	apDir := filepath.Join(tmpDir, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Mock execCommandContext
+	var capturedArgs []string
+	var capturedName string
+	origExec := execCommandContext
+	defer func() { execCommandContext = origExec }()
+
+	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if name == "docker" && len(args) > 1 && args[0] == "buildx" && args[1] == "inspect" {
+			// Mock 'docker buildx inspect' to simulate support for multi-platform (e.g. docker-container driver)
+			return exec.CommandContext(ctx, "echo", "Driver: docker-container")
+		}
+		capturedName = name
+		capturedArgs = args
+		// Return a command that always succeeds (e.g. echo)
+		return exec.CommandContext(ctx, "echo", "mocked")
+	}
+
+	// 3. Test case A: Push is true, no images.yaml configured -> should buildx multi-platform
+	task := &DockerBuildTask{
+		ImageName:  "test-img",
+		Dockerfile: "images/test-img/Dockerfile",
+		Root:       tmpDir,
+		Push:       true,
+	}
+
+	scope := &tasks.APScope{
+		RepoRoot: tmpDir,
+		Dir:      tmpDir,
+	}
+
+	if err := task.Run(t.Context(), scope); err != nil {
+		t.Fatalf("unexpected error running task: %v", err)
+	}
+
+	if capturedName != "docker" {
+		t.Errorf("expected docker command, got %s", capturedName)
+	}
+
+	// Check for buildx, --platform, linux/amd64,linux/arm64, and --push
+	argsStr := strings.Join(capturedArgs, " ")
+	if !strings.Contains(argsStr, "buildx build") {
+		t.Errorf("expected 'buildx build' in args, got: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "--platform linux/amd64,linux/arm64") {
+		t.Errorf("expected '--platform linux/amd64,linux/arm64' in args, got: %s", argsStr)
+	}
+	if !strings.Contains(argsStr, "--push") {
+		t.Errorf("expected '--push' in args, got: %s", argsStr)
+	}
+
+	// 4. Test case B: Push is false, no images.yaml configured -> should use standard docker build, no platform (since there are multiple)
+	task.Push = false
+	capturedArgs = nil
+	capturedName = ""
+
+	if err := task.Run(t.Context(), scope); err != nil {
+		t.Fatalf("unexpected error running task: %v", err)
+	}
+
+	if capturedName != "docker" {
+		t.Errorf("expected docker command, got %s", capturedName)
+	}
+
+	argsStr = strings.Join(capturedArgs, " ")
+	if !strings.Contains(argsStr, "build") || strings.Contains(argsStr, "buildx") {
+		t.Errorf("expected standard 'build' (no buildx) in args, got: %s", argsStr)
+	}
+	if strings.Contains(argsStr, "--platform") {
+		t.Errorf("expected NO '--platform' when Push is false and multiple platforms are configured, got: %s", argsStr)
+	}
+
+	// 5. Test case C: Push is false, images.yaml has single platform -> should use standard docker build with --platform
+	apYamlContent := `
+platforms:
+  - amd64
+`
+	if err := os.WriteFile(filepath.Join(apDir, "images.yaml"), []byte(apYamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	capturedArgs = nil
+	capturedName = ""
+
+	if err := task.Run(t.Context(), scope); err != nil {
+		t.Fatalf("unexpected error running task: %v", err)
+	}
+
+	argsStr = strings.Join(capturedArgs, " ")
+	if !strings.Contains(argsStr, "--platform linux/amd64") {
+		t.Errorf("expected '--platform linux/amd64' when single platform is configured, got: %s", argsStr)
+	}
+
+	// 6. Test case D: buildctl host configured -> should use buildctl with --opt platform=
+	task.BuildkitHost = "127.0.0.1:1234"
+	capturedArgs = nil
+	capturedName = ""
+
+	if err := task.Run(t.Context(), scope); err != nil {
+		t.Fatalf("unexpected error running task: %v", err)
+	}
+
+	if capturedName != "buildctl" {
+		t.Errorf("expected buildctl command, got %s", capturedName)
+	}
+
+	argsStr = strings.Join(capturedArgs, " ")
+	if !strings.Contains(argsStr, "--opt platform=linux/amd64") {
+		t.Errorf("expected '--opt platform=linux/amd64' in buildctl args, got: %s", argsStr)
+	}
+
+	// 7. Test case E: Multi-platform NOT supported by default docker driver
+	// Re-mock inspect to return 'Driver: docker'
+	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if name == "docker" && len(args) > 1 && args[0] == "buildx" && args[1] == "inspect" {
+			return exec.CommandContext(ctx, "echo", "Driver: docker")
+		}
+		capturedName = name
+		capturedArgs = args
+		return exec.CommandContext(ctx, "echo", "mocked")
+	}
+
+	// Remove images.yaml to fall back to defaults (which has 2 platforms)
+	if err := os.Remove(filepath.Join(apDir, "images.yaml")); err != nil {
+		t.Fatal(err)
+	}
+
+	task.Push = true
+	task.BuildkitHost = ""
+	capturedArgs = nil
+	capturedName = ""
+
+	if err := task.Run(t.Context(), scope); err != nil {
+		t.Fatalf("unexpected error running task: %v", err)
+	}
+
+	// Because multi-platform is unsupported, it should fall back to single native platform.
+	// Since task.Push is true, it should fall back to using standard build/push or single platform.
+	// Actually, with single platform, t.Push=true uses "buildx build --platform linux/current --push".
+	argsStr = strings.Join(capturedArgs, " ")
+	expectedPlatform := "linux/" + runtime.GOARCH
+	if !strings.Contains(argsStr, "--platform "+expectedPlatform) {
+		t.Errorf("expected fallback platform %s in args, got: %s", expectedPlatform, argsStr)
 	}
 }
