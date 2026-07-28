@@ -100,3 +100,52 @@ func TestPinnedActionRefs(t *testing.T) {
 		}
 	}
 }
+
+// TestGeneratedWorkflowActionPins parses the generated ci-presubmits.yaml workflow
+// and asserts that all action references (uses:) are securely pinned to full commit SHAs
+// and include a `# ratchet:` comment.
+func TestGeneratedWorkflowActionPins(t *testing.T) {
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := dir
+	for {
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			break
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			t.Fatal("could not find repository root")
+		}
+		root = parent
+	}
+
+	workflowPath := filepath.Join(root, ".github", "workflows", "ci-presubmits.yaml")
+	content, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatalf("failed to read workflow file: %v", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "uses:") {
+			continue
+		}
+		ref := strings.TrimSpace(strings.TrimPrefix(trimmed, "uses:"))
+		at := strings.Index(ref, "@")
+		if at < 0 {
+			t.Errorf("line %d: action ref %q has no @", i+1, ref)
+			continue
+		}
+		rest := ref[at+1:]
+		sha, _, _ := strings.Cut(rest, " ")
+		if len(sha) != 40 {
+			t.Errorf("line %d: action ref %q is not pinned to a full 40-char commit SHA (got %q)", i+1, ref, sha)
+		}
+		if !strings.Contains(rest, "# ratchet:") {
+			t.Errorf("line %d: action ref %q missing ratchet version comment", i+1, ref)
+		}
+	}
+}
