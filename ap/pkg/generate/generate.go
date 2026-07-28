@@ -31,6 +31,20 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+// GitHub Actions used in generated workflows, pinned to full commit
+// SHAs. Org security scanning (zizmor, blanket hash-pin policy)
+// rejects mutable tag refs in workflows, and consumers can't pin by
+// hand because ap-verify-generate requires byte-equality with fresh
+// generator output — so the pins must live here. The trailing
+// comment is ratchet syntax (github.com/sethvargo/ratchet), the same
+// convention Google's scan workflows use; bump by resolving the new
+// tag's commit SHA and updating both the SHA and the comment.
+const (
+	actionCheckout       = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # ratchet:actions/checkout@v7.0.1"
+	actionSetupGo        = "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # ratchet:actions/setup-go@v7.0.0"
+	actionUploadArtifact = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1"
+)
+
 // LegacyScriptTask represents a task to run a legacy generate script.
 type LegacyScriptTask struct {
 	Name string
@@ -483,6 +497,11 @@ on:
   pull_request:
   merge_group:
 
+# Presubmits only read the repo; an explicit least-privilege grant
+# also keeps zizmor's excessive-permissions audit clean.
+permissions:
+  contents: read
+
 jobs:
 `)
 
@@ -525,17 +544,21 @@ jobs:
       ARTIFACTS: /tmp/artifacts
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
-`, jobName))
+        uses: %s
+        with:
+          # Presubmit scripts never push; don't leave the token in
+          # .git/config (zizmor: artipacked).
+          persist-credentials: false
+`, jobName, actionCheckout))
 
 			if goModExists {
 				relGoMod, _ := filepath.Rel(repoRoot, filepath.Join(apRoot, "go.mod"))
 				sb.WriteString(fmt.Sprintf(`
       - name: Setup Go
-        uses: actions/setup-go@v7
+        uses: %s
         with:
           go-version-file: '%s'
-`, relGoMod))
+`, actionSetupGo, relGoMod))
 			}
 
 			if scriptName == "ap-build" {
@@ -558,11 +581,11 @@ jobs:
 				sb.WriteString(fmt.Sprintf(`
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: %s
         with:
           name: artifacts-%s
           path: /tmp/artifacts
-`, jobName))
+`, actionUploadArtifact, jobName))
 			}
 		}
 	}
@@ -600,6 +623,15 @@ func GetApCommand(repoRoot, apRoot string) (string, error) {
 
 	if config.Version == "!self" {
 		return "go run ./ap", nil
+	}
+
+	// A concrete version (e.g. "v0.12.3", or a pseudo-version) pins
+	// the generated wrappers and workflow to that ap release, so
+	// upstream ap releases can't invalidate the consumer repo's
+	// ap-verify-generate check. "latest" (and empty) keeps the
+	// floating behavior.
+	if config.Version != "" && config.Version != "latest" {
+		return fmt.Sprintf("go run github.com/gke-labs/gke-labs-infra/ap@%s", config.Version), nil
 	}
 
 	return defaultCmd, nil
