@@ -19,60 +19,80 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 50
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
 
   - package-ecosystem: "gomod"
     directory: "/autodeploy"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 50
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
 
   - package-ecosystem: "gomod"
     directory: "/autodeploy/examples/helloworld"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 50
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
 
   - package-ecosystem: "gomod"
     directory: "/in-cluster-image-registry"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 50
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
 
   - package-ecosystem: "gomod"
     directory: "/ktesting"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 50
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
 
   # Docker base images
   - package-ecosystem: "docker"
     directory: "/ap/images/ap-golang"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 50
 
   - package-ecosystem: "docker"
     directory: "/autodeploy/images/autodeploy-controller"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 50
 
   - package-ecosystem: "docker"
     directory: "/autodeploy/examples/helloworld/images/examples-helloworld"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 50
 
   - package-ecosystem: "docker"
     directory: "/in-cluster-image-registry/images/in-cluster-image-registry-node-agent"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 50
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "daily"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 50
