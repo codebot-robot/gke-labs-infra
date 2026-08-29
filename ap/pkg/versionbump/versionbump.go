@@ -37,12 +37,18 @@ type GoVersion struct {
 }
 
 // Run executes the versionbump command.
-func Run(ctx context.Context, root string) error {
-	latestGo, err := fetchLatestGoVersion(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch latest go version: %w", err)
+func Run(ctx context.Context, root string, targetGoVersion string) error {
+	var latestGo string
+	var err error
+	if targetGoVersion != "" {
+		latestGo = targetGoVersion
+	} else {
+		latestGo, err = fetchLatestGoVersion(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to fetch latest go version: %w", err)
+		}
 	}
-	klog.Infof("Latest Go version: %s", latestGo)
+	klog.Infof("Target Go version: %s", latestGo)
 
 	// Strip 'go' prefix from 'go1.26.1' -> '1.26.1'
 	version := strings.TrimPrefix(latestGo, "go")
