@@ -1,5 +1,5 @@
 module github.com/gke-labs/gke-labs-infra/autodeploy/examples/helloworld
 
-go 1.26.5
+go 1.27
 
-toolchain go1.26.6
+toolchain go1.27.0
