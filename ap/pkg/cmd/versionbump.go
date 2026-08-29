@@ -24,6 +24,7 @@ import (
 // VersionBumpOptions holds the configuration for the "versionbump" command.
 type VersionBumpOptions struct {
 	*RootOptions
+	GoVersion string
 }
 
 // BuildVersionBumpCommand constructs the cobra command for "versionbump".
@@ -44,6 +45,8 @@ func BuildVersionBumpCommand(rootOpt *RootOptions) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().StringVar(&opt.GoVersion, "go-version", "", "Target Go version to bump to (e.g. 1.26.6)")
+
 	return cmd
 }
 
@@ -53,7 +56,7 @@ func RunVersionBump(ctx context.Context, opt VersionBumpOptions) error {
 		return err
 	}
 	for _, apRoot := range opt.APRoots {
-		if err := versionbump.Run(ctx, apRoot); err != nil {
+		if err := versionbump.Run(ctx, apRoot, opt.GoVersion); err != nil {
 			return err
 		}
 	}
