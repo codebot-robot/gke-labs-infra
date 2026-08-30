@@ -151,18 +151,22 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 	}
 
 	// 2. Mock execCommandContext
-	var capturedArgs []string
-	var capturedName string
+	type commandCall struct {
+		name string
+		args []string
+	}
+	var calls []commandCall
+	driverMock := "docker-container"
+
 	origExec := execCommandContext
 	defer func() { execCommandContext = origExec }()
 
 	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		if name == "docker" && len(args) > 1 && args[0] == "buildx" && args[1] == "inspect" {
-			// Mock 'docker buildx inspect' to simulate support for multi-platform (e.g. docker-container driver)
-			return exec.CommandContext(ctx, "echo", "Driver: docker-container")
+			// Mock 'docker buildx inspect' to simulate support/lack of support for multi-platform
+			return exec.CommandContext(ctx, "echo", "Driver: "+driverMock)
 		}
-		capturedName = name
-		capturedArgs = args
+		calls = append(calls, commandCall{name: name, args: args})
 		// Return a command that always succeeds (e.g. echo)
 		return exec.CommandContext(ctx, "echo", "mocked")
 	}
@@ -180,45 +184,44 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 		Dir:      tmpDir,
 	}
 
+	calls = nil
 	if err := task.Run(t.Context(), scope); err != nil {
 		t.Fatalf("unexpected error running task: %v", err)
 	}
 
-	if capturedName != "docker" {
-		t.Errorf("expected docker command, got %s", capturedName)
-	}
-
-	// Check for buildx, --platform, linux/amd64,linux/arm64, and --push
-	argsStr := strings.Join(capturedArgs, " ")
-	if !strings.Contains(argsStr, "buildx build") {
-		t.Errorf("expected 'buildx build' in args, got: %s", argsStr)
-	}
-	if !strings.Contains(argsStr, "--platform linux/amd64,linux/arm64") {
-		t.Errorf("expected '--platform linux/amd64,linux/arm64' in args, got: %s", argsStr)
-	}
-	if !strings.Contains(argsStr, "--push") {
-		t.Errorf("expected '--push' in args, got: %s", argsStr)
+	if len(calls) != 1 || calls[0].name != "docker" {
+		t.Errorf("expected 1 docker command call, got %v", calls)
+	} else {
+		argsStr := strings.Join(calls[0].args, " ")
+		if !strings.Contains(argsStr, "buildx build") {
+			t.Errorf("expected 'buildx build' in args, got: %s", argsStr)
+		}
+		if !strings.Contains(argsStr, "--platform linux/amd64,linux/arm64") {
+			t.Errorf("expected '--platform linux/amd64,linux/arm64' in args, got: %s", argsStr)
+		}
+		if !strings.Contains(argsStr, "--push") {
+			t.Errorf("expected '--push' in args, got: %s", argsStr)
+		}
 	}
 
 	// 4. Test case B: Push is false, no images.yaml configured -> should use standard docker build, no platform (since there are multiple)
 	task.Push = false
-	capturedArgs = nil
-	capturedName = ""
+	calls = nil
 
 	if err := task.Run(t.Context(), scope); err != nil {
 		t.Fatalf("unexpected error running task: %v", err)
 	}
 
-	if capturedName != "docker" {
-		t.Errorf("expected docker command, got %s", capturedName)
-	}
-
-	argsStr = strings.Join(capturedArgs, " ")
-	if !strings.Contains(argsStr, "build") || strings.Contains(argsStr, "buildx") {
-		t.Errorf("expected standard 'build' (no buildx) in args, got: %s", argsStr)
-	}
-	if strings.Contains(argsStr, "--platform") {
-		t.Errorf("expected NO '--platform' when Push is false and multiple platforms are configured, got: %s", argsStr)
+	if len(calls) != 1 || calls[0].name != "docker" {
+		t.Errorf("expected 1 docker command call, got %v", calls)
+	} else {
+		argsStr := strings.Join(calls[0].args, " ")
+		if !strings.Contains(argsStr, "build") || strings.Contains(argsStr, "buildx") {
+			t.Errorf("expected standard 'build' (no buildx) in args, got: %s", argsStr)
+		}
+		if strings.Contains(argsStr, "--platform") {
+			t.Errorf("expected NO '--platform' when Push is false and multiple platforms are configured, got: %s", argsStr)
+		}
 	}
 
 	// 5. Test case C: Push is false, images.yaml has single platform -> should use standard docker build with --platform
@@ -230,46 +233,39 @@ platforms:
 		t.Fatal(err)
 	}
 
-	capturedArgs = nil
-	capturedName = ""
-
+	calls = nil
 	if err := task.Run(t.Context(), scope); err != nil {
 		t.Fatalf("unexpected error running task: %v", err)
 	}
 
-	argsStr = strings.Join(capturedArgs, " ")
-	if !strings.Contains(argsStr, "--platform linux/amd64") {
-		t.Errorf("expected '--platform linux/amd64' when single platform is configured, got: %s", argsStr)
+	if len(calls) != 1 || calls[0].name != "docker" {
+		t.Errorf("expected 1 docker command call, got %v", calls)
+	} else {
+		argsStr := strings.Join(calls[0].args, " ")
+		if !strings.Contains(argsStr, "--platform linux/amd64") {
+			t.Errorf("expected '--platform linux/amd64' when single platform is configured, got: %s", argsStr)
+		}
 	}
 
 	// 6. Test case D: buildctl host configured -> should use buildctl with --opt platform=
 	task.BuildkitHost = "127.0.0.1:1234"
-	capturedArgs = nil
-	capturedName = ""
+	calls = nil
 
 	if err := task.Run(t.Context(), scope); err != nil {
 		t.Fatalf("unexpected error running task: %v", err)
 	}
 
-	if capturedName != "buildctl" {
-		t.Errorf("expected buildctl command, got %s", capturedName)
-	}
-
-	argsStr = strings.Join(capturedArgs, " ")
-	if !strings.Contains(argsStr, "--opt platform=linux/amd64") {
-		t.Errorf("expected '--opt platform=linux/amd64' in buildctl args, got: %s", argsStr)
+	if len(calls) != 1 || calls[0].name != "buildctl" {
+		t.Errorf("expected buildctl command, got %v", calls)
+	} else {
+		argsStr := strings.Join(calls[0].args, " ")
+		if !strings.Contains(argsStr, "--opt platform=linux/amd64") {
+			t.Errorf("expected '--opt platform=linux/amd64' in buildctl args, got: %s", argsStr)
+		}
 	}
 
 	// 7. Test case E: Multi-platform NOT supported by default docker driver
-	// Re-mock inspect to return 'Driver: docker'
-	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		if name == "docker" && len(args) > 1 && args[0] == "buildx" && args[1] == "inspect" {
-			return exec.CommandContext(ctx, "echo", "Driver: docker")
-		}
-		capturedName = name
-		capturedArgs = args
-		return exec.CommandContext(ctx, "echo", "mocked")
-	}
+	driverMock = "docker"
 
 	// Remove images.yaml to fall back to defaults (which has 2 platforms)
 	if err := os.Remove(filepath.Join(apDir, "images.yaml")); err != nil {
@@ -278,19 +274,37 @@ platforms:
 
 	task.Push = true
 	task.BuildkitHost = ""
-	capturedArgs = nil
-	capturedName = ""
+	calls = nil
 
 	if err := task.Run(t.Context(), scope); err != nil {
 		t.Fatalf("unexpected error running task: %v", err)
 	}
 
-	// Because multi-platform is unsupported, it should fall back to single native platform.
-	// Since task.Push is true, it should fall back to using standard build/push or single platform.
-	// Actually, with single platform, t.Push=true uses "buildx build --platform linux/current --push".
-	argsStr = strings.Join(capturedArgs, " ")
+	// Because multi-platform is unsupported, it should fall back to single native platform,
+	// and since driver is standard 'docker', it should run standard 'docker build' AND standard 'docker push'.
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 calls (build then push) when multi-platform is unsupported on docker driver, got %d", len(calls))
+	}
+
+	buildCall := calls[0]
+	if buildCall.name != "docker" {
+		t.Errorf("expected first call to be docker, got %s", buildCall.name)
+	}
+	buildArgsStr := strings.Join(buildCall.args, " ")
+	if !strings.Contains(buildArgsStr, "build") || strings.Contains(buildArgsStr, "buildx") {
+		t.Errorf("expected standard 'build' (no buildx) in build args, got: %s", buildArgsStr)
+	}
 	expectedPlatform := "linux/" + runtime.GOARCH
-	if !strings.Contains(argsStr, "--platform "+expectedPlatform) {
-		t.Errorf("expected fallback platform %s in args, got: %s", expectedPlatform, argsStr)
+	if !strings.Contains(buildArgsStr, "--platform "+expectedPlatform) {
+		t.Errorf("expected fallback platform %s in build args, got: %s", expectedPlatform, buildArgsStr)
+	}
+
+	pushCall := calls[1]
+	if pushCall.name != "docker" {
+		t.Errorf("expected second call to be docker, got %s", pushCall.name)
+	}
+	pushArgsStr := strings.Join(pushCall.args, " ")
+	if !strings.Contains(pushArgsStr, "push") {
+		t.Errorf("expected 'push' in push args, got: %s", pushArgsStr)
 	}
 }

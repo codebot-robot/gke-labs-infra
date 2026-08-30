@@ -106,9 +106,9 @@ func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context) bool {
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "Driver:") {
-			val := strings.TrimSpace(strings.TrimPrefix(line, "Driver:"))
-			if val == "docker" {
+		if strings.HasPrefix(strings.ToLower(line), "driver:") {
+			val := strings.TrimSpace(line[7:])
+			if strings.ToLower(val) == "docker" {
 				return false
 			}
 		}
@@ -200,8 +200,10 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, re
 		tag = "latest"
 	}
 
+	useBuildxPush := t.Push && t.supportsMultiPlatform(ctx)
+
 	var args []string
-	if t.Push {
+	if useBuildxPush {
 		args = []string{
 			"buildx", "build",
 			"--platform", strings.Join(platforms, ","),
@@ -232,6 +234,17 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, re
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
+	}
+
+	if t.Push && !useBuildxPush {
+		klog.Infof("Pushing image %s", fullImageName)
+		pushCmd := execCommandContext(ctx, "docker", "push", fullImageName)
+		pushCmd.Dir = root
+		pushCmd.Stdout = os.Stdout
+		pushCmd.Stderr = os.Stderr
+		if err := pushCmd.Run(); err != nil {
+			return fmt.Errorf("docker push failed for %s: %w", t.ImageName, err)
+		}
 	}
 
 	return nil
