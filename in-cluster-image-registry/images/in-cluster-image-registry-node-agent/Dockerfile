@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.27.0-trixie AS builder
+FROM golang:1.27.1-trixie AS builder
 
 WORKDIR /workspace
 COPY . .
