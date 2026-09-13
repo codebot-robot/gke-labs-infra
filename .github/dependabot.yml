@@ -16,55 +16,8 @@ version: 2
 updates:
   # Go modules
   - package-ecosystem: "gomod"
-    directory: "/"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 50
-    cooldown:
-      default-days: 7
-    groups:
-      go-dependencies:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "gomod"
-    directory: "/autodeploy"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 50
-    cooldown:
-      default-days: 7
-    groups:
-      go-dependencies:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "gomod"
-    directory: "/autodeploy/examples/helloworld"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 50
-    cooldown:
-      default-days: 7
-    groups:
-      go-dependencies:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "gomod"
-    directory: "/in-cluster-image-registry"
-    schedule:
-      interval: "daily"
-    open-pull-requests-limit: 50
-    cooldown:
-      default-days: 7
-    groups:
-      go-dependencies:
-        patterns:
-          - "*"
-
-  - package-ecosystem: "gomod"
-    directory: "/ktesting"
+    directories:
+      - "/**"
     schedule:
       interval: "daily"
     open-pull-requests-limit: 50
