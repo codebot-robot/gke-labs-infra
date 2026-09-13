@@ -1,8 +1,8 @@
 module github.com/gke-labs/gke-labs-infra
 
-go 1.27
+go 1.27.0
 
-toolchain go1.27.0
+toolchain go1.27.1
 
 require (
 	github.com/google/go-github/v81 v81.0.0
