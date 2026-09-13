@@ -1,8 +1,8 @@
 module github.com/gke-labs/gke-labs-infra/in-cluster-image-registry
 
-go 1.27
+go 1.27.0
 
-toolchain go1.27.0
+toolchain go1.27.1
 
 require (
 	k8s.io/apimachinery v0.37.0
