@@ -1,0 +1,20 @@
+owner: gke-labs
+name: clix
+settings:
+  allowAutoMerge: true
+  allowSquashMerge: false
+  allowRebaseMerge: false
+  mergeCommitTitle: PR_TITLE
+  mergeCommitMessage: PR_BODY
+branchProtection:
+  main:
+    requiredStatusChecks:
+      contexts:
+        - ap-verify-generate
+        - ap-test
+    requiredPullRequestReviews:
+      requireCodeOwnerReviews: true
+      requiredApprovingReviewCount: 1
+defaultRulesets:
+  - merge-queue
+  - require-pr-reviews

@@ -1,0 +1,23 @@
+# Changes to the default branch must go through a pull request with at least
+# one approving review. The branch cannot be deleted or force-pushed.
+# Repository admins can bypass, e.g. to land an emergency fix.
+name: require-pr-reviews
+target: branch
+enforcement: active
+conditions:
+  refName:
+    include:
+      - "~DEFAULT_BRANCH"
+bypassActors:
+  - actorId: 5 # RepositoryRole: admin
+    actorType: RepositoryRole
+    bypassMode: always
+rules:
+  deletion: true
+  nonFastForward: true
+  pullRequest:
+    requiredApprovingReviewCount: 1
+    allowedMergeMethods:
+      - merge
+      - squash
+      - rebase

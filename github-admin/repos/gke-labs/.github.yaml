@@ -1,0 +1,4 @@
+owner: gke-labs
+name: .github
+defaultRulesets:
+  - require-pr-reviews

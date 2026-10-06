@@ -1,0 +1,16 @@
+owner: gke-labs
+name: open-rl
+description: Self-hosted post training API for LLMs
+defaultRulesets:
+  - require-pr-reviews
+customRulesets:
+  - name: protect-main-at-all-cost
+    target: branch
+    enforcement: disabled
+    conditions:
+      refName:
+        include:
+          - ~DEFAULT_BRANCH
+    rules:
+      deletion: true
+      nonFastForward: true

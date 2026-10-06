@@ -1,0 +1,4 @@
+owner: gke-labs
+name: pod-migration
+defaultRulesets:
+  - require-pr-reviews

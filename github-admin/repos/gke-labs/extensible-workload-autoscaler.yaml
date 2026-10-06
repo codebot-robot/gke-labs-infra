@@ -1,0 +1,40 @@
+owner: gke-labs
+name: extensible-workload-autoscaler
+description: 'xAS: The Kubernetes Extensible Workload Autoscaler'
+topics:
+  - autoscaling
+  - kubernetes
+settings:
+  allowAutoMerge: true
+  deleteBranchOnMerge: true
+defaultRulesets:
+  - require-pr-reviews
+customRulesets:
+  - name: Main
+    target: branch
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - refs/heads/main
+    rules:
+      deletion: true
+      pullRequest:
+        requiredApprovingReviewCount: 1
+        allowedMergeMethods:
+          - merge
+          - squash
+          - rebase
+    bypassActors:
+      - actorId: 680407
+        actorType: User
+        bypassMode: always
+      - actorId: 11047174
+        actorType: User
+        bypassMode: always
+      - actorId: 55160426
+        actorType: User
+        bypassMode: always
+      - actorId: 170564944
+        actorType: User
+        bypassMode: always

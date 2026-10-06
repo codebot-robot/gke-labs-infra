@@ -1,0 +1,45 @@
+owner: gke-labs
+name: generation-ai
+settings:
+  allowAutoMerge: true
+  allowSquashMerge: false
+  allowRebaseMerge: false
+  mergeCommitTitle: PR_TITLE
+  mergeCommitMessage: PR_BODY
+branchProtection:
+  main:
+    requiredStatusChecks:
+      contexts:
+        - ap-verify-generate
+        - ap-test
+    requiredPullRequestReviews:
+      requireCodeOwnerReviews: true
+      requiredApprovingReviewCount: 1
+defaultRulesets:
+  - require-pr-reviews
+customRulesets:
+  - name: merge-queue
+    target: branch
+    enforcement: disabled
+    conditions:
+      refName:
+        include:
+          - ~DEFAULT_BRANCH
+    rules:
+      deletion: true
+      nonFastForward: true
+      mergeQueue:
+        checkResponseTimeoutMinutes: 60
+        groupingStrategy: ALLGREEN
+        maxEntriesToBuild: 5
+        maxEntriesToMerge: 5
+        mergeMethod: MERGE
+        minEntriesToMerge: 1
+        minEntriesToMergeWaitMinutes: 5
+      requiredStatusChecks:
+        contexts:
+          - ap-lint
+          - ap-test
+          - ap-verify-generate
+          - ap-build
+          - ap-e2e-experiments-finetuning

@@ -1,0 +1,22 @@
+owner: gke-labs
+name: gateway-api-reference-implementation
+settings:
+  allowAutoMerge: true
+defaultRulesets:
+  - merge-queue
+  - require-pr-reviews
+customRulesets:
+  - name: required-status-checks
+    target: branch
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - ~DEFAULT_BRANCH
+    rules:
+      requiredStatusChecks:
+        contexts:
+          - ap-lint
+          - ap-test
+          - ap-verify-generate
+          - ap-e2e

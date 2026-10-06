@@ -27,18 +27,20 @@ import (
 	"github.com/google/go-github/v81/github"
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
-	"sigs.k8s.io/yaml"
 )
 
 type ExportOptions struct {
-	Owner       string
-	Repo        string
-	GitHubToken string
-	Output      string
+	Owner              string
+	Repo               string
+	DefaultRulesetsDir string
+	GitHubToken        string
+	Output             string
+	IncludePrivate     bool
 }
 
 func (o *ExportOptions) InitDefaults() {
 	o.Output = "-" // stdout
+	o.DefaultRulesetsDir = DefaultRulesetsDir
 }
 
 func BuildExportCommand() *cobra.Command {
@@ -57,8 +59,10 @@ func BuildExportCommand() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&opt.Owner, "owner", opt.Owner, "The github owner (org or user)")
 	cmd.Flags().StringVar(&opt.Repo, "repo", opt.Repo, "The specific repo to export")
+	cmd.Flags().StringVar(&opt.DefaultRulesetsDir, "default-rulesets", opt.DefaultRulesetsDir, "Directory holding the shared default rulesets; rulesets that exactly match one are exported by name")
 	cmd.Flags().StringVar(&opt.GitHubToken, "token", opt.GitHubToken, "The github token (default from GITHUB_TOKEN env var)")
 	cmd.Flags().StringVar(&opt.Output, "output", opt.Output, "Output file path (default is stdout)")
+	cmd.Flags().BoolVar(&opt.IncludePrivate, "include-private", opt.IncludePrivate, "Also export private repositories (skipped by default, as their configuration should not be committed)")
 
 	return cmd
 }
@@ -79,6 +83,11 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 	)
 	tc := oauth2.NewClient(ctx, ts)
 	client := github.NewClient(tc)
+
+	defaults, err := LoadDefaultRulesets(opt.DefaultRulesetsDir)
+	if err != nil {
+		return err
+	}
 
 	type RepoRef struct {
 		Owner string
@@ -113,8 +122,12 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 			errs = append(errs, fmt.Errorf("error getting repo %s/%s: %w", ref.Owner, ref.Name, err))
 			continue
 		}
+		if repo.GetPrivate() && !opt.IncludePrivate {
+			fmt.Fprintf(os.Stderr, "Skipping private repo %s (pass --include-private to export it)\n", ref.Name)
+			continue
+		}
 
-		cfg, err := exportRepo(ctx, client, repo)
+		cfg, err := exportRepo(ctx, client, repo, defaults)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("error exporting repo %s: %w", ref.Name, err))
 			continue
@@ -136,9 +149,9 @@ func RunExport(ctx context.Context, opt ExportOptions) error {
 			if i > 0 {
 				buf.WriteString("---\n")
 			}
-			data, err := yaml.Marshal(cfg)
+			data, err := MarshalYAML(cfg)
 			if err != nil {
-				errs = append(errs, fmt.Errorf("failed to marshal config: %w", err))
+				errs = append(errs, err)
 				return errors.Join(errs...)
 			}
 			buf.Write(data)
@@ -170,7 +183,7 @@ func writeRepoConfig(path string, cfg *config.RepositoryConfig) error {
 		return fmt.Errorf("failed to create directory %s: %w", dir, err)
 	}
 
-	data, err := yaml.Marshal(cfg)
+	data, err := MarshalYAML(cfg)
 	if err != nil {
 		return fmt.Errorf("failed to marshal config for %s: %w", cfg.Name, err)
 	}
@@ -204,14 +217,11 @@ func listRepositories(ctx context.Context, client *github.Client, owner string) 
 	return allRepos, nil
 }
 
-func exportRepo(ctx context.Context, client *github.Client, repo *github.Repository) (*config.RepositoryConfig, error) {
+func exportRepo(ctx context.Context, client *github.Client, repo *github.Repository, defaults map[string]*config.RepositoryRuleset) (*config.RepositoryConfig, error) {
 	cfg := &config.RepositoryConfig{
-		Owner:       repo.GetOwner().GetLogin(),
-		Name:        repo.GetName(),
-		Description: repo.Description,
-		Homepage:    repo.Homepage,
-		Private:     repo.Private,
-		Topics:      repo.Topics,
+		Owner:  repo.GetOwner().GetLogin(),
+		Name:   repo.GetName(),
+		Topics: repo.Topics,
 		Settings: &config.RepositorySettings{
 			AllowAutoMerge:      repo.AllowAutoMerge,
 			AllowSquashMerge:    repo.AllowSquashMerge,
@@ -227,6 +237,18 @@ func exportRepo(ctx context.Context, client *github.Client, repo *github.Reposit
 		},
 		BranchProtection: make(map[string]*config.BranchProtection),
 	}
+	// Omit anything that is the default, so the export only says what is
+	// specific to this repository.
+	if repo.GetDescription() != "" {
+		cfg.Description = repo.Description
+	}
+	if repo.GetHomepage() != "" {
+		cfg.Homepage = repo.Homepage
+	}
+	if repo.GetPrivate() {
+		cfg.Private = repo.Private
+	}
+	cfg.Settings = cfg.Settings.WithoutDefaults()
 
 	// Get branches to check for protection
 	// We specifically care about 'main' but we can check all branches
@@ -245,14 +267,22 @@ func exportRepo(ctx context.Context, client *github.Client, repo *github.Reposit
 	for _, branch := range branches {
 		bp, _, err := client.Repositories.GetBranchProtection(ctx, repo.GetOwner().GetLogin(), repo.GetName(), branch.GetName())
 		if err != nil {
+			// Branches protected only by rulesets are listed as protected but
+			// have no legacy branch protection.
+			if errors.Is(err, github.ErrBranchNotProtected) {
+				continue
+			}
 			if resp, ok := err.(*github.ErrorResponse); ok && resp.Response.StatusCode == 404 {
-				// Should not happen if we listed protected branches, but good safety
 				continue
 			}
 			return nil, fmt.Errorf("failed to get branch protection for %s: %w", branch.GetName(), err)
 		}
 
 		cfg.BranchProtection[branch.GetName()] = mapBranchProtection(bp)
+	}
+
+	if len(cfg.BranchProtection) == 0 {
+		cfg.BranchProtection = nil
 	}
 
 	// Export Rulesets
@@ -264,16 +294,24 @@ func exportRepo(ctx context.Context, client *github.Client, repo *github.Reposit
 			return nil, fmt.Errorf("failed to get rulesets: %w", err)
 		}
 	} else {
+		var live []*config.RepositoryRuleset
 		for _, rsSummary := range rulesets {
 			if rsSummary.ID == nil {
+				continue
+			}
+			// Organization and enterprise rulesets also appear in the listing,
+			// but they are not managed per-repository and cannot be fetched
+			// through the repository endpoint.
+			if st := rsSummary.GetSourceType(); st == nil || *st != github.RulesetSourceTypeRepository {
 				continue
 			}
 			rs, _, err := client.Repositories.GetRuleset(ctx, repo.GetOwner().GetLogin(), repo.GetName(), *rsSummary.ID, false)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get ruleset %d: %w", *rsSummary.ID, err)
 			}
-			cfg.Rulesets = append(cfg.Rulesets, mapRuleset(rs))
+			live = append(live, mapRuleset(rs))
 		}
+		cfg.DefaultRulesets, cfg.CustomRulesets = classifyRulesets(live, defaults)
 	}
 
 	return cfg, nil
@@ -297,8 +335,48 @@ func mapRuleset(rs *github.RepositoryRuleset) *config.RepositoryRuleset {
 		}
 	}
 
+	if rs.BypassActors != nil {
+		res.BypassActors = []config.BypassActor{}
+		for _, ba := range rs.BypassActors {
+			actor := config.BypassActor{ActorID: ba.GetActorID()}
+			if ba.ActorType != nil {
+				actor.ActorType = string(*ba.ActorType)
+			}
+			if ba.BypassMode != nil {
+				actor.BypassMode = string(*ba.BypassMode)
+			}
+			res.BypassActors = append(res.BypassActors, actor)
+		}
+	}
+
 	if rs.Rules != nil {
 		res.Rules = &config.RulesetRules{}
+		res.Rules.Deletion = rs.Rules.Deletion != nil
+		res.Rules.NonFastForward = rs.Rules.NonFastForward != nil
+		if pr := rs.Rules.PullRequest; pr != nil {
+			var mergeMethods []string
+			for _, m := range pr.AllowedMergeMethods {
+				mergeMethods = append(mergeMethods, string(m))
+			}
+			res.Rules.PullRequest = &config.PullRequestRule{
+				RequiredApprovingReviewCount:   pr.RequiredApprovingReviewCount,
+				DismissStaleReviewsOnPush:      pr.DismissStaleReviewsOnPush,
+				RequireCodeOwnerReview:         pr.RequireCodeOwnerReview,
+				RequireLastPushApproval:        pr.RequireLastPushApproval,
+				RequiredReviewThreadResolution: pr.RequiredReviewThreadResolution,
+				AllowedMergeMethods:            mergeMethods,
+			}
+		}
+		if sc := rs.Rules.RequiredStatusChecks; sc != nil {
+			var contexts []string
+			for _, c := range sc.RequiredStatusChecks {
+				contexts = append(contexts, c.Context)
+			}
+			res.Rules.RequiredStatusChecks = &config.RequiredStatusChecks{
+				Strict:   sc.StrictRequiredStatusChecksPolicy,
+				Contexts: contexts,
+			}
+		}
 		if rs.Rules.MergeQueue != nil {
 			mq := rs.Rules.MergeQueue
 			res.Rules.MergeQueue = &config.MergeQueueRule{

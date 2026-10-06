@@ -1,0 +1,45 @@
+owner: gke-labs
+name: devops-bench
+settings:
+  hasWiki: false
+branchProtection:
+  main:
+    requiredStatusChecks:
+      contexts:
+        - guardrails (3.12)
+        - guardrails (3.13)
+        - guardrails (3.14)
+        - migrated-readonly
+        - legacy-readonly
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+defaultRulesets:
+  - require-pr-reviews
+customRulesets:
+  - name: disable_force_push
+    target: branch
+    enforcement: disabled
+    conditions:
+      refName:
+        include:
+          - refs/heads/main
+    rules:
+      deletion: true
+      nonFastForward: true
+  - name: main-branch
+    target: branch
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - refs/heads/main
+    rules:
+      deletion: true
+      nonFastForward: true
+      pullRequest:
+        requiredApprovingReviewCount: 1
+        dismissStaleReviewsOnPush: true
+        allowedMergeMethods:
+          - merge
+          - squash
+          - rebase

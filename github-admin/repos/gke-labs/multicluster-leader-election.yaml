@@ -1,0 +1,6 @@
+owner: gke-labs
+name: multicluster-leader-election
+settings:
+  hasWiki: false
+defaultRulesets:
+  - require-pr-reviews

@@ -1,0 +1,7 @@
+owner: gke-labs
+name: k8s-ai-bench
+description: A benchmark to evaluate LLMs on Kubernetes tasks
+settings:
+  hasWiki: false
+defaultRulesets:
+  - require-pr-reviews

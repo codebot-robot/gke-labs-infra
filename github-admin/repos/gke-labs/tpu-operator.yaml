@@ -1,0 +1,41 @@
+owner: gke-labs
+name: tpu-operator
+description: ' A Kubernetes operator designed to automate the lifecycle of TPU slices within self-managed clusters on Google Compute Engine (GCE).'
+topics:
+  - gce
+  - kubernetes
+  - tpu
+  - tpu-slice
+branchProtection:
+  main:
+    requiredPullRequestReviews:
+      dismissStaleReviews: true
+      requiredApprovingReviewCount: 1
+    enforceAdmins: true
+defaultRulesets:
+  - require-pr-reviews
+customRulesets:
+  - name: PRs & conventional commits
+    target: branch
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - ~DEFAULT_BRANCH
+    rules:
+      deletion: true
+      nonFastForward: true
+      pullRequest:
+        requiredApprovingReviewCount: 2
+        dismissStaleReviewsOnPush: true
+        requireLastPushApproval: true
+        allowedMergeMethods:
+          - merge
+          - squash
+          - rebase
+    bypassActors:
+      - actorType: OrganizationAdmin
+        bypassMode: always
+      - actorId: 44061
+        actorType: Integration
+        bypassMode: always

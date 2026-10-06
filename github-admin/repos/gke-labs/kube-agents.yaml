@@ -1,0 +1,230 @@
+owner: gke-labs
+name: kube-agents
+description: An autonomous agentic harness for Kubernetes. Proactive fleet audits, declarative GitOps remediation, and ChatOps in one place.
+homepage: https://gke-labs.github.io/kube-agents/
+settings:
+  allowMergeCommit: false
+  allowRebaseMerge: false
+branchProtection:
+  add-agents-md:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  ap-agent-prose:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  ap-agent-runtime:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  ap-build-ci:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  ap-governance-cron:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  ap-governance-cron-2:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  ap-image-patch-surface:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  ap-result-delivery:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  decouple-hermes-routing:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  demo-scenarios:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  dev-github-actions:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  devteam-agent:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  experimental:
+    requiredStatusChecks:
+      contexts:
+        - cla/google
+        - actionlint
+        - build
+        - prettier
+        - validate
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  feat/ai-code-review:
+    allowForcePushes: true
+  feat/event-watcher-pull-failure-classifier:
+    allowForcePushes: true
+  feat/gke-pod-provisioner:
+    allowForcePushes: true
+  feat/platform-agent-provisioner:
+    allowForcePushes: true
+  main:
+    requiredStatusChecks:
+      contexts:
+        - cla/google
+        - actionlint
+        - build
+        - prettier
+        - validate
+        - Run Controller Tests
+        - Run Python Unit Tests
+        - Documentation Checks
+        - Validate Conventional Commit PR Title
+        - Agent instructions cite assets that exist
+    requiredPullRequestReviews: {}
+    enforceAdmins: true
+  mastersingh24-patch-1:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  openclaw-install:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  platform-agent:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  platform-agent-merge:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  realtime_iam:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  release/0.1.0:
+    requiredPullRequestReviews: {}
+    enforceAdmins: true
+  release/0.2.0:
+    requiredPullRequestReviews: {}
+    enforceAdmins: true
+  release/0.3.0:
+    requiredPullRequestReviews: {}
+    enforceAdmins: true
+  release/0.4.0:
+    requiredPullRequestReviews: {}
+    enforceAdmins: true
+  release/0.5.0:
+    requiredPullRequestReviews: {}
+    enforceAdmins: true
+  release/0.6.0:
+    requiredPullRequestReviews: {}
+    enforceAdmins: true
+  release/0.7.0:
+    requiredPullRequestReviews: {}
+    enforceAdmins: true
+  release/0.8:
+    requiredPullRequestReviews: {}
+    enforceAdmins: true
+  scion-prototype:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+  scion-prototype-work:
+    requiredStatusChecks: {}
+    requiredPullRequestReviews:
+      requiredApprovingReviewCount: 1
+# This repo requires a pull request but no approving reviews, so it carries
+# a custom copy of require-pr-reviews with requiredApprovingReviewCount: 0
+# (omitted below, as 0 is the zero value). That is an accepted per-repo choice.
+customRulesets:
+  - name: Code Quality Copilot review for default branch
+    target: branch
+    enforcement: disabled
+    conditions:
+      refName:
+        include:
+          - ~DEFAULT_BRANCH
+    rules: {}
+  - name: kube-agents-release-lines
+    target: branch
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - refs/heads/release/**
+    rules:
+      deletion: true
+      nonFastForward: true
+    bypassActors:
+      - actorId: 143327
+        actorType: Integration
+        bypassMode: always
+      - actorId: 4830165
+        actorType: Integration
+        bypassMode: always
+  - name: kube-agents-release-lines-checks
+    target: branch
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - refs/heads/release/**
+    rules:
+      requiredStatusChecks:
+        contexts:
+          - cla/google
+          - actionlint
+          - build
+          - prettier
+          - validate
+          - Run Controller Tests
+          - Run Python Unit Tests
+          - Documentation Checks
+          - Validate Conventional Commit PR Title
+          - Agent instructions cite assets that exist
+    bypassActors:
+      - actorId: 4830165
+        actorType: Integration
+        bypassMode: always
+  - name: kube-agents-tag-protection
+    target: tag
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - ~ALL
+    rules:
+      deletion: true
+      nonFastForward: true
+    bypassActors:
+      - actorId: 4830165
+        actorType: Integration
+        bypassMode: always
+      - actorId: 15786916
+        actorType: User
+        bypassMode: always
+  - name: require-pr-reviews
+    target: branch
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - ~DEFAULT_BRANCH
+    rules:
+      deletion: true
+      nonFastForward: true
+      pullRequest:
+        allowedMergeMethods:
+          - merge
+          - squash
+          - rebase
+    bypassActors:
+      - actorId: 5
+        actorType: RepositoryRole
+        bypassMode: always

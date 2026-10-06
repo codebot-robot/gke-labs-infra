@@ -1,0 +1,36 @@
+owner: gke-labs
+name: gemini-for-kubernetes-development
+settings:
+  allowMergeCommit: false
+  hasWiki: false
+defaultRulesets:
+  - require-pr-reviews
+customRulesets:
+  - name: merge-queue
+    target: branch
+    enforcement: disabled
+    conditions:
+      refName:
+        include:
+          - ~DEFAULT_BRANCH
+    rules:
+      deletion: true
+      nonFastForward: true
+      mergeQueue:
+        checkResponseTimeoutMinutes: 60
+        groupingStrategy: ALLGREEN
+        maxEntriesToBuild: 5
+        maxEntriesToMerge: 5
+        mergeMethod: MERGE
+        minEntriesToMerge: 1
+        minEntriesToMergeWaitMinutes: 5
+      requiredStatusChecks:
+        contexts:
+          - unit-test
+          - docker-build (dind-golang)
+          - docker-build (generic-golang)
+          - docker-build (github-mcp-server)
+          - e2e-test
+          - go-build
+          - generate
+          - lint
