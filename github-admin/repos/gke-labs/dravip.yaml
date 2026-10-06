@@ -1,0 +1,10 @@
+owner: gke-labs
+name: dravip
+description: Kubernetes Dynamic IP Address Allocation
+topics:
+  - kubernetes
+  - networking
+settings:
+  hasWiki: false
+defaultRulesets:
+  - require-pr-reviews

@@ -1,0 +1,4 @@
+owner: gke-labs
+name: accelerated-ai
+defaultRulesets:
+  - require-pr-reviews

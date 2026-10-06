@@ -1,0 +1,6 @@
+owner: gke-labs
+name: app-discovery
+settings:
+  hasWiki: false
+defaultRulesets:
+  - require-pr-reviews

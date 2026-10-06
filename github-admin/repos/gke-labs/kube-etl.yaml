@@ -1,0 +1,23 @@
+owner: gke-labs
+name: kube-etl
+settings:
+  allowAutoMerge: true
+  allowSquashMerge: false
+  allowRebaseMerge: false
+defaultRulesets:
+  - merge-queue
+  - require-pr-reviews
+customRulesets:
+  - name: required-status-checks
+    target: branch
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - ~DEFAULT_BRANCH
+    rules:
+      requiredStatusChecks:
+        contexts:
+          - ap-test
+          - ap-verify-generate
+          - cla/google

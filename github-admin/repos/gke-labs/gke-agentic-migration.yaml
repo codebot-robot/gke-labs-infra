@@ -1,0 +1,4 @@
+owner: gke-labs
+name: gke-agentic-migration
+defaultRulesets:
+  - require-pr-reviews

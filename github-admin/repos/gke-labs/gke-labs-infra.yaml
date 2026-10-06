@@ -1,0 +1,44 @@
+owner: gke-labs
+name: gke-labs-infra
+settings:
+  allowAutoMerge: true
+  allowSquashMerge: false
+  allowRebaseMerge: false
+  mergeCommitTitle: PR_TITLE
+  mergeCommitMessage: PR_BODY
+branchProtection:
+  main:
+    requiredPullRequestReviews:
+      requireCodeOwnerReviews: true
+      requiredApprovingReviewCount: 1
+defaultRulesets:
+  - require-pr-reviews
+customRulesets:
+  - name: merge-queue
+    target: branch
+    enforcement: disabled
+    conditions:
+      refName:
+        include:
+          - ~DEFAULT_BRANCH
+    rules:
+      deletion: true
+      nonFastForward: true
+      mergeQueue:
+        checkResponseTimeoutMinutes: 60
+        groupingStrategy: ALLGREEN
+        maxEntriesToBuild: 5
+        maxEntriesToMerge: 1
+        mergeMethod: MERGE
+        minEntriesToMerge: 1
+        minEntriesToMergeWaitMinutes: 5
+      pullRequest:
+        requiredApprovingReviewCount: 1
+        allowedMergeMethods:
+          - merge
+      requiredStatusChecks:
+        contexts:
+          - ap-verify-generate
+          - ap-test
+          - ap-lint
+          - ap-build

@@ -1,0 +1,45 @@
+owner: gke-labs
+name: workload-class
+defaultRulesets:
+  - require-pr-reviews
+customRulesets:
+  - name: Block Force Pushes, Restrict Deletions
+    target: branch
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - refs/heads/main
+    rules:
+      deletion: true
+      nonFastForward: true
+  - name: Require Pull Request Before Merging
+    target: branch
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - refs/heads/main
+    rules:
+      pullRequest:
+        requiredApprovingReviewCount: 1
+        dismissStaleReviewsOnPush: true
+        requireCodeOwnerReview: true
+        requiredReviewThreadResolution: true
+        allowedMergeMethods:
+          - merge
+          - squash
+          - rebase
+      requiredStatusChecks:
+        strict: true
+        contexts:
+          - cla/google
+          - Docker Build
+          - Lint
+          - Chart Tests
+          - E2E Tests
+          - Unit Tests
+    bypassActors:
+      - actorId: 51032967
+        actorType: User
+        bypassMode: always

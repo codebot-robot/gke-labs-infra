@@ -1,0 +1,4 @@
+owner: gke-labs
+name: rl-for-k8s
+defaultRulesets:
+  - require-pr-reviews

@@ -103,6 +103,39 @@ settings:
 	}
 }
 
+func TestLoadConfigsDirectory(t *testing.T) {
+	dir := t.TempDir()
+	files := map[string]string{
+		"b.yaml":       "owner: org1\nname: repo-b\n",
+		"a.yaml":       "owner: org1\nname: repo-a\ndefaultRulesets:\n  - require-pr-reviews\n",
+		"nested/c.yml": "owner: org2\nname: repo-c\n",
+		"README.md":    "not yaml",
+		"notes.txt":    "owner: ignored\nname: ignored\n",
+	}
+	for name, content := range files {
+		path := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := LoadConfigs(dir)
+	if err != nil {
+		t.Fatalf("LoadConfigs() error = %v", err)
+	}
+	want := []config.RepositoryConfig{
+		{Owner: "org1", Name: "repo-a", DefaultRulesets: []string{"require-pr-reviews"}},
+		{Owner: "org1", Name: "repo-b"},
+		{Owner: "org2", Name: "repo-c"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("LoadConfigs() = %+v, want %+v", got, want)
+	}
+}
+
 func stringPtr(s string) *string {
 	return &s
 }

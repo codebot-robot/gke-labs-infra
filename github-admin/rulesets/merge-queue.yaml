@@ -1,0 +1,22 @@
+# Pull requests to the default branch land through the merge queue.
+# Required status checks are repository-specific and belong in a custom
+# ruleset; rules from all active rulesets combine on the branch.
+# Repositories using this should also set settings.allowAutoMerge: true.
+name: merge-queue
+target: branch
+enforcement: active
+conditions:
+  refName:
+    include:
+      - "~DEFAULT_BRANCH"
+rules:
+  deletion: true
+  nonFastForward: true
+  mergeQueue:
+    mergeMethod: MERGE
+    groupingStrategy: ALLGREEN
+    maxEntriesToBuild: 5
+    maxEntriesToMerge: 5
+    minEntriesToMerge: 1
+    minEntriesToMergeWaitMinutes: 5
+    checkResponseTimeoutMinutes: 60

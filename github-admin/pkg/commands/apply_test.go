@@ -67,6 +67,86 @@ func TestRulesetFromConfig(t *testing.T) {
 			},
 		},
 		{
+			name: "Ruleset with pull request, status checks and bypass actors",
+			cfg: &config.RepositoryRuleset{
+				Name:        "require-pr-reviews",
+				Enforcement: "active",
+				BypassActors: []config.BypassActor{
+					{ActorID: 5, ActorType: "RepositoryRole", BypassMode: "always"},
+				},
+				Rules: &config.RulesetRules{
+					Deletion:       true,
+					NonFastForward: true,
+					PullRequest: &config.PullRequestRule{
+						RequiredApprovingReviewCount: 1,
+						DismissStaleReviewsOnPush:    true,
+						AllowedMergeMethods:          []string{"merge", "squash"},
+					},
+					RequiredStatusChecks: &config.RequiredStatusChecks{
+						Strict:   true,
+						Contexts: []string{"ap-test"},
+					},
+				},
+			},
+			want: &github.RepositoryRuleset{
+				Name:        "require-pr-reviews",
+				Enforcement: "active",
+				BypassActors: []*github.BypassActor{
+					{
+						ActorID:    github.Ptr(int64(5)),
+						ActorType:  github.Ptr(github.BypassActorType("RepositoryRole")),
+						BypassMode: github.Ptr(github.BypassMode("always")),
+					},
+				},
+				Rules: &github.RepositoryRulesetRules{
+					Deletion:       &github.EmptyRuleParameters{},
+					NonFastForward: &github.EmptyRuleParameters{},
+					PullRequest: &github.PullRequestRuleParameters{
+						AllowedMergeMethods:          []github.PullRequestMergeMethod{"merge", "squash"},
+						DismissStaleReviewsOnPush:    true,
+						RequiredApprovingReviewCount: 1,
+					},
+					RequiredStatusChecks: &github.RequiredStatusChecksRuleParameters{
+						RequiredStatusChecks:             []*github.RuleStatusCheck{{Context: "ap-test"}},
+						StrictRequiredStatusChecksPolicy: true,
+					},
+				},
+			},
+		},
+		{
+			name: "Empty bypass actors clears them",
+			cfg: &config.RepositoryRuleset{
+				Name:         "merge-queue",
+				Enforcement:  "active",
+				BypassActors: []config.BypassActor{},
+			},
+			want: &github.RepositoryRuleset{
+				Name:         "merge-queue",
+				Enforcement:  "active",
+				BypassActors: []*github.BypassActor{},
+			},
+		},
+		{
+			name: "Omitted exclude list is sent as empty, not null",
+			cfg: &config.RepositoryRuleset{
+				Name:        "defaults-only",
+				Enforcement: "active",
+				Conditions: &config.RulesetConditions{
+					RefName: &config.RefNameCondition{Include: []string{"~DEFAULT_BRANCH"}},
+				},
+			},
+			want: &github.RepositoryRuleset{
+				Name:        "defaults-only",
+				Enforcement: "active",
+				Conditions: &github.RepositoryRulesetConditions{
+					RefName: &github.RepositoryRulesetRefConditionParameters{
+						Include: []string{"~DEFAULT_BRANCH"},
+						Exclude: []string{},
+					},
+				},
+			},
+		},
+		{
 			name: "Ruleset with Conditions",
 			cfg: &config.RepositoryRuleset{
 				Name:        "main-protection",

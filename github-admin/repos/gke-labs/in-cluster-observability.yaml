@@ -1,0 +1,34 @@
+owner: gke-labs
+name: in-cluster-observability
+description: Transparent eBPF-based network observability for Kubernetes workloads. Zero-instrumentation L4 + L7 metrics   with K8s identity attached, scrapable on a single Prometheus URL per node. Built on OpenTelemetry eBPF   Instrumentation.
+homepage: https://gke-labs.github.io/in-cluster-observability/
+topics:
+  - ebpf
+  - golang
+  - kubernetes
+  - monitoring
+  - network-observability
+  - obi
+  - observability
+  - opentelemetry
+  - prometheus
+settings:
+  allowAutoMerge: true
+  hasWiki: false
+defaultRulesets:
+  - merge-queue
+  - require-pr-reviews
+customRulesets:
+  - name: required-status-checks
+    target: branch
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - ~DEFAULT_BRANCH
+    rules:
+      requiredStatusChecks:
+        contexts:
+          - ap-test
+          - ap-verify-generate
+          - cla/google

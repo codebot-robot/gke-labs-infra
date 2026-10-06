@@ -1,0 +1,26 @@
+owner: gke-labs
+name: multicluster-network-policy
+description: Kubernetes Multicluster Network Policies
+topics:
+  - kubernetes
+  - multicluster
+  - network-security
+settings:
+  hasWiki: false
+defaultRulesets:
+  - require-pr-reviews
+customRulesets:
+  - name: main
+    target: branch
+    enforcement: active
+    conditions:
+      refName: {}
+    rules:
+      deletion: true
+      nonFastForward: true
+      pullRequest:
+        requiredApprovingReviewCount: 1
+        allowedMergeMethods:
+          - merge
+          - squash
+          - rebase

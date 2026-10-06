@@ -1,0 +1,42 @@
+owner: gke-labs
+name: sweperf
+settings:
+  hasWiki: false
+# TODO: this repo historically required a PR but no approvals, so it keeps a
+# custom copy of require-pr-reviews with requiredApprovingReviewCount: 0.
+# Once the owners agree, delete that entry and list it under defaultRulesets.
+customRulesets:
+  - name: main
+    target: branch
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - ~DEFAULT_BRANCH
+    rules:
+      deletion: true
+      nonFastForward: true
+      pullRequest:
+        allowedMergeMethods:
+          - merge
+          - squash
+          - rebase
+  - name: require-pr-reviews
+    target: branch
+    enforcement: active
+    conditions:
+      refName:
+        include:
+          - ~DEFAULT_BRANCH
+    rules:
+      deletion: true
+      nonFastForward: true
+      pullRequest:
+        allowedMergeMethods:
+          - merge
+          - squash
+          - rebase
+    bypassActors:
+      - actorId: 5
+        actorType: RepositoryRole
+        bypassMode: always

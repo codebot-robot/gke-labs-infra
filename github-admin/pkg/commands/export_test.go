@@ -167,6 +167,55 @@ func TestMapRuleset(t *testing.T) {
 	}
 }
 
+func TestMapRulesetPullRequest(t *testing.T) {
+	rs := &github.RepositoryRuleset{
+		Name:        "require-pr-reviews",
+		Enforcement: "active",
+		BypassActors: []*github.BypassActor{
+			{
+				ActorID:    github.Ptr(int64(5)),
+				ActorType:  github.Ptr(github.BypassActorType("RepositoryRole")),
+				BypassMode: github.Ptr(github.BypassMode("always")),
+			},
+		},
+		Rules: &github.RepositoryRulesetRules{
+			Deletion:       &github.EmptyRuleParameters{},
+			NonFastForward: &github.EmptyRuleParameters{},
+			PullRequest: &github.PullRequestRuleParameters{
+				AllowedMergeMethods:          []github.PullRequestMergeMethod{"merge"},
+				RequiredApprovingReviewCount: 2,
+				RequireCodeOwnerReview:       true,
+			},
+			RequiredStatusChecks: &github.RequiredStatusChecksRuleParameters{
+				RequiredStatusChecks: []*github.RuleStatusCheck{
+					{Context: "ap-test", IntegrationID: github.Ptr(int64(15368))},
+				},
+			},
+		},
+	}
+	want := &config.RepositoryRuleset{
+		Name:        "require-pr-reviews",
+		Enforcement: "active",
+		BypassActors: []config.BypassActor{
+			{ActorID: 5, ActorType: "RepositoryRole", BypassMode: "always"},
+		},
+		Rules: &config.RulesetRules{
+			Deletion:       true,
+			NonFastForward: true,
+			PullRequest: &config.PullRequestRule{
+				RequiredApprovingReviewCount: 2,
+				RequireCodeOwnerReview:       true,
+				AllowedMergeMethods:          []string{"merge"},
+			},
+			RequiredStatusChecks: &config.RequiredStatusChecks{Contexts: []string{"ap-test"}},
+		},
+	}
+	got := mapRuleset(rs)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("mapRuleset() = %+v, want %+v", got, want)
+	}
+}
+
 func TestResolveOutputPath(t *testing.T) {
 	tests := []struct {
 		name     string
