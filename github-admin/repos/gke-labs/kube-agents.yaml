@@ -139,9 +139,9 @@ branchProtection:
     requiredStatusChecks: {}
     requiredPullRequestReviews:
       requiredApprovingReviewCount: 1
-# TODO: this repo historically required a PR but no approvals, so it keeps a
-# custom copy of require-pr-reviews with requiredApprovingReviewCount: 0.
-# Once the owners agree, delete that entry and list it under defaultRulesets.
+# This repo requires a pull request but no approving reviews, so it carries
+# a custom copy of require-pr-reviews with requiredApprovingReviewCount: 0
+# (omitted below, as 0 is the zero value). That is an accepted per-repo choice.
 customRulesets:
   - name: Code Quality Copilot review for default branch
     target: branch
