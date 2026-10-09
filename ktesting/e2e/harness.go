@@ -16,6 +16,7 @@ package e2e
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -40,6 +41,28 @@ func (h *Harness) logf(format string, args ...any) {
 		h.t.Logf(format, args...)
 	} else {
 		log.Printf(format, args...)
+	}
+}
+
+func (h *Harness) fatalf(format string, args ...any) {
+	if h.t != nil {
+		h.t.Helper()
+		h.t.Fatalf(format, args...)
+	} else {
+		log.Fatalf(format, args...)
+	}
+}
+
+// MustWriteFile writes data to a file, calling t.Fatalf if writing fails.
+func (h *Harness) MustWriteFile(path string, data []byte) {
+	if h.t != nil {
+		h.t.Helper()
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		h.fatalf("failed to create directory for %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		h.fatalf("failed to write file %s: %v", path, err)
 	}
 }
 
@@ -69,79 +92,77 @@ func (h *Harness) CreateTempNamespace(prefix string) string {
 	return ns
 }
 
-func (h *Harness) CollectArtifacts(testName string) {
+func (h *Harness) CollectArtifacts(testName string) error {
 	artifactsDir := os.Getenv("ARTIFACTS")
 	if artifactsDir == "" {
-		return
+		return nil
 	}
 	h.logf("Collecting artifacts to %s", artifactsDir)
+
+	var errs []error
 
 	for _, ns := range h.Namespaces {
 		nsDir := filepath.Join(artifactsDir, "tests", testName, "objects", ns)
 		if err := os.MkdirAll(nsDir, 0755); err != nil {
-			h.logf("failed to create directory %s: %v", nsDir, err)
+			errs = append(errs, fmt.Errorf("failed to create directory %s: %w", nsDir, err))
 		}
 
 		pods, err := exec.Command("kubectl", "get", "pods", "-n", ns).Output()
 		if err != nil {
-			h.logf("failed to get pods in namespace %s: %v", ns, err)
+			errs = append(errs, fmt.Errorf("failed to get pods in namespace %s: %w", ns, err))
 		} else {
-			if err := os.WriteFile(filepath.Join(nsDir, "pods.txt"), pods, 0644); err != nil {
-				h.logf("failed to write pods.txt in %s: %v", nsDir, err)
-			}
+			h.MustWriteFile(filepath.Join(nsDir, "pods.txt"), pods)
 		}
 
 		podsYaml, err := exec.Command("kubectl", "get", "pods", "-n", ns, "-o", "yaml").Output()
 		if err != nil {
-			h.logf("failed to get pods yaml in namespace %s: %v", ns, err)
+			errs = append(errs, fmt.Errorf("failed to get pods yaml in namespace %s: %w", ns, err))
 		} else {
-			if err := os.WriteFile(filepath.Join(nsDir, "pods.yaml"), podsYaml, 0644); err != nil {
-				h.logf("failed to write pods.yaml in %s: %v", nsDir, err)
-			}
+			h.MustWriteFile(filepath.Join(nsDir, "pods.yaml"), podsYaml)
 		}
 
 		logsDir := filepath.Join(artifactsDir, "tests", testName, "logs", ns)
 		if err := os.MkdirAll(logsDir, 0755); err != nil {
-			h.logf("failed to create directory %s: %v", logsDir, err)
+			errs = append(errs, fmt.Errorf("failed to create directory %s: %w", logsDir, err))
 		}
 
 		podList, err := exec.Command("kubectl", "get", "pods", "-n", ns, "-o", "jsonpath={.items[*].metadata.name}").Output()
 		if err != nil {
-			h.logf("failed to list pods in namespace %s: %v", ns, err)
+			errs = append(errs, fmt.Errorf("failed to list pods in namespace %s: %w", ns, err))
 		} else {
 			for _, pod := range strings.Fields(string(podList)) {
 				logs, err := exec.Command("kubectl", "logs", pod, "-n", ns, "--all-containers=true").Output()
 				if err != nil {
-					h.logf("failed to get logs for pod %s in namespace %s: %v", pod, ns, err)
+					errs = append(errs, fmt.Errorf("failed to get logs for pod %s in namespace %s: %w", pod, ns, err))
 					continue
 				}
-				if err := os.WriteFile(filepath.Join(logsDir, pod+".log"), logs, 0644); err != nil {
-					h.logf("failed to write pod log for %s in %s: %v", pod, logsDir, err)
-				}
+				h.MustWriteFile(filepath.Join(logsDir, pod+".log"), logs)
 			}
 		}
 	}
 
 	clusterDir := filepath.Join(artifactsDir, "tests", testName, "objects", "_cluster")
 	if err := os.MkdirAll(clusterDir, 0755); err != nil {
-		h.logf("failed to create directory %s: %v", clusterDir, err)
+		errs = append(errs, fmt.Errorf("failed to create directory %s: %w", clusterDir, err))
 	}
 	nodes, err := exec.Command("kubectl", "get", "nodes").Output()
 	if err != nil {
-		h.logf("failed to get nodes: %v", err)
+		errs = append(errs, fmt.Errorf("failed to get nodes: %w", err))
 	} else {
-		if err := os.WriteFile(filepath.Join(clusterDir, "nodes.txt"), nodes, 0644); err != nil {
-			h.logf("failed to write nodes.txt in %s: %v", clusterDir, err)
-		}
+		h.MustWriteFile(filepath.Join(clusterDir, "nodes.txt"), nodes)
 	}
 	nodesYaml, err := exec.Command("kubectl", "get", "nodes", "-o", "yaml").Output()
 	if err != nil {
-		h.logf("failed to get nodes yaml: %v", err)
+		errs = append(errs, fmt.Errorf("failed to get nodes yaml: %w", err))
 	} else {
-		if err := os.WriteFile(filepath.Join(clusterDir, "nodes.yaml"), nodesYaml, 0644); err != nil {
-			h.logf("failed to write nodes.yaml in %s: %v", clusterDir, err)
-		}
+		h.MustWriteFile(filepath.Join(clusterDir, "nodes.yaml"), nodesYaml)
 	}
+
+	if err := errors.Join(errs...); err != nil {
+		h.logf("failed to collect artifacts: %v", err)
+		return err
+	}
+	return nil
 }
 
 func (h *Harness) Setup() {
@@ -162,7 +183,9 @@ func (h *Harness) Setup() {
 
 	h.t.Cleanup(func() {
 		if h.t.Failed() {
-			h.CollectArtifacts(h.t.Name())
+			if err := h.CollectArtifacts(h.t.Name()); err != nil {
+				h.logf("failed to collect artifacts: %v", err)
+			}
 		}
 		h.Teardown()
 	})

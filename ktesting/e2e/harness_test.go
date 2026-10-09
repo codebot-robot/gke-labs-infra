@@ -37,7 +37,9 @@ func TestCollectArtifacts_NoArtifactsDir(t *testing.T) {
 	t.Setenv("ARTIFACTS", "")
 	h := NewHarness(t, "test-cluster")
 	h.TrackNamespace("default")
-	h.CollectArtifacts("test-case")
+	if err := h.CollectArtifacts("test-case"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestCollectArtifacts_KubectlFails_NoEmptyFilesWritten(t *testing.T) {
@@ -50,7 +52,9 @@ exit 1
 	setupMockKubectl(t, script)
 	h := NewHarness(t, "test-cluster")
 	h.TrackNamespace("test-ns")
-	h.CollectArtifacts("test-case")
+	if err := h.CollectArtifacts("test-case"); err == nil {
+		t.Fatal("expected error from CollectArtifacts when kubectl commands fail")
+	}
 
 	// Ensure no empty files were written
 	nsDir := filepath.Join(artifactsDir, "tests", "test-case", "objects", "test-ns")
@@ -97,7 +101,9 @@ esac
 	setupMockKubectl(t, script)
 	h := NewHarness(t, "test-cluster")
 	h.TrackNamespace("test-ns")
-	h.CollectArtifacts("test-case")
+	if err := h.CollectArtifacts("test-case"); err != nil {
+		t.Fatalf("unexpected error from CollectArtifacts: %v", err)
+	}
 
 	nsDir := filepath.Join(artifactsDir, "tests", "test-case", "objects", "test-ns")
 	podsContent, err := os.ReadFile(filepath.Join(nsDir, "pods.txt"))
@@ -115,6 +121,21 @@ esac
 	}
 	if !strings.Contains(string(logContent), "container logs") {
 		t.Errorf("unexpected log content: %s", logContent)
+	}
+}
+
+func TestMustWriteFile(t *testing.T) {
+	dir := t.TempDir()
+	h := NewHarness(t, "test-cluster")
+	target := filepath.Join(dir, "sub", "test.txt")
+	h.MustWriteFile(target, []byte("hello"))
+
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+	if string(data) != "hello" {
+		t.Errorf("got %q, want %q", string(data), "hello")
 	}
 }
 
