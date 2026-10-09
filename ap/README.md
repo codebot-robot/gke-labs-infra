@@ -56,7 +56,8 @@ Configures Go-specific tooling.
 
 Example `.ap/go.yaml`:
 ```yaml
-gofmt: true
+gofmt:
+  enabled: true
 ```
 
 ### ap.yaml
@@ -92,6 +93,7 @@ ap <command>
 ```
 
 Commands:
+- `init`: Initialize `.ap/` configuration for a repository
 - `test`: Run tests
 - `lint`: Run linting tasks (vet, govulncheck)
 - `build`: Build artifacts

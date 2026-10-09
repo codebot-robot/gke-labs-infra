@@ -4,32 +4,36 @@
 
 ## Prerequisites
 
-*   Go installed (1.21+ recommended)
+*   Go installed (1.27+ recommended)
 *   A git repository
 
 ## Setup
 
-1.  **Configure `.ap` directory**:
-    Copy the `.ap` directory from the [gke-labs-infra repository](https://github.com/gke-labs/gke-labs-infra/tree/main/.ap) to the root of your repository.
-    This directory contains configuration for `ap` tools.
+1.  **Initialize `.ap` directory**:
+    Run `ap init` to scaffold the `.ap/` configuration in your repository:
 
     ```bash
-    # Example: Copy from a local checkout or manually create the files
-    mkdir .ap
-    # Download headers.yaml, go.yaml, ap.yaml...
+    go run github.com/gke-labs/gke-labs-infra/ap@latest init --copyright-holder "Your Organization"
     ```
 
-    Ensure `headers.yaml` has the correct license and copyright holder for your project.
+    This command creates:
+    *   `.ap/ap.yaml` configured with `version: latest`.
+    *   `.ap/go.yaml` configuring Go formatting (`gofmt`) and `govet`.
+    *   `.ap/headers.yaml` configuring file headers (defaults to `license: apache-2.0`, or pass `--license none` to disable).
 
-    Ensure `.ap/ap.yaml` is configured with `version: latest`.
-    (Note: The source repo uses `version: "!self"` which is for internal development only).
+    You can optionally pass `--generate` to scaffold and run generation in a single step:
+    ```bash
+    go run github.com/gke-labs/gke-labs-infra/ap@latest init --copyright-holder "Your Organization" --generate
+    ```
 
 2.  **Run generation**:
-    Run `ap generate` to create the initial CI scripts and GitHub Actions workflows.
+    If you did not pass `--generate` during initialization, run `ap generate` to create the initial CI scripts and GitHub Actions workflows:
 
     ```bash
     go run github.com/gke-labs/gke-labs-infra/ap@latest generate
     ```
+
+    Note: `ap generate` also runs code formatting and stamps license headers across your sources (equivalent to running `ap fmt`).
 
     This command will:
     *   Create the `dev/ci/presubmits/` directory if it doesn't exist.
