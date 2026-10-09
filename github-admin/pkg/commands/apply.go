@@ -38,6 +38,7 @@ type ApplyOptions struct {
 	GitHubToken        string
 	DryRun             bool
 	IncludePrivate     bool
+	Out                io.Writer
 }
 
 func (o *ApplyOptions) InitDefaults() {
@@ -100,24 +101,28 @@ func RunApply(ctx context.Context, opt ApplyOptions) error {
 	tc := oauth2.NewClient(ctx, ts)
 	client := github.NewClient(tc)
 
+	p := newPrinter(opt.Out)
 	var summary planSummary
 	var errs []error
 	for _, cfg := range configs {
-		if err := applyRepo(ctx, client, cfg, defaults, opt, &summary); err != nil {
+		if err := applyRepo(ctx, client, p, cfg, defaults, opt, &summary); err != nil {
 			errs = append(errs, fmt.Errorf("error applying config to %s/%s: %w", cfg.Owner, cfg.Name, err))
 		}
 	}
 
-	fmt.Println()
+	p.Println()
 	switch {
 	case summary.Add == 0 && summary.Change == 0:
-		fmt.Println("No changes. GitHub matches the configuration.")
+		p.Println("No changes. GitHub matches the configuration.")
 	case opt.DryRun:
-		fmt.Printf("Plan: %d to add, %d to change. Dry run; re-run with --dry-run=false to apply.\n", summary.Add, summary.Change)
+		p.Printf("Plan: %d to add, %d to change. Dry run; re-run with --dry-run=false to apply.\n", summary.Add, summary.Change)
 	default:
-		fmt.Printf("Applied: %d added, %d changed.\n", summary.Add, summary.Change)
+		p.Printf("Applied: %d added, %d changed.\n", summary.Add, summary.Change)
 	}
 
+	if err := p.Err(); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
 }
 
@@ -177,16 +182,18 @@ func loadConfigFile(path string) ([]config.RepositoryConfig, error) {
 	return configs, nil
 }
 
-func applyRepo(ctx context.Context, client *github.Client, cfg config.RepositoryConfig, defaults map[string]*config.RepositoryRuleset, opt ApplyOptions, summary *planSummary) error {
-	out := os.Stdout
-	fmt.Fprintf(out, "%s/%s\n", cfg.Owner, cfg.Name)
+func applyRepo(ctx context.Context, client *github.Client, out *printer, cfg config.RepositoryConfig, defaults map[string]*config.RepositoryRuleset, opt ApplyOptions, summary *planSummary) error {
+	if out == nil {
+		out = newPrinter(os.Stdout)
+	}
+	out.Printf("%s/%s\n", cfg.Owner, cfg.Name)
 
 	repo, _, err := client.Repositories.Get(ctx, cfg.Owner, cfg.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get repo: %w", err)
 	}
 	if repo.GetPrivate() && !opt.IncludePrivate {
-		fmt.Fprintf(out, "  skipped: repository is private (pass --include-private to manage it)\n")
+		out.Printf("  skipped: repository is private (pass --include-private to manage it)\n")
 		return nil
 	}
 
@@ -200,7 +207,7 @@ func applyRepo(ctx context.Context, client *github.Client, cfg config.Repository
 	// Repository settings.
 	fieldChanges := settingsChanges(repo, cfg)
 	for _, c := range fieldChanges {
-		fmt.Fprintf(out, "  %s\n", c)
+		out.Printf("  %s\n", c)
 	}
 	if len(fieldChanges) > 0 {
 		changes++
@@ -227,7 +234,7 @@ func applyRepo(ctx context.Context, client *github.Client, cfg config.Repository
 			if _, _, err := client.Repositories.Edit(ctx, cfg.Owner, cfg.Name, repoReq); err != nil {
 				return fmt.Errorf("failed to edit repo: %w", err)
 			}
-			fmt.Fprintf(out, "    updated settings\n")
+			out.Printf("    updated settings\n")
 		}
 	}
 
@@ -238,12 +245,12 @@ func applyRepo(ctx context.Context, client *github.Client, cfg config.Repository
 	}
 	if topicsChanged {
 		changes++
-		fmt.Fprintf(out, "  %s\n", topics)
+		out.Printf("  %s\n", topics)
 		if !opt.DryRun {
 			if _, _, err := client.Repositories.ReplaceAllTopics(ctx, cfg.Owner, cfg.Name, cfg.Topics); err != nil {
 				return fmt.Errorf("failed to update topics: %w", err)
 			}
-			fmt.Fprintf(out, "    updated topics\n")
+			out.Printf("    updated topics\n")
 		}
 	}
 
@@ -270,10 +277,10 @@ func applyRepo(ctx context.Context, client *github.Client, cfg config.Repository
 		changes++
 		if current == nil {
 			summary.Add++
-			fmt.Fprintf(out, "  + branchProtection %q\n", branch)
+			out.Printf("  + branchProtection %q\n", branch)
 		} else {
 			summary.Change++
-			fmt.Fprintf(out, "  ~ branchProtection %q\n", branch)
+			out.Printf("  ~ branchProtection %q\n", branch)
 		}
 		printIndented(out, "      ", lines)
 
@@ -281,7 +288,7 @@ func applyRepo(ctx context.Context, client *github.Client, cfg config.Repository
 			if _, _, err := client.Repositories.UpdateBranchProtection(ctx, cfg.Owner, cfg.Name, branch, branchProtectionRequest(bp)); err != nil {
 				return fmt.Errorf("failed to update branch protection for %s: %w", branch, err)
 			}
-			fmt.Fprintf(out, "    updated\n")
+			out.Printf("    updated\n")
 		}
 	}
 
@@ -293,7 +300,7 @@ func applyRepo(ctx context.Context, client *github.Client, cfg config.Repository
 	changes += n
 
 	if changes == 0 {
-		fmt.Fprintf(out, "  no changes\n")
+		out.Printf("  no changes\n")
 	}
 	return nil
 }
@@ -324,7 +331,10 @@ func branchProtectionRequest(bp *config.BranchProtection) *github.ProtectionRequ
 // applyRulesets diffs each desired ruleset against GitHub, prints the
 // differences, and (unless dryRun) creates or updates the ones that differ.
 // It returns the number of rulesets that differed.
-func applyRulesets(ctx context.Context, client *github.Client, out io.Writer, cfg config.RepositoryConfig, rulesets []*config.RepositoryRuleset, dryRun bool, summary *planSummary) (int, error) {
+func applyRulesets(ctx context.Context, client *github.Client, out *printer, cfg config.RepositoryConfig, rulesets []*config.RepositoryRuleset, dryRun bool, summary *planSummary) (int, error) {
+	if out == nil {
+		out = newPrinter(os.Stdout)
+	}
 	existingRulesets, _, err := client.Repositories.GetAllRulesets(ctx, cfg.Owner, cfg.Name, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to list existing rulesets: %w", err)
@@ -351,7 +361,7 @@ func applyRulesets(ctx context.Context, client *github.Client, out io.Writer, cf
 			}
 			changes++
 			summary.Add++
-			fmt.Fprintf(out, "  + ruleset %q\n", desired.Name)
+			out.Printf("  + ruleset %q\n", desired.Name)
 			printIndented(out, "      ", lines)
 			if dryRun {
 				continue
@@ -363,7 +373,7 @@ func applyRulesets(ctx context.Context, client *github.Client, out io.Writer, cf
 			if err != nil {
 				return changes, fmt.Errorf("failed to create ruleset %s: %w", desired.Name, err)
 			}
-			fmt.Fprintf(out, "    created\n")
+			out.Printf("    created\n")
 			continue
 		}
 
@@ -384,7 +394,7 @@ func applyRulesets(ctx context.Context, client *github.Client, out io.Writer, cf
 		}
 		changes++
 		summary.Change++
-		fmt.Fprintf(out, "  ~ ruleset %q\n", desired.Name)
+		out.Printf("  ~ ruleset %q\n", desired.Name)
 		printIndented(out, "      ", lines)
 		if dryRun {
 			continue
@@ -396,7 +406,7 @@ func applyRulesets(ctx context.Context, client *github.Client, out io.Writer, cf
 		if err != nil {
 			return changes, fmt.Errorf("failed to update ruleset %s: %w", desired.Name, err)
 		}
-		fmt.Fprintf(out, "    updated\n")
+		out.Printf("    updated\n")
 	}
 	return changes, nil
 }
