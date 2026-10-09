@@ -47,6 +47,14 @@ jobs:
 
       - name: Run ap-build
         run: ./dev/ci/presubmits/ap-build
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        with:
+          name: artifacts-ap-build
+          path: /tmp/artifacts
+          if-no-files-found: ignore
   ap-e2e:
     runs-on: ubuntu-latest
     env:
@@ -73,6 +81,7 @@ jobs:
         with:
           name: artifacts-ap-e2e
           path: /tmp/artifacts
+          if-no-files-found: ignore
   ap-e2e-autodeploy:
     runs-on: ubuntu-latest
     env:
@@ -99,6 +108,7 @@ jobs:
         with:
           name: artifacts-ap-e2e-autodeploy
           path: /tmp/artifacts
+          if-no-files-found: ignore
   ap-lint:
     runs-on: ubuntu-latest
     env:
@@ -118,6 +128,14 @@ jobs:
 
       - name: Run ap-lint
         run: ./dev/ci/presubmits/ap-lint
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        with:
+          name: artifacts-ap-lint
+          path: /tmp/artifacts
+          if-no-files-found: ignore
   ap-test:
     runs-on: ubuntu-latest
     env:
@@ -144,6 +162,7 @@ jobs:
         with:
           name: artifacts-ap-test
           path: /tmp/artifacts
+          if-no-files-found: ignore
   ap-verify-generate:
     runs-on: ubuntu-latest
     env:
@@ -163,3 +182,11 @@ jobs:
 
       - name: Run ap-verify-generate
         run: ./dev/ci/presubmits/ap-verify-generate
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7.0.1
+        with:
+          name: artifacts-ap-verify-generate
+          path: /tmp/artifacts
+          if-no-files-found: ignore
