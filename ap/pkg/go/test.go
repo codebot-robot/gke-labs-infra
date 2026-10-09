@@ -17,8 +17,10 @@ package golang
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -92,9 +94,9 @@ func (t *GoE2eTask) GetChildren() []tasks.Task {
 }
 
 // HasGoTests returns true if the directory or any subdirectory contains a .go file with a _test.go suffix.
-func HasGoTests(dir string) bool {
+func HasGoTests(dir string) (bool, error) {
 	found := false
-	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -104,7 +106,13 @@ func HasGoTests(dir string) bool {
 		}
 		return nil
 	})
-	return found
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return found, nil
 }
 
 // TestTasks returns a task group for running go tests in discovered modules.
@@ -172,12 +180,16 @@ type RunGoTestOptions struct {
 }
 
 // RunGoTest runs go tests in the given directory.
-func RunGoTest(ctx context.Context, dir string, resultFile string, opts RunGoTestOptions) error {
+func RunGoTest(ctx context.Context, dir string, resultFile string, opts RunGoTestOptions) (retErr error) {
 	f, err := os.Create(resultFile)
 	if err != nil {
 		return fmt.Errorf("failed to create result file: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil && retErr == nil {
+			retErr = fmt.Errorf("failed to close result file: %w", err)
+		}
+	}()
 
 	args := []string{"test", "-json"}
 	if len(opts.Args) > 0 {

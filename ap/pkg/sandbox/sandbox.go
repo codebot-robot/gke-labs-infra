@@ -16,6 +16,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,7 +31,7 @@ import (
 )
 
 // Run runs the ap command in a sandbox pod.
-func Run(ctx context.Context, root string, args []string) error {
+func Run(ctx context.Context, root string, args []string) (retErr error) {
 	podName := "ap-sandbox"
 	image := "local/ap-golang:latest"
 
@@ -69,7 +70,9 @@ func Run(ctx context.Context, root string, args []string) error {
 	}
 	defer func() {
 		if pfCmd.Process != nil {
-			pfCmd.Process.Kill()
+			if err := pfCmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				retErr = errors.Join(retErr, fmt.Errorf("failed to kill port-forward process: %w", err))
+			}
 		}
 	}()
 
@@ -86,7 +89,11 @@ func Run(ctx context.Context, root string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to sandbox gRPC after retries: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			klog.Warningf("failed to close grpc connection: %v", err)
+		}
+	}()
 	client := api.NewSandboxServiceClient(conn)
 
 	// Copy code using gRPC

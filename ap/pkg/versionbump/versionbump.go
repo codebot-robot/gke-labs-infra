@@ -84,7 +84,11 @@ func fetchLatestGoVersion(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			klog.Warningf("failed to close response body: %v", err)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

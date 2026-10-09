@@ -88,3 +88,13 @@ func TestIsInCluster(t *testing.T) {
 		t.Error("IsInCluster should be true when service account token exists")
 	}
 }
+
+func TestPickFreePort(t *testing.T) {
+	port, err := pickFreePort()
+	if err != nil {
+		t.Fatalf("pickFreePort() error = %v", err)
+	}
+	if port <= 0 || port > 65535 {
+		t.Errorf("pickFreePort() returned invalid port = %d", port)
+	}
+}

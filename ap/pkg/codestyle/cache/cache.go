@@ -140,12 +140,16 @@ func (m *Manager) MarkGofmtDone(hash string) {
 	m.caches.Gofmt[hash] = true
 }
 
-func hashFile(path string) (string, error) {
+func hashFile(path string) (retHash string, retErr error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil && retErr == nil {
+			retErr = err
+		}
+	}()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {

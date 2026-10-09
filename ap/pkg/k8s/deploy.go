@@ -245,7 +245,10 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		tag = "latest"
 	}
 
-	relPath, _ := filepath.Rel(scope.RepoRoot, t.ManifestPath)
+	relPath, err := filepath.Rel(scope.RepoRoot, t.ManifestPath)
+	if err != nil {
+		return err
+	}
 	klog.Infof("Applying manifest %s", relPath)
 
 	content, err := os.ReadFile(t.ManifestPath)

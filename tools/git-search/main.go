@@ -43,7 +43,9 @@ func main() {
 
 	cmd.Flags().StringVar(&opt.repo, "repo", "", "The git repository URL")
 	cmd.Flags().StringVar(&opt.ref, "ref", "main", "The git ref to search in")
-	_ = cmd.MarkFlagRequired("repo")
+	if err := cmd.MarkFlagRequired("repo"); err != nil {
+		panic(err)
+	}
 
 	if err := cmd.Execute(); err != nil {
 		os.Exit(1)
@@ -74,7 +76,9 @@ func runSearch(ctx context.Context, opt *options, needle string) error {
 	} else {
 		fmt.Fprintf(os.Stderr, "Updating %s (ref %s)...\n", opt.repo, opt.ref)
 		fetchCmd := exec.CommandContext(ctx, "git", "--git-dir", barePath, "fetch", "origin", opt.ref+":"+opt.ref, "--depth", "1")
-		_ = fetchCmd.Run()
+		if err := fetchCmd.Run(); err != nil {
+			return fmt.Errorf("failed to fetch ref %s: %w", opt.ref, err)
+		}
 	}
 
 	fmt.Fprintf(os.Stderr, "Searching for \"%s\" in %s...\n", needle, opt.ref)
