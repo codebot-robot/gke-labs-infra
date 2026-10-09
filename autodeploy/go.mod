@@ -1,8 +1,8 @@
 module github.com/gke-labs/gke-labs-infra/autodeploy
 
-go 1.27.0
+go 1.27.1
 
-toolchain go1.27.1
+toolchain go1.27.2
 
 require (
 	github.com/go-git/go-git/v5 v5.19.2
