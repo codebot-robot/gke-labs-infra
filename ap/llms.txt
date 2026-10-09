@@ -9,11 +9,28 @@
 - By default, `ap` commands operate on all AP roots found within the git repository.
 - Use the `--root` flag to specify a single AP root (e.g., `ap --root autodeploy lint`).
 
+## Initializing / Onboarding Projects
+
+To onboard a repository or subdirectory onto `ap`, run `ap init`:
+
+```bash
+go run github.com/gke-labs/gke-labs-infra/ap@latest init --copyright-holder "<Organization>"
+```
+
+- Creates `.ap/` with starter `ap.yaml` (`version: latest`), `go.yaml`, and `headers.yaml`.
+- Pass `--license none` to disable license header checks, or `--license apache-2.0` (default).
+- Pass `--generate` to initialize and generate CI presubmits in one step:
+
+```bash
+go run github.com/gke-labs/gke-labs-infra/ap@latest init --copyright-holder "<Organization>" --generate
+```
+
 ## Recommended Workflow for Agents
 
 When making changes to an AP-managed project, coding agents should follow this verification sequence:
 
-1.  **Generate Code**: Run `ap generate` to update any generated files, CI scripts, or manifests.
+0.  **Initialize (if onboarding)**: If the repository or component is not yet configured for `ap`, run `ap init`.
+1.  **Generate Code**: Run `ap generate` to update any generated files, CI scripts, or manifests (note: `ap generate` also runs `ap fmt` to format code and stamp license headers).
 2.  **Lint**: Run `ap lint` to ensure code follows project style and quality guidelines.
 3.  **Test**:
     -   Run `ap test` for unit and integration tests.

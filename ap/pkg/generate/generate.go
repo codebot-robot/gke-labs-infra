@@ -213,10 +213,14 @@ func runGenerateVerifierGenerator(_ context.Context, repoRoot string) error {
 		return err
 	}
 
+	var headerBlock string
+	if headerContent != "" {
+		headerBlock = headerContent + "\n"
+	}
+
 	content := fmt.Sprintf(`#!/bin/bash
 
-%s
-set -o errexit
+%sset -o errexit
 set -o nounset
 set -o pipefail
 
@@ -233,7 +237,7 @@ if [[ -n $(git status --porcelain) ]]; then
   git status
   exit 1
 fi
-`, headerContent, skipGuard, apCmd, apCmd)
+`, headerBlock, skipGuard, apCmd, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -270,10 +274,14 @@ func runApTestGenerator(_ context.Context, repoRoot string) error {
 		return err
 	}
 
+	var headerBlock string
+	if headerContent != "" {
+		headerBlock = headerContent + "\n"
+	}
+
 	content := fmt.Sprintf(`#!/bin/bash
 
-%s
-set -o errexit
+%sset -o errexit
 set -o nounset
 set -o pipefail
 
@@ -282,7 +290,7 @@ cd "${REPO_ROOT}"
 %s
 # Run tests
 %s test //...
-`, headerContent, skipGuard, apCmd)
+`, headerBlock, skipGuard, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -319,10 +327,14 @@ func runApLintGenerator(_ context.Context, repoRoot string) error {
 		return err
 	}
 
+	var headerBlock string
+	if headerContent != "" {
+		headerBlock = headerContent + "\n"
+	}
+
 	content := fmt.Sprintf(`#!/bin/bash
 
-%s
-set -o errexit
+%sset -o errexit
 set -o nounset
 set -o pipefail
 
@@ -331,7 +343,7 @@ cd "${REPO_ROOT}"
 %s
 # Run linting
 %s lint //...
-`, headerContent, skipGuard, apCmd)
+`, headerBlock, skipGuard, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -396,10 +408,14 @@ func runApBuildGenerator(_ context.Context, repoRoot string, scopes []*tasks.APS
 		return err
 	}
 
+	var headerBlock string
+	if headerContent != "" {
+		headerBlock = headerContent + "\n"
+	}
+
 	content := fmt.Sprintf(`#!/bin/bash
 
-%s
-set -o errexit
+%sset -o errexit
 set -o nounset
 set -o pipefail
 
@@ -408,7 +424,7 @@ cd "${REPO_ROOT}"
 %s
 # Run build
 %s build //...
-`, headerContent, skipGuard, apCmd)
+`, headerBlock, skipGuard, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -474,10 +490,14 @@ func runApE2eGenerator(_ context.Context, repoRoot string, scopes []*tasks.APSco
 			return err
 		}
 
+		var headerBlock string
+		if headerContent != "" {
+			headerBlock = headerContent + "\n"
+		}
+
 		content := fmt.Sprintf(`#!/bin/bash
 
-%s
-set -o errexit
+%sset -o errexit
 set -o nounset
 set -o pipefail
 
@@ -486,7 +506,7 @@ cd "${REPO_ROOT}"
 %s
 # Run e2e tests
 %s e2e %s
-`, headerContent, skipGuard, apCmd, relApRoot)
+`, headerBlock, skipGuard, apCmd, relApRoot)
 		if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 			return fmt.Errorf("failed to write %s: %w", targetFile, err)
 		}

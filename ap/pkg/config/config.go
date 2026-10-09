@@ -15,6 +15,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,12 +36,57 @@ type GofmtConfig struct {
 	Enabled *bool `json:"enabled"`
 }
 
+func (g *GofmtConfig) UnmarshalJSON(b []byte) error {
+	var bVal bool
+	if err := json.Unmarshal(b, &bVal); err == nil {
+		g.Enabled = &bVal
+		return nil
+	}
+	type rawGofmtConfig GofmtConfig
+	var raw rawGofmtConfig
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	*g = GofmtConfig(raw)
+	return nil
+}
+
 type GovetConfig struct {
 	Enabled *bool `json:"enabled"`
 }
 
+func (g *GovetConfig) UnmarshalJSON(b []byte) error {
+	var bVal bool
+	if err := json.Unmarshal(b, &bVal); err == nil {
+		g.Enabled = &bVal
+		return nil
+	}
+	type rawGovetConfig GovetConfig
+	var raw rawGovetConfig
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	*g = GovetConfig(raw)
+	return nil
+}
+
 type GovulncheckConfig struct {
 	Enabled *bool `json:"enabled"`
+}
+
+func (g *GovulncheckConfig) UnmarshalJSON(b []byte) error {
+	var bVal bool
+	if err := json.Unmarshal(b, &bVal); err == nil {
+		g.Enabled = &bVal
+		return nil
+	}
+	type rawGovulncheckConfig GovulncheckConfig
+	var raw rawGovulncheckConfig
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	*g = GovulncheckConfig(raw)
+	return nil
 }
 
 type LintConfig struct {

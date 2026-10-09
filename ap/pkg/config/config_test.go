@@ -88,6 +88,39 @@ func TestLoadDefault(t *testing.T) {
 	}
 }
 
+func TestLoadBooleanFlags(t *testing.T) {
+	tempDir := t.TempDir()
+
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+gofmt: false
+govet: true
+govulncheck: false
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed with boolean config: %v", err)
+	}
+
+	if cfg.IsGofmtEnabled() != false {
+		t.Errorf("expected gofmt enabled to be false")
+	}
+	if cfg.IsGovetEnabled() != true {
+		t.Errorf("expected govet enabled to be true")
+	}
+	if cfg.IsGovulncheckEnabled() != false {
+		t.Errorf("expected govulncheck enabled to be false")
+	}
+}
+
 func TestLoadImagesConfig(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "ap-imagesconfig-test")
 	if err != nil {

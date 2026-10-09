@@ -104,6 +104,7 @@ func BuildRootCommand() *cobra.Command {
 	klog.InitFlags(klogFlags)
 	fs.AddGoFlagSet(klogFlags)
 
+	cmd.AddCommand(BuildInitCommand(&opt))
 	cmd.AddCommand(BuildLsCommand(&opt))
 	cmd.AddCommand(BuildTestCommand(&opt))
 	cmd.AddCommand(BuildE2eCommand(&opt))
