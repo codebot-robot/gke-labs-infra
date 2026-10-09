@@ -18,6 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
 func TestHasGoFiles(t *testing.T) {
@@ -117,4 +119,100 @@ func TestHasGoFiles(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLintTasks_DroppedErrors(t *testing.T) {
+	setupModule := func(t *testing.T, apYAML string) string {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if apYAML != "" {
+			apDir := filepath.Join(dir, ".ap")
+			if err := os.MkdirAll(apDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(apYAML), 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return dir
+	}
+
+	findDroppedTask := func(taskGroup tasks.Task) *DroppedErrorsCheckTask {
+		group, ok := taskGroup.(*tasks.Group)
+		if !ok {
+			return nil
+		}
+		for _, t := range group.Tasks {
+			if modGroup, ok := t.(*tasks.Group); ok {
+				for _, sub := range modGroup.Tasks {
+					if dt, ok := sub.(*DroppedErrorsCheckTask); ok {
+						return dt
+					}
+				}
+			}
+		}
+		return nil
+	}
+
+	t.Run("default_error", func(t *testing.T) {
+		dir := setupModule(t, "")
+		taskGroup, err := LintTasks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dt := findDroppedTask(taskGroup)
+		if dt == nil {
+			t.Fatalf("expected DroppedErrorsCheckTask to be included by default")
+		}
+		if dt.IsError != true {
+			t.Errorf("expected IsError to be true in default error mode")
+		}
+	})
+
+	t.Run("mode_warn", func(t *testing.T) {
+		dir := setupModule(t, "lint:\n  droppedErrors:\n    mode: warn\n")
+		taskGroup, err := LintTasks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dt := findDroppedTask(taskGroup)
+		if dt == nil {
+			t.Fatalf("expected DroppedErrorsCheckTask to be included")
+		}
+		if dt.IsError != false {
+			t.Errorf("expected IsError to be false in mode warn")
+		}
+	})
+
+	t.Run("mode_error", func(t *testing.T) {
+		dir := setupModule(t, "lint:\n  droppedErrors:\n    mode: error\n")
+		taskGroup, err := LintTasks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dt := findDroppedTask(taskGroup)
+		if dt == nil {
+			t.Fatalf("expected DroppedErrorsCheckTask to be included")
+		}
+		if dt.IsError != true {
+			t.Errorf("expected IsError to be true in mode error")
+		}
+	})
+
+	t.Run("mode_ignore", func(t *testing.T) {
+		dir := setupModule(t, "lint:\n  droppedErrors:\n    mode: ignore\n")
+		taskGroup, err := LintTasks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dt := findDroppedTask(taskGroup)
+		if dt != nil {
+			t.Fatalf("expected DroppedErrorsCheckTask to be excluded in mode ignore")
+		}
+	})
 }

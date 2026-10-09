@@ -178,6 +178,40 @@ func (t *ReplaceEmptyInterfaceWithAnyTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+// DroppedErrorsCheckTask represents a task to run droppederrors check.
+type DroppedErrorsCheckTask struct {
+	Dir     string
+	IsError bool
+}
+
+func (t *DroppedErrorsCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
+	klog.Infof("Running droppederrors check in %s", t.Dir)
+	apPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("could not find ap executable: %w", err)
+	}
+	args := []string{"lint", "droppederrors", "./..."}
+	droppedCmd := exec.CommandContext(ctx, apPath, args...)
+	droppedCmd.Dir = t.Dir
+	droppedCmd.Stdout = os.Stdout
+	droppedCmd.Stderr = os.Stderr
+	if err := droppedCmd.Run(); err != nil {
+		if t.IsError {
+			return fmt.Errorf("droppederrors check failed in %s: %w", t.Dir, err)
+		}
+		klog.Warningf("droppederrors check failed in %s: %v", t.Dir, err)
+	}
+	return nil
+}
+
+func (t *DroppedErrorsCheckTask) GetName() string {
+	return "droppederrors-check"
+}
+
+func (t *DroppedErrorsCheckTask) GetChildren() []tasks.Task {
+	return nil
+}
+
 // LintTasks returns a task group for running go linting in discovered modules.
 func LintTasks(root string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
@@ -231,6 +265,12 @@ func LintTasks(root string) (tasks.Task, error) {
 		if cfg.IsReplaceEmptyInterfaceWithAnyEnabled() {
 			modGroup.Tasks = append(modGroup.Tasks, &ReplaceEmptyInterfaceWithAnyTask{
 				Dir: dir,
+			})
+		}
+		if cfg.IsDroppedErrorsEnabled() {
+			modGroup.Tasks = append(modGroup.Tasks, &DroppedErrorsCheckTask{
+				Dir:     dir,
+				IsError: cfg.IsDroppedErrorsError(),
 			})
 		}
 

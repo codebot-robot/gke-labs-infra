@@ -15,10 +15,10 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -36,57 +36,12 @@ type GofmtConfig struct {
 	Enabled *bool `json:"enabled"`
 }
 
-func (g *GofmtConfig) UnmarshalJSON(b []byte) error {
-	var bVal bool
-	if err := json.Unmarshal(b, &bVal); err == nil {
-		g.Enabled = &bVal
-		return nil
-	}
-	type rawGofmtConfig GofmtConfig
-	var raw rawGofmtConfig
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return err
-	}
-	*g = GofmtConfig(raw)
-	return nil
-}
-
 type GovetConfig struct {
 	Enabled *bool `json:"enabled"`
 }
 
-func (g *GovetConfig) UnmarshalJSON(b []byte) error {
-	var bVal bool
-	if err := json.Unmarshal(b, &bVal); err == nil {
-		g.Enabled = &bVal
-		return nil
-	}
-	type rawGovetConfig GovetConfig
-	var raw rawGovetConfig
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return err
-	}
-	*g = GovetConfig(raw)
-	return nil
-}
-
 type GovulncheckConfig struct {
 	Enabled *bool `json:"enabled"`
-}
-
-func (g *GovulncheckConfig) UnmarshalJSON(b []byte) error {
-	var bVal bool
-	if err := json.Unmarshal(b, &bVal); err == nil {
-		g.Enabled = &bVal
-		return nil
-	}
-	type rawGovulncheckConfig GovulncheckConfig
-	var raw rawGovulncheckConfig
-	if err := json.Unmarshal(b, &raw); err != nil {
-		return err
-	}
-	*g = GovulncheckConfig(raw)
-	return nil
 }
 
 type LintConfig struct {
@@ -94,6 +49,7 @@ type LintConfig struct {
 	TestContext                  *TestContextConfig                  `json:"testcontext"`
 	UnusedParameters             *UnusedParametersConfig             `json:"unusedparameters"`
 	ReplaceEmptyInterfaceWithAny *ReplaceEmptyInterfaceWithAnyConfig `json:"replaceEmptyInterfaceWithAny"`
+	DroppedErrors                *DroppedErrorsConfig                `json:"droppedErrors"`
 }
 
 type UnusedConfig struct {
@@ -110,6 +66,16 @@ type TestContextConfig struct {
 
 type UnusedParametersConfig struct {
 	Mode string `json:"mode"`
+}
+
+type DroppedErrorsConfig struct {
+	Mode               string   `json:"mode"`
+	Exclude            []string `json:"exclude"`
+	Baseline           string   `json:"baseline"`
+	SkipTests          *bool    `json:"skipTests"`
+	SkipGenerated      *bool    `json:"skipGenerated"`
+	UseDefaultExcludes *bool    `json:"useDefaultExcludes"`
+	GOOS               []string `json:"goos"`
 }
 
 // Load loads the configuration from .ap/go.yaml in the repository root.
@@ -130,7 +96,22 @@ func Load(repoRoot string) (*Config, error) {
 		return nil, fmt.Errorf("error checking %s: %w", configFile, err)
 	}
 
+	if err := config.Validate(); err != nil {
+		return nil, err
+	}
+
 	return &config, nil
+}
+
+// Validate checks the configuration for semantic errors.
+func (c *Config) Validate() error {
+	if c.Lint != nil && c.Lint.DroppedErrors != nil && c.Lint.DroppedErrors.Mode != "" {
+		m := c.Lint.DroppedErrors.Mode
+		if m != "error" && m != "warn" && m != "ignore" {
+			return fmt.Errorf("invalid droppedErrors mode %q: must be one of 'error', 'warn', 'ignore'", m)
+		}
+	}
+	return nil
 }
 
 // IsGofmtEnabled returns true if gofmt is enabled in the config (defaulting to true).
@@ -197,6 +178,88 @@ func (c *Config) IsReplaceEmptyInterfaceWithAnyEnabled() bool {
 		return *c.Lint.ReplaceEmptyInterfaceWithAny.Enabled
 	}
 	return true
+}
+
+// IsDroppedErrorsEnabled returns true if dropped error checking is enabled (defaulting to true, mode != "ignore").
+func (c *Config) IsDroppedErrorsEnabled() bool {
+	if c.Lint != nil && c.Lint.DroppedErrors != nil {
+		return c.Lint.DroppedErrors.Mode != "ignore"
+	}
+	return true
+}
+
+// IsDroppedErrorsError returns true if dropped errors should be reported as an error.
+// Default is true ("error" mode).
+func (c *Config) IsDroppedErrorsError() bool {
+	return c.DroppedErrorsMode() == "error"
+}
+
+// DroppedErrorsMode returns the mode for dropped error checking: "ignore", "warn", or "error".
+// Default is "error".
+func (c *Config) DroppedErrorsMode() string {
+	if c.Lint != nil && c.Lint.DroppedErrors != nil && c.Lint.DroppedErrors.Mode != "" {
+		return c.Lint.DroppedErrors.Mode
+	}
+	return "error"
+}
+
+// DroppedErrorsBaseline returns the configured baseline file path, or empty string.
+func (c *Config) DroppedErrorsBaseline() string {
+	if c.Lint != nil && c.Lint.DroppedErrors != nil {
+		return c.Lint.DroppedErrors.Baseline
+	}
+	return ""
+}
+
+// DroppedErrorsExclude returns the configured excluded symbols.
+func (c *Config) DroppedErrorsExclude() []string {
+	if c.Lint != nil && c.Lint.DroppedErrors != nil {
+		return c.Lint.DroppedErrors.Exclude
+	}
+	return nil
+}
+
+// DroppedErrorsSkipTests returns true if test files should be skipped (default true).
+func (c *Config) DroppedErrorsSkipTests() bool {
+	if c.Lint != nil && c.Lint.DroppedErrors != nil {
+		if c.Lint.DroppedErrors.SkipTests != nil {
+			return *c.Lint.DroppedErrors.SkipTests
+		}
+	}
+	return true
+}
+
+// DroppedErrorsSkipGenerated returns true if generated files should be skipped (default false).
+func (c *Config) DroppedErrorsSkipGenerated() bool {
+	if c.Lint != nil && c.Lint.DroppedErrors != nil {
+		if c.Lint.DroppedErrors.SkipGenerated != nil {
+			return *c.Lint.DroppedErrors.SkipGenerated
+		}
+	}
+	return false
+}
+
+// DroppedErrorsUseDefaultExcludes returns true if default exclusions should be used (default true).
+func (c *Config) DroppedErrorsUseDefaultExcludes() bool {
+	if c.Lint != nil && c.Lint.DroppedErrors != nil {
+		if c.Lint.DroppedErrors.UseDefaultExcludes != nil {
+			return *c.Lint.DroppedErrors.UseDefaultExcludes
+		}
+	}
+	return true
+}
+
+// DroppedErrorsGOOS returns the list of GOOS targets to check.
+// Default is host plus "linux" (or just "linux" if host is linux).
+func (c *Config) DroppedErrorsGOOS() []string {
+	if c.Lint != nil && c.Lint.DroppedErrors != nil && len(c.Lint.DroppedErrors.GOOS) > 0 {
+		return c.Lint.DroppedErrors.GOOS
+	}
+	host := runtime.GOOS
+	if host == "linux" {
+		return []string{"linux"}
+	}
+	return []string{host, "linux"}
 }
 
 // ImageRepo returns the image repository to use, defaulting to "images.local".

@@ -12,21 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package a
 
-import (
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/any"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/droppederrors"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/testcontext"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/unused"
-	"golang.org/x/tools/go/analysis/multichecker"
-)
+import "errors"
 
-func main() {
-	multichecker.Main(
-		unused.Analyzer,
-		any.Analyzer,
-		testcontext.Analyzer,
-		droppederrors.Analyzer,
-	)
+func fail() error {
+	return errors.New("fail")
+}
+
+func test() {
+	_ = fail() // want "unchecked error"
+
+	err := fail() // want "error only checked for success"
+	if err == nil {
+		println("ok")
+	}
 }

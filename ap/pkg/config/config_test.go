@@ -86,10 +86,32 @@ func TestLoadDefault(t *testing.T) {
 	if cfg.IsGovulncheckEnabled() != true {
 		t.Errorf("expected default govulncheck enabled to be true")
 	}
+	if cfg.IsDroppedErrorsEnabled() != true {
+		t.Errorf("expected default droppederrors enabled to be true")
+	}
+	if cfg.IsDroppedErrorsError() != true {
+		t.Errorf("expected default droppederrors error to be true (error mode)")
+	}
+	if cfg.DroppedErrorsMode() != "error" {
+		t.Errorf("expected default droppederrors mode to be error, got %q", cfg.DroppedErrorsMode())
+	}
+	if cfg.DroppedErrorsSkipTests() != true {
+		t.Errorf("expected default droppederrors skipTests to be true")
+	}
+	if cfg.DroppedErrorsSkipGenerated() != false {
+		t.Errorf("expected default droppederrors skipGenerated to be false")
+	}
+	if cfg.DroppedErrorsUseDefaultExcludes() != true {
+		t.Errorf("expected default droppederrors useDefaultExcludes to be true")
+	}
 }
 
-func TestLoadBooleanFlags(t *testing.T) {
-	tempDir := t.TempDir()
+func TestDroppedErrorsConfig(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "ap-droppederrors-config-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
 
 	apDir := filepath.Join(tempDir, ".ap")
 	if err := os.Mkdir(apDir, 0755); err != nil {
@@ -97,9 +119,17 @@ func TestLoadBooleanFlags(t *testing.T) {
 	}
 
 	yamlContent := `
-gofmt: false
-govet: true
-govulncheck: false
+lint:
+  droppedErrors:
+    mode: error
+    exclude:
+      - fmt.Fprintln
+    baseline: .ap/droppederrors-baseline.txt
+    skipTests: false
+    skipGenerated: true
+    useDefaultExcludes: false
+    goos:
+      - linux
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -107,17 +137,57 @@ govulncheck: false
 
 	cfg, err := Load(tempDir)
 	if err != nil {
-		t.Fatalf("Load failed with boolean config: %v", err)
+		t.Fatalf("Load failed: %v", err)
 	}
 
-	if cfg.IsGofmtEnabled() != false {
-		t.Errorf("expected gofmt enabled to be false")
+	if !cfg.IsDroppedErrorsEnabled() {
+		t.Errorf("expected droppederrors to be enabled")
 	}
-	if cfg.IsGovetEnabled() != true {
-		t.Errorf("expected govet enabled to be true")
+	if !cfg.IsDroppedErrorsError() {
+		t.Errorf("expected droppederrors to be error mode")
 	}
-	if cfg.IsGovulncheckEnabled() != false {
-		t.Errorf("expected govulncheck enabled to be false")
+	if cfg.DroppedErrorsMode() != "error" {
+		t.Errorf("expected mode error, got %q", cfg.DroppedErrorsMode())
+	}
+	if cfg.DroppedErrorsBaseline() != ".ap/droppederrors-baseline.txt" {
+		t.Errorf("expected baseline .ap/droppederrors-baseline.txt, got %q", cfg.DroppedErrorsBaseline())
+	}
+	if len(cfg.DroppedErrorsExclude()) != 1 || cfg.DroppedErrorsExclude()[0] != "fmt.Fprintln" {
+		t.Errorf("unexpected exclude list: %v", cfg.DroppedErrorsExclude())
+	}
+	if cfg.DroppedErrorsSkipTests() != false {
+		t.Errorf("expected skipTests to be false")
+	}
+	if cfg.DroppedErrorsSkipGenerated() != true {
+		t.Errorf("expected skipGenerated to be true")
+	}
+	if cfg.DroppedErrorsUseDefaultExcludes() != false {
+		t.Errorf("expected useDefaultExcludes to be false")
+	}
+	if len(cfg.DroppedErrorsGOOS()) != 1 || cfg.DroppedErrorsGOOS()[0] != "linux" {
+		t.Errorf("unexpected GOOS list: %v", cfg.DroppedErrorsGOOS())
+	}
+}
+
+func TestConfig_InvalidDroppedErrorsMode(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  droppedErrors:
+    mode: eror
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(tempDir)
+	if err == nil {
+		t.Fatalf("expected Load to fail on invalid droppedErrors mode 'eror'")
 	}
 }
 
