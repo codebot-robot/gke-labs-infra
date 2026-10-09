@@ -600,18 +600,15 @@ jobs:
 			sb.WriteString(fmt.Sprintf(`
       - name: Run %s
         run: ./%s/%s
-`, jobName, relPresubmitsDir, scriptName))
 
-			if strings.Contains(scriptName, "test") || strings.Contains(scriptName, "e2e") {
-				sb.WriteString(fmt.Sprintf(`
       - name: Upload artifacts
         if: always()
         uses: %s
         with:
           name: artifacts-%s
           path: /tmp/artifacts
-`, actionUploadArtifact, jobName))
-			}
+          if-no-files-found: ignore
+`, jobName, relPresubmitsDir, scriptName, actionUploadArtifact, jobName))
 		}
 	}
 

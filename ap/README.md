@@ -20,6 +20,10 @@ The `ap generate` command is aware of all ap roots in the repository. It will:
 3.  If multiple roots are found, it appends a suffix to the generated script names (e.g., `ap-test-subdir`) to avoid collisions.
 4.  Create a unified GitHub Actions workflow at `.github/workflows/ci-presubmits.yaml` that includes jobs for all scripts across all ap roots.
 
+### Presubmit Artifacts
+
+Presubmit scripts may write anything to `$ARTIFACTS` (set to `/tmp/artifacts` in generated GitHub Actions jobs), and it is uploaded as `artifacts-<job>` upon job completion (even on failure). If no files are written, the upload step completes without producing warnings or errors.
+
 ### Environment Variables
 
 You can override the root discovery by setting the following environment variables:
