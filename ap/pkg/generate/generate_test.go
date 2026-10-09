@@ -15,10 +15,13 @@
 package generate
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
 func TestGetApCommand(t *testing.T) {
@@ -238,6 +241,49 @@ func TestPinnedActionRefs(t *testing.T) {
 		}
 		if !strings.Contains(rest, "# ratchet:") {
 			t.Errorf("action ref %q missing ratchet version comment", ref)
+		}
+	}
+}
+
+func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
+	root := t.TempDir()
+	writeTestHeadersConfig(t, root)
+
+	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
+	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create presubmit scripts: one without test/e2e in name (e.g. ap-posix or ap-lint), one with.
+	for _, script := range []string{"ap-posix", "ap-test"} {
+		path := filepath.Join(presubmitsDir, script)
+		if err := os.WriteFile(path, []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root}}
+	if err := runGithubActionsGenerator(t.Context(), root, scopes); err != nil {
+		t.Fatalf("runGithubActionsGenerator: %v", err)
+	}
+
+	workflowPath := filepath.Join(root, ".github", "workflows", "ci-presubmits.yaml")
+	b, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(b)
+
+	for _, job := range []string{"ap-posix", "ap-test"} {
+		expectedStep := fmt.Sprintf(`      - name: Upload artifacts
+        if: always()
+        uses: %s
+        with:
+          name: artifacts-%s
+          path: /tmp/artifacts
+          if-no-files-found: ignore`, actionUploadArtifact, job)
+		if !strings.Contains(content, expectedStep) {
+			t.Errorf("job %s missing expected artifact upload step in workflow:\n%s", job, content)
 		}
 	}
 }
