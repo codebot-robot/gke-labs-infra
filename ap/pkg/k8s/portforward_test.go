@@ -17,6 +17,7 @@ package k8s
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -60,12 +61,30 @@ func TestPortForwardTask_Properties(t *testing.T) {
 }
 
 func TestIsInCluster(t *testing.T) {
-	// Backup env
-	orig := os.Getenv("KUBERNETES_SERVICE_HOST")
-	defer os.Setenv("KUBERNETES_SERVICE_HOST", orig)
+	// Backup env and var
+	origEnv := os.Getenv("KUBERNETES_SERVICE_HOST")
+	defer os.Setenv("KUBERNETES_SERVICE_HOST", origEnv)
+
+	origTokenPath := serviceAccountTokenPath
+	defer func() { serviceAccountTokenPath = origTokenPath }()
 
 	os.Setenv("KUBERNETES_SERVICE_HOST", "")
 	if IsInCluster() {
 		t.Error("IsInCluster should be false when KUBERNETES_SERVICE_HOST is empty")
+	}
+
+	os.Setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+	serviceAccountTokenPath = filepath.Join(t.TempDir(), "missing-token")
+	if IsInCluster() {
+		t.Error("IsInCluster should be false when service account token does not exist")
+	}
+
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("fake-token"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	serviceAccountTokenPath = tokenFile
+	if !IsInCluster() {
+		t.Error("IsInCluster should be true when service account token exists")
 	}
 }

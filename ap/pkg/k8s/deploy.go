@@ -27,6 +27,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"gopkg.in/yaml.v3"
 	"k8s.io/klog/v2"
@@ -392,7 +393,11 @@ func findManifests(root string) ([]string, error) {
 
 		if info.IsDir() {
 			// If this directory contains a .ap directory, it's a different root, so skip it.
-			if _, err := os.Stat(filepath.Join(path, ".ap")); err == nil {
+			hasAP, err := fileutils.FileExists(filepath.Join(path, ".ap"))
+			if err != nil {
+				return err
+			}
+			if hasAP {
 				return filepath.SkipDir
 			}
 			return nil

@@ -12,26 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package k8s
+package fileutils
 
 import (
+	"errors"
+	"io/fs"
 	"os"
-
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
-	"k8s.io/klog/v2"
 )
 
-var serviceAccountTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-
-// IsInCluster returns true if the current process is running inside a Kubernetes cluster.
-func IsInCluster() bool {
-	if os.Getenv("KUBERNETES_SERVICE_HOST") == "" {
-		return false
+// FileExists reports whether the named file or directory exists.
+// It returns false, nil only when errors.Is(err, fs.ErrNotExist).
+// All other errors are returned.
+func FileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
 	}
-	exists, err := fileutils.FileExists(serviceAccountTokenPath)
-	if err != nil {
-		klog.Warningf("failed to check for service account token at %s: %v", serviceAccountTokenPath, err)
-		return false
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
 	}
-	return exists
+	return false, err
 }

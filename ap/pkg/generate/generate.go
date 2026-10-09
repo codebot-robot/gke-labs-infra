@@ -25,6 +25,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileheaders"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
@@ -374,7 +375,11 @@ func runApBuildGenerator(_ context.Context, repoRoot string, scopes []*tasks.APS
 
 	// If no images or build scripts, we should remove the file if it exists
 	if !hasBuild {
-		if _, err := os.Stat(targetFile); err == nil {
+		exists, err := fileutils.FileExists(targetFile)
+		if err != nil {
+			return err
+		}
+		if exists {
 			klog.Infof("Removing %s as no build tasks found", targetFile)
 			if err := os.Remove(targetFile); err != nil {
 				return fmt.Errorf("failed to remove %s: %w", targetFile, err)
@@ -437,7 +442,11 @@ func runApE2eGenerator(_ context.Context, repoRoot string, scopes []*tasks.APSco
 
 	// Remove the global ap-e2e script if it exists
 	globalTargetFile := filepath.Join(presubmitsDir, "ap-e2e")
-	if _, err := os.Stat(globalTargetFile); err == nil {
+	exists, err := fileutils.FileExists(globalTargetFile)
+	if err != nil {
+		return err
+	}
+	if exists {
 		klog.Infof("Removing global %s", globalTargetFile)
 		if err := os.Remove(globalTargetFile); err != nil {
 			return fmt.Errorf("failed to remove %s: %w", globalTargetFile, err)
@@ -452,7 +461,11 @@ func runApE2eGenerator(_ context.Context, repoRoot string, scopes []*tasks.APSco
 		targetFile := filepath.Join(presubmitsDir, "ap-e2e"+suffix)
 
 		if len(e2eTasks) == 0 {
-			if _, err := os.Stat(targetFile); err == nil {
+			exists, err := fileutils.FileExists(targetFile)
+			if err != nil {
+				return err
+			}
+			if exists {
 				klog.Infof("Removing %s as no e2e tasks found", targetFile)
 				if err := os.Remove(targetFile); err != nil {
 					return fmt.Errorf("failed to remove %s: %w", targetFile, err)
@@ -562,9 +575,9 @@ jobs:
 			return fmt.Errorf("failed to read presubmits dir %s: %w", presubmitsDir, err)
 		}
 
-		goModExists := false
-		if _, err := os.Stat(filepath.Join(apRoot, "go.mod")); err == nil {
-			goModExists = true
+		goModExists, err := fileutils.FileExists(filepath.Join(apRoot, "go.mod"))
+		if err != nil {
+			return err
 		}
 
 		relPresubmitsDir, err := filepath.Rel(repoRoot, presubmitsDir)
@@ -608,7 +621,11 @@ jobs:
 
 			if scriptName == "ap-build" {
 				cleanupTaskPath := filepath.Join(apRoot, "dev", "tasks", "free-disk-space-on-github-actions-runner")
-				if _, err := os.Stat(cleanupTaskPath); err == nil {
+				hasCleanup, err := fileutils.FileExists(cleanupTaskPath)
+				if err != nil {
+					return err
+				}
+				if hasCleanup {
 					relCleanupTask, _ := filepath.Rel(repoRoot, cleanupTaskPath)
 					sb.WriteString(fmt.Sprintf(`
       - name: Free disk space

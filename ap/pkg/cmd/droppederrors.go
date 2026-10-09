@@ -22,6 +22,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/droppederrors"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/spf13/cobra"
 )
 
@@ -141,11 +142,19 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 	}
 	if baseline == "" {
 		defaultBaseline := filepath.Join(apRoot, ".ap", "droppederrors-baseline.txt")
-		if _, err := os.Stat(defaultBaseline); err == nil {
+		exists, err := fileutils.FileExists(defaultBaseline)
+		if err != nil {
+			return err
+		}
+		if exists {
 			baseline = defaultBaseline
 		} else if repoRoot != "" {
 			repoBaseline := filepath.Join(repoRoot, ".ap", "droppederrors-baseline.txt")
-			if _, err := os.Stat(repoBaseline); err == nil {
+			exists, err := fileutils.FileExists(repoBaseline)
+			if err != nil {
+				return err
+			}
+			if exists {
 				baseline = repoBaseline
 			}
 		}

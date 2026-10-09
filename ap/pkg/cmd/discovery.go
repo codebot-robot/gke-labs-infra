@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -84,7 +85,11 @@ func DiscoverScopes(repoRoot string, apRoots []string) ([]*tasks.APScope, error)
 
 			// If this is not the root we're walking, and it has a .ap directory, skip it.
 			if path != apRoot {
-				if _, err := os.Stat(filepath.Join(path, ".ap")); err == nil {
+				hasAP, err := fileutils.FileExists(filepath.Join(path, ".ap"))
+				if err != nil {
+					return err
+				}
+				if hasAP {
 					return filepath.SkipDir
 				}
 			}
