@@ -15,7 +15,6 @@
 package cmd
 
 import (
-	"context"
 	"path/filepath"
 	"testing"
 )
@@ -45,8 +44,7 @@ func TestRunFormat_DryRun(t *testing.T) {
 	}
 
 	// Should not panic or fail with dry run enabled even if directory structure is mock
-	ctx := context.Background()
-	err := RunFormat(ctx, opt)
+	err := RunFormat(t.Context(), opt)
 	if err != nil {
 		t.Fatalf("RunFormat dry run failed: %v", err)
 	}
