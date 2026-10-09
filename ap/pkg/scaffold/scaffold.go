@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
@@ -74,7 +75,11 @@ func Init(opt InitOptions) error {
 		var existing []string
 		for _, f := range filesToCheck {
 			path := filepath.Join(apDir, f)
-			if _, err := os.Stat(path); err == nil {
+			exists, err := fileutils.FileExists(path)
+			if err != nil {
+				return fmt.Errorf("failed to check %s: %w", path, err)
+			}
+			if exists {
 				existing = append(existing, f)
 			}
 		}

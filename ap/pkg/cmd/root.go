@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 )
@@ -138,11 +139,19 @@ func findRoots() (string, string, error) {
 	dir := startDir
 	for {
 		if apRoot == "" {
-			if _, err := os.Stat(filepath.Join(dir, ".ap")); err == nil {
+			hasAP, err := fileutils.FileExists(filepath.Join(dir, ".ap"))
+			if err != nil {
+				return "", "", err
+			}
+			if hasAP {
 				apRoot = dir
 			}
 		}
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		hasGit, err := fileutils.FileExists(filepath.Join(dir, ".git"))
+		if err != nil {
+			return "", "", err
+		}
+		if hasGit {
 			if repoRoot == "" {
 				repoRoot = dir
 			}

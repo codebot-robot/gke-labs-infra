@@ -24,6 +24,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 )
 
 // Options specifies configuration for the test harness.
@@ -207,7 +209,11 @@ func (h *Harness) FindRepoRoot() string {
 		h.t.Fatalf("failed to get current working directory: %v", err)
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+		hasGit, err := fileutils.FileExists(filepath.Join(dir, ".git"))
+		if err != nil {
+			h.t.Fatalf("failed to check for .git in %s: %v", dir, err)
+		}
+		if hasGit {
 			return dir
 		}
 		parent := filepath.Dir(dir)

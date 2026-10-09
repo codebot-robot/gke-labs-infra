@@ -23,6 +23,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
 )
@@ -306,7 +307,11 @@ func hasGoFiles(root string) (bool, error) {
 			if path != root {
 				// If this directory contains a go.mod file, it's a separate module.
 				// We should not look for Go files inside it.
-				if _, err := os.Stat(filepath.Join(path, "go.mod")); err == nil {
+				hasGoMod, err := fileutils.FileExists(filepath.Join(path, "go.mod"))
+				if err != nil {
+					return err
+				}
+				if hasGoMod {
 					return filepath.SkipDir
 				}
 			}
