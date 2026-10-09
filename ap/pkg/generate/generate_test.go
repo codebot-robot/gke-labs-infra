@@ -287,3 +287,39 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 		}
 	}
 }
+
+func TestPresubmitScriptsWithoutHeadersConfig(t *testing.T) {
+	root := t.TempDir()
+	if err := runApTestGenerator(t.Context(), root); err != nil {
+		t.Fatalf("runApTestGenerator should succeed without headers.yaml: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, "dev", "ci", "presubmits", "ap-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(b)
+	if !strings.HasPrefix(script, "#!/bin/bash\n\nset -o errexit\n") {
+		t.Errorf("expected script without header to start directly with shebang and set -o errexit, got:\n%s", script)
+	}
+}
+
+func TestPresubmitScriptsWithLicenseNone(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".ap", "headers.yaml"), []byte("license: none\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runApTestGenerator(t.Context(), root); err != nil {
+		t.Fatalf("runApTestGenerator should succeed with license: none: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(root, "dev", "ci", "presubmits", "ap-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(b)
+	if !strings.HasPrefix(script, "#!/bin/bash\n\nset -o errexit\n") {
+		t.Errorf("expected script with license: none to start directly with shebang and set -o errexit, got:\n%s", script)
+	}
+}

@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 )
 
 func TestRun_Skip(t *testing.T) {
@@ -375,5 +377,123 @@ func main() {}
 	// The top of the file should now contain the license block
 	if !strings.HasPrefix(contentStr, "// Copyright") {
 		t.Errorf("Expected the license header to be added at the very top of the file. Content:\n%s", contentStr)
+	}
+}
+
+func TestGenerateHeader(t *testing.T) {
+	cases := []struct {
+		name    string
+		cfg     *config.HeadersConfig
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "nil config",
+			cfg:  nil,
+			want: "",
+		},
+		{
+			name: "empty license",
+			cfg:  &config.HeadersConfig{},
+			want: "",
+		},
+		{
+			name: "license none",
+			cfg:  &config.HeadersConfig{License: "none"},
+			want: "",
+		},
+		{
+			name: "apache-2.0 license",
+			cfg:  &config.HeadersConfig{License: "apache-2.0", CopyrightHolder: "Test Org"},
+			want: "// Copyright",
+		},
+		{
+			name:    "unsupported license",
+			cfg:     &config.HeadersConfig{License: "mit"},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := GenerateHeader(tc.cfg, "//")
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error for %s, got nil", tc.name)
+				}
+				if !strings.Contains(err.Error(), ".ap/headers.yaml") {
+					t.Errorf("expected error to mention .ap/headers.yaml, got %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for %s: %v", tc.name, err)
+			}
+			if tc.want == "" && got != "" {
+				t.Errorf("expected empty header, got %q", got)
+			}
+			if tc.want != "" && !strings.HasPrefix(got, tc.want) {
+				t.Errorf("expected prefix %q, got %q", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestRun_LicenseNone(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	configDir := filepath.Join(tmpDir, ".ap")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configFile := filepath.Join(configDir, "headers.yaml")
+	if err := os.WriteFile(configFile, []byte("license: none\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	targetFile := filepath.Join(tmpDir, "main.go")
+	originalContent := "package main\n\nfunc main() {}\n"
+	if err := os.WriteFile(targetFile, []byte(originalContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := t.Context()
+	if err := Run(ctx, tmpDir, []string{targetFile}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	content, err := os.ReadFile(targetFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != originalContent {
+		t.Errorf("Expected content unchanged when license is none, got:\n%s", string(content))
+	}
+}
+
+func TestRun_UnsupportedLicense(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	configDir := filepath.Join(tmpDir, ".ap")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	configFile := filepath.Join(configDir, "headers.yaml")
+	if err := os.WriteFile(configFile, []byte("license: mit\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	targetFile := filepath.Join(tmpDir, "main.go")
+	if err := os.WriteFile(targetFile, []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := t.Context()
+	err := Run(ctx, tmpDir, []string{targetFile})
+	if err == nil {
+		t.Fatal("Expected error for unsupported license, got nil")
+	}
+	if !strings.Contains(err.Error(), ".ap/headers.yaml") {
+		t.Errorf("Expected error to mention .ap/headers.yaml, got %v", err)
 	}
 }

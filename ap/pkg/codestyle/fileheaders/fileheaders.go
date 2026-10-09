@@ -75,6 +75,14 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 		return err
 	}
 
+	if config.License == "" || config.License == "none" {
+		klog.V(2).Info("License is empty or 'none', skipping file headers")
+		return nil
+	}
+	if config.License != "apache-2.0" {
+		return fmt.Errorf("unsupported license %q in .ap/headers.yaml (supported: %q, %q)", config.License, "apache-2.0", "none")
+	}
+
 	// Combine default ignores with config skips
 	allIgnores := append(opt.IgnoreFiles, config.Skip...)
 	ignoreList := walker.NewIgnoreList(allIgnores)
@@ -272,14 +280,22 @@ func getCommentStyle(name, ext string) string {
 }
 
 func GenerateHeader(cfg *config.HeadersConfig, style string) (string, error) {
-	year := time.Now().Year()
-
-	if cfg.License != "apache-2.0" {
-		return "", fmt.Errorf("unsupported license: %s", cfg.License)
+	if cfg == nil || cfg.License == "" || cfg.License == "none" {
+		return "", nil
 	}
 
+	if cfg.License != "apache-2.0" {
+		return "", fmt.Errorf("unsupported license %q in .ap/headers.yaml (supported: %q, %q)", cfg.License, "apache-2.0", "none")
+	}
+
+	year := time.Now().Year()
+
 	var lines []string
-	lines = append(lines, fmt.Sprintf("%s Copyright %d %s", style, year, cfg.CopyrightHolder))
+	if cfg.CopyrightHolder != "" {
+		lines = append(lines, fmt.Sprintf("%s Copyright %d %s", style, year, cfg.CopyrightHolder))
+	} else {
+		lines = append(lines, fmt.Sprintf("%s Copyright %d", style, year))
+	}
 	lines = append(lines, style)
 	lines = append(lines, fmt.Sprintf("%s Licensed under the Apache License, Version 2.0 (the \"License\");", style))
 	lines = append(lines, fmt.Sprintf("%s you may not use this file except in compliance with the License.", style))
