@@ -132,3 +132,40 @@ func TestReconcile(t *testing.T) {
 		t.Errorf("expected LastDeployedCommit to be %s, got %s", commitHash.String(), updatedPkg.Status.LastDeployedCommit)
 	}
 }
+
+func TestReconcile_InvalidInterval(t *testing.T) {
+	ctx := t.Context()
+	scheme := runtime.NewScheme()
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("failed to add scheme: %v", err)
+	}
+
+	pkg := &v1alpha1.Package{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pkg-invalid-interval",
+			Namespace: "default",
+		},
+		Spec: v1alpha1.PackageSpec{
+			Repo:     "http://example.com/repo.git",
+			Interval: "not-a-valid-duration",
+		},
+	}
+
+	client := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(pkg).Build()
+	r := &PackageReconciler{
+		Client: client,
+		Scheme: scheme,
+	}
+
+	req := ctrl.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      "test-pkg-invalid-interval",
+			Namespace: "default",
+		},
+	}
+
+	_, err := r.Reconcile(ctx, req)
+	if err == nil {
+		t.Fatalf("expected error for invalid interval, got nil")
+	}
+}

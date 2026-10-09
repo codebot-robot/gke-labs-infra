@@ -58,9 +58,12 @@ func (r *PackageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	pollInterval := 1 * time.Minute
 	if pkg.Spec.Interval != "" {
-		if d, err := time.ParseDuration(pkg.Spec.Interval); err == nil {
-			pollInterval = d
+		d, err := time.ParseDuration(pkg.Spec.Interval)
+		if err != nil {
+			klog.Errorf("Invalid spec.interval %q for Package %s: %v", pkg.Spec.Interval, req.NamespacedName, err)
+			return ctrl.Result{}, fmt.Errorf("invalid spec.interval %q: %w", pkg.Spec.Interval, err)
 		}
+		pollInterval = d
 	}
 
 	monitor := git.NewMonitor(repoURL)
