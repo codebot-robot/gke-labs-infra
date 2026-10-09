@@ -17,7 +17,9 @@ package generate
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -105,6 +107,9 @@ func GenerateTasks(repoRoot string, scopes []*tasks.APScope) (tasks.Task, error)
 		// 1. Run legacy scripts
 		tasksDir := filepath.Join(apRoot, "dev", "tasks")
 		entries, err := os.ReadDir(tasksDir)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("failed to read tasks dir %s: %w", tasksDir, err)
+		}
 		if err == nil {
 			for _, entry := range entries {
 				name := entry.Name()

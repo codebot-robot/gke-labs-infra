@@ -601,7 +601,10 @@ func Run(_ context.Context, opts Options) (*Result, error) {
 	if opts.WriteBaseline {
 		var finalEntries []BaselineEntry
 		if opts.BaselinePath != "" {
-			existingEntries, _ := LoadBaseline(opts.BaselinePath)
+			existingEntries, err := LoadBaseline(opts.BaselinePath)
+			if err != nil {
+				return nil, err
+			}
 			for _, e := range existingEntries {
 				entryFile := filepath.ToSlash(e.File)
 				if !allCheckedFiles[entryFile] {

@@ -324,4 +324,22 @@ platforms:
 	if !foundBuildxBuild {
 		t.Errorf("expected buildx build call with multi-platform and --push after builder creation, calls: %v", calls)
 	}
+
+	// 9. Test case G: Multi-platform NOT supported and creating ap-builder fails -> should return wrapped error
+	driverMock = "docker"
+	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if name == "docker" && len(args) > 1 && args[0] == "buildx" && args[1] == "inspect" {
+			return exec.CommandContext(ctx, "echo", "Driver: "+driverMock)
+		}
+		if name == "docker" && len(args) > 2 && args[0] == "buildx" && args[1] == "create" {
+			return exec.CommandContext(ctx, "false")
+		}
+		return exec.CommandContext(ctx, "echo", "mocked")
+	}
+
+	if err := task.Run(t.Context(), scope); err == nil {
+		t.Fatalf("expected error when builder creation fails, got nil")
+	} else if !strings.Contains(err.Error(), "failed to ensure multi-platform builder") {
+		t.Errorf("expected wrapped error 'failed to ensure multi-platform builder', got: %v", err)
+	}
 }

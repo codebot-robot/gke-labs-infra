@@ -17,6 +17,8 @@ package walker
 import (
 	"path/filepath"
 	"strings"
+
+	"k8s.io/klog/v2"
 )
 
 // segmentMatcher matches a single path segment.
@@ -33,7 +35,11 @@ func (m literalMatcher) Match(segment string) bool {
 type globMatcher string
 
 func (m globMatcher) Match(segment string) bool {
-	matched, _ := filepath.Match(string(m), segment)
+	matched, err := filepath.Match(string(m), segment)
+	if err != nil {
+		klog.Errorf("invalid glob pattern %q: %v", string(m), err)
+		return false
+	}
 	return matched
 }
 
@@ -132,6 +138,9 @@ func parsePattern(pattern string) *pathMatcher {
 		if part == "**" {
 			segments = append(segments, doubleStarMatcher{})
 		} else if strings.Contains(part, "*") || strings.Contains(part, "?") || strings.Contains(part, "[") {
+			if _, err := filepath.Match(part, ""); err != nil {
+				klog.Errorf("invalid glob pattern segment %q in %q: %v", part, pattern, err)
+			}
 			segments = append(segments, globMatcher(part))
 		} else {
 			segments = append(segments, literalMatcher(part))

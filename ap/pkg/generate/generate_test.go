@@ -323,3 +323,34 @@ func TestPresubmitScriptsWithLicenseNone(t *testing.T) {
 		t.Errorf("expected script with license: none to start directly with shebang and set -o errexit, got:\n%s", script)
 	}
 }
+
+func TestGenerateTasks_DevTasks(t *testing.T) {
+	root := t.TempDir()
+	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root}}
+
+	// 1. dev/tasks does not exist -> should succeed
+	task, err := GenerateTasks(root, scopes)
+	if err != nil {
+		t.Fatalf("unexpected error when dev/tasks does not exist: %v", err)
+	}
+	if task == nil {
+		t.Fatal("expected non-nil task")
+	}
+
+	// 2. dev/tasks has a script -> should succeed
+	tasksDir := filepath.Join(root, "dev", "tasks")
+	if err := os.MkdirAll(tasksDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tasksDir, "generate-foo"), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	task, err = GenerateTasks(root, scopes)
+	if err != nil {
+		t.Fatalf("unexpected error with dev/tasks script: %v", err)
+	}
+	if task == nil {
+		t.Fatal("expected non-nil task")
+	}
+}

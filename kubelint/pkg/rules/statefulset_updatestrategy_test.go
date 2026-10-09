@@ -69,6 +69,39 @@ spec:
 `,
 			wantDiag: false,
 		},
+		{
+			name: "malformed kind",
+			yaml: `
+apiVersion: apps/v1
+kind: [StatefulSet]
+spec:
+  replicas: 3
+`,
+			wantDiag: true,
+		},
+		{
+			name: "malformed updateStrategy type",
+			yaml: `
+apiVersion: apps/v1
+kind: StatefulSet
+spec:
+  updateStrategy:
+    type: [RollingUpdate]
+`,
+			wantDiag: true,
+		},
+		{
+			name: "updateStrategy without type",
+			yaml: `
+apiVersion: apps/v1
+kind: StatefulSet
+spec:
+  updateStrategy:
+    rollingUpdate:
+      partition: 1
+`,
+			wantDiag: true,
+		},
 	}
 
 	rule := &StatefulSetUpdateStrategy{}

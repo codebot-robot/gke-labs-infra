@@ -114,3 +114,12 @@ func TestIgnoreList(t *testing.T) {
 		}
 	}
 }
+
+func TestIgnoreList_InvalidPattern(t *testing.T) {
+	// A pattern with an unclosed bracket is invalid syntax in filepath.Match
+	invalidPattern := "foo/[a-"
+	l := NewIgnoreList([]string{invalidPattern})
+	if l.ShouldIgnore("foo/bar", false) {
+		t.Errorf("invalid pattern %q should not match foo/bar", invalidPattern)
+	}
+}

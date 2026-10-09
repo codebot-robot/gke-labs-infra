@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
@@ -91,7 +92,10 @@ func fetchLatestGoVersion(ctx context.Context) (string, error) {
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return "", fmt.Errorf("unexpected status code %d fetching %s (failed to read response body: %w)", resp.StatusCode, url, err)
+		}
 		return "", fmt.Errorf("unexpected status code %d fetching %s: %s", resp.StatusCode, url, string(body))
 	}
 
@@ -165,11 +169,13 @@ func bumpContent(filename string, content []byte, version string) ([]byte, bool)
 func getGoDirectiveVersion(version string) string {
 	parts := strings.Split(version, ".")
 	if len(parts) == 3 {
-		var patch int
-		if _, err := fmt.Sscanf(parts[2], "%d", &patch); err == nil {
-			if patch > 0 {
-				return fmt.Sprintf("%s.%s.%d", parts[0], parts[1], patch-1)
-			}
+		patch, err := strconv.Atoi(parts[2])
+		if err != nil {
+			klog.Warningf("failed to parse patch version %q in %q: %v", parts[2], version, err)
+			return fmt.Sprintf("%s.%s", parts[0], parts[1])
+		}
+		if patch > 0 {
+			return fmt.Sprintf("%s.%s.%d", parts[0], parts[1], patch-1)
 		}
 		return fmt.Sprintf("%s.%s", parts[0], parts[1])
 	}
