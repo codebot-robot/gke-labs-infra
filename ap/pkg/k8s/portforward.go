@@ -17,8 +17,10 @@ package k8s
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -38,7 +40,7 @@ type PortForwardTask struct {
 	RemotePort int
 }
 
-func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.APScope) error {
+func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.APScope) (retErr error) {
 	if IsInCluster() {
 		klog.Infof("Running in-cluster, skipping port-forward to %s/%s", t.Namespace, t.Service)
 		return t.Child.Run(ctx, scope)
@@ -63,7 +65,9 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	if useProxy {
 		// A stale proxy container holds 127.0.0.1:5000 on the host; remove it
 		// before anything tries to bind.
-		exec.CommandContext(ctx, "docker", "rm", "-f", "ap-registry-proxy").Run()
+		if err := exec.CommandContext(ctx, "docker", "rm", "-f", "ap-registry-proxy").Run(); err != nil {
+			return fmt.Errorf("failed to remove stale docker proxy container: %w", err)
+		}
 
 		freePort, err := pickFreePort()
 		if err != nil {
@@ -90,13 +94,17 @@ func (t *PortForwardTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	var hasProxy bool
 	defer func() {
 		if pfCmd.Process != nil {
-			pfCmd.Process.Kill()
+			if err := pfCmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				retErr = errors.Join(retErr, fmt.Errorf("failed to kill port-forward process: %w", err))
+			}
 		}
 		if hasProxy {
 			klog.Infof("Stopping docker registry proxy container...")
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			exec.CommandContext(cleanupCtx, "docker", "rm", "-f", "ap-registry-proxy").Run()
+			if err := exec.CommandContext(cleanupCtx, "docker", "rm", "-f", "ap-registry-proxy").Run(); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("failed to stop docker registry proxy container: %w", err))
+			}
 		}
 	}()
 
@@ -153,7 +161,11 @@ func pickFreePort() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	defer l.Close()
+	defer func() {
+		if err := l.Close(); err != nil {
+			klog.Warningf("failed to close listener: %v", err)
+		}
+	}()
 	return l.Addr().(*net.TCPAddr).Port, nil
 }
 

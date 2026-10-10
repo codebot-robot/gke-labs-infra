@@ -190,3 +190,33 @@ func TestRunInit_WithGenerate(t *testing.T) {
 		t.Errorf("expected %s to exist: %v", workflow, err)
 	}
 }
+
+func TestBuildInitCommand_HiddenFlag(t *testing.T) {
+	cmd := BuildInitCommand(&RootOptions{})
+	f := cmd.Flags().Lookup("copyright")
+	if f == nil {
+		t.Fatal("expected copyright flag to exist")
+	}
+	if !f.Hidden {
+		t.Errorf("expected copyright flag to be hidden")
+	}
+}
+
+func TestDetectGitUserName(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Initialize git repo and set local user.name
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tempDir
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	cfgCmd := exec.Command("git", "config", "user.name", "Test Specific User")
+	cfgCmd.Dir = tempDir
+	if err := cfgCmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	if name := detectGitUserName(tempDir); name != "Test Specific User" {
+		t.Errorf("expected 'Test Specific User', got %q", name)
+	}
+}

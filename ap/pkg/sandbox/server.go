@@ -17,7 +17,9 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -91,13 +93,48 @@ func (s *server) RunTask(ctx context.Context, req *api.RunTaskRequest) (*api.Run
 		case "test":
 			// Copy back .build/test-results
 			resultsDir := filepath.Join(s.root, ".build", "test-results")
-			_ = filepath.Walk(resultsDir, func(path string, info os.FileInfo, err error) error {
-				if err != nil || info.IsDir() {
+			err := filepath.Walk(resultsDir, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				if info.IsDir() {
 					return nil
 				}
-				relPath, _ := filepath.Rel(s.root, path)
+				relPath, err := filepath.Rel(s.root, path)
+				if err != nil {
+					return err
+				}
 				content, err := os.ReadFile(path)
-				if err == nil {
+				if err != nil {
+					return err
+				}
+				resp.ChangedFiles = append(resp.ChangedFiles, &api.ChangedFile{
+					Path:    relPath,
+					Content: content,
+				})
+				return nil
+			})
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return nil, fmt.Errorf("failed to walk test results: %w", err)
+			}
+		case "format", "fmt":
+			// Return all files modified after startTime
+			err := filepath.Walk(s.root, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				if info.IsDir() {
+					return nil
+				}
+				if info.ModTime().After(startTime) {
+					relPath, err := filepath.Rel(s.root, path)
+					if err != nil {
+						return err
+					}
+					content, err := os.ReadFile(path)
+					if err != nil {
+						return err
+					}
 					resp.ChangedFiles = append(resp.ChangedFiles, &api.ChangedFile{
 						Path:    relPath,
 						Content: content,
@@ -105,24 +142,9 @@ func (s *server) RunTask(ctx context.Context, req *api.RunTaskRequest) (*api.Run
 				}
 				return nil
 			})
-		case "format", "fmt":
-			// Return all files modified after startTime
-			_ = filepath.Walk(s.root, func(path string, info os.FileInfo, err error) error {
-				if err != nil || info.IsDir() {
-					return nil
-				}
-				if info.ModTime().After(startTime) {
-					relPath, _ := filepath.Rel(s.root, path)
-					content, err := os.ReadFile(path)
-					if err == nil {
-						resp.ChangedFiles = append(resp.ChangedFiles, &api.ChangedFile{
-							Path:    relPath,
-							Content: content,
-						})
-					}
-				}
-				return nil
-			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to walk sandbox root: %w", err)
+			}
 		}
 	}
 

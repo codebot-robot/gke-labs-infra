@@ -610,7 +610,10 @@ jobs:
 `, jobName, actionCheckout))
 
 			if goModExists {
-				relGoMod, _ := filepath.Rel(repoRoot, filepath.Join(apRoot, "go.mod"))
+				relGoMod, err := filepath.Rel(repoRoot, filepath.Join(apRoot, "go.mod"))
+				if err != nil {
+					return fmt.Errorf("failed to get relative path for go.mod: %w", err)
+				}
 				sb.WriteString(fmt.Sprintf(`
       - name: Setup Go
         uses: %s
@@ -626,7 +629,10 @@ jobs:
 					return err
 				}
 				if hasCleanup {
-					relCleanupTask, _ := filepath.Rel(repoRoot, cleanupTaskPath)
+					relCleanupTask, err := filepath.Rel(repoRoot, cleanupTaskPath)
+					if err != nil {
+						return fmt.Errorf("failed to get relative path for cleanup task: %w", err)
+					}
 					sb.WriteString(fmt.Sprintf(`
       - name: Free disk space
         run: ./%s

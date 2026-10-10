@@ -17,7 +17,9 @@ package cmd
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,6 +29,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scaffold"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
+	"k8s.io/klog/v2"
 )
 
 // InitOptions holds the configuration for the "init" command.
@@ -61,7 +64,9 @@ func BuildInitCommand(rootOpt *RootOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opt.License, "license", opt.License, "License type ('apache-2.0' or 'none')")
 	cmd.Flags().StringVar(&opt.CopyrightHolder, "copyright-holder", "", "Copyright holder name (required if license is 'apache-2.0')")
 	cmd.Flags().StringVar(&opt.CopyrightHolder, "copyright", "", "Alias for --copyright-holder")
-	_ = cmd.Flags().MarkHidden("copyright")
+	if err := cmd.Flags().MarkHidden("copyright"); err != nil {
+		panic(err)
+	}
 	cmd.Flags().BoolVar(&opt.Generate, "generate", false, "Run 'ap generate' after initialization")
 	cmd.Flags().BoolVar(&opt.Force, "force", false, "Overwrite existing configuration files in .ap")
 
@@ -98,7 +103,10 @@ func RunInit(ctx context.Context, opt InitOptions) error {
 		reader := bufio.NewReader(os.Stdin)
 		if opt.License == "" {
 			fmt.Print("License [apache-2.0]: ")
-			input, _ := reader.ReadString('\n')
+			input, err := reader.ReadString('\n')
+			if err != nil && !errors.Is(err, io.EOF) {
+				return fmt.Errorf("failed to read license input: %w", err)
+			}
 			input = strings.TrimSpace(input)
 			if input != "" {
 				opt.License = input
@@ -113,7 +121,10 @@ func RunInit(ctx context.Context, opt InitOptions) error {
 			} else {
 				fmt.Print("Copyright holder: ")
 			}
-			input, _ := reader.ReadString('\n')
+			input, err := reader.ReadString('\n')
+			if err != nil && !errors.Is(err, io.EOF) {
+				return fmt.Errorf("failed to read copyright holder input: %w", err)
+			}
 			input = strings.TrimSpace(input)
 			if input != "" {
 				opt.CopyrightHolder = input
@@ -209,8 +220,9 @@ func detectGitUserName(dir string) string {
 	}
 	cmd.Env = env
 	out, err := cmd.Output()
-	if err == nil {
-		return strings.TrimSpace(string(out))
+	if err != nil {
+		klog.V(2).Infof("detectGitUserName in %s failed: %v", dir, err)
+		return ""
 	}
-	return ""
+	return strings.TrimSpace(string(out))
 }

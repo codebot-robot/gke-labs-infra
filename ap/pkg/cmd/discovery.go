@@ -99,7 +99,11 @@ func DiscoverScopes(repoRoot string, apRoots []string) ([]*tasks.APScope, error)
 
 				// e2e
 				e2eDir := filepath.Join(path, "e2e")
-				if golang.HasGoTests(e2eDir) {
+				hasE2E, err := golang.HasGoTests(e2eDir)
+				if err != nil {
+					return fmt.Errorf("failed to check for go tests in %s: %w", e2eDir, err)
+				}
+				if hasE2E {
 					buildDir := filepath.Join(repoRoot, ".build", "test-results", "go")
 					if artifactsDir := os.Getenv("ARTIFACTS"); artifactsDir != "" {
 						buildDir = filepath.Join(artifactsDir, "test-results", "go")
@@ -107,7 +111,10 @@ func DiscoverScopes(repoRoot string, apRoots []string) ([]*tasks.APScope, error)
 					if err := os.MkdirAll(buildDir, 0755); err != nil {
 						return fmt.Errorf("failed to create build dir: %w", err)
 					}
-					rel, _ := filepath.Rel(repoRoot, parentDir)
+					rel, err := filepath.Rel(repoRoot, parentDir)
+					if err != nil {
+						return fmt.Errorf("failed to determine relative path for %s: %w", parentDir, err)
+					}
 					name := rel
 					if name == "." {
 						name = "root"

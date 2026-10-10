@@ -40,7 +40,7 @@ func BuildRootCommand() *cobra.Command {
 			var allDiagnostics []rules.Diagnostic
 
 			for _, arg := range args {
-				err := filepath.Walk(arg, func(path string, info os.FileInfo, err error) error {
+				err := filepath.Walk(arg, func(path string, info os.FileInfo, err error) (walkErr error) {
 					if err != nil {
 						return err
 					}
@@ -56,7 +56,11 @@ func BuildRootCommand() *cobra.Command {
 					if err != nil {
 						return fmt.Errorf("failed to open %s: %w", path, err)
 					}
-					defer f.Close()
+					defer func() {
+						if err := f.Close(); err != nil && walkErr == nil {
+							walkErr = fmt.Errorf("failed to close %s: %w", path, err)
+						}
+					}()
 
 					objs, err := manifests.Parse(f)
 					if err != nil {

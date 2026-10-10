@@ -89,10 +89,11 @@ func BuildRootCommand() *cobra.Command {
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			cmd.SilenceUsage = true
 			repoRoot, apRoot, err := findRoots()
-			if err == nil {
-				opt.RepoRoot = repoRoot
-				opt.APRoot = apRoot
+			if err != nil {
+				return err
 			}
+			opt.RepoRoot = repoRoot
+			opt.APRoot = apRoot
 			return nil
 		},
 	}
