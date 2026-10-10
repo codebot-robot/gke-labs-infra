@@ -16,7 +16,9 @@ package e2e
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,10 +28,42 @@ import (
 )
 
 type Harness struct {
-	ClusterName string
-	Namespace   string
-	t           *testing.T
-	Namespaces  []string
+	ClusterName  string
+	Namespace    string
+	t            *testing.T
+	Namespaces   []string
+	PollInterval time.Duration
+}
+
+func (h *Harness) logf(format string, args ...any) {
+	if h.t != nil {
+		h.t.Helper()
+		h.t.Logf(format, args...)
+	} else {
+		log.Printf(format, args...)
+	}
+}
+
+func (h *Harness) fatalf(format string, args ...any) {
+	if h.t != nil {
+		h.t.Helper()
+		h.t.Fatalf(format, args...)
+	} else {
+		log.Fatalf(format, args...)
+	}
+}
+
+// MustWriteFile writes data to a file, calling t.Fatalf if writing fails.
+func (h *Harness) MustWriteFile(path string, data []byte) {
+	if h.t != nil {
+		h.t.Helper()
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		h.fatalf("failed to create directory for %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		h.fatalf("failed to write file %s: %v", path, err)
+	}
 }
 
 func NewHarness(t *testing.T, clusterName string) *Harness {
@@ -58,39 +92,77 @@ func (h *Harness) CreateTempNamespace(prefix string) string {
 	return ns
 }
 
-func (h *Harness) CollectArtifacts(testName string) {
+func (h *Harness) CollectArtifacts(testName string) error {
 	artifactsDir := os.Getenv("ARTIFACTS")
 	if artifactsDir == "" {
-		return
+		return nil
 	}
-	h.t.Logf("Collecting artifacts to %s", artifactsDir)
+	h.logf("Collecting artifacts to %s", artifactsDir)
+
+	var errs []error
 
 	for _, ns := range h.Namespaces {
 		nsDir := filepath.Join(artifactsDir, "tests", testName, "objects", ns)
-		os.MkdirAll(nsDir, 0755)
+		if err := os.MkdirAll(nsDir, 0755); err != nil {
+			errs = append(errs, fmt.Errorf("failed to create directory %s: %w", nsDir, err))
+		}
 
-		pods, _ := exec.Command("kubectl", "get", "pods", "-n", ns).Output()
-		os.WriteFile(filepath.Join(nsDir, "pods.txt"), pods, 0644)
+		pods, err := exec.Command("kubectl", "get", "pods", "-n", ns).Output()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to get pods in namespace %s: %w", ns, err))
+		} else {
+			h.MustWriteFile(filepath.Join(nsDir, "pods.txt"), pods)
+		}
 
-		podsYaml, _ := exec.Command("kubectl", "get", "pods", "-n", ns, "-o", "yaml").Output()
-		os.WriteFile(filepath.Join(nsDir, "pods.yaml"), podsYaml, 0644)
+		podsYaml, err := exec.Command("kubectl", "get", "pods", "-n", ns, "-o", "yaml").Output()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to get pods yaml in namespace %s: %w", ns, err))
+		} else {
+			h.MustWriteFile(filepath.Join(nsDir, "pods.yaml"), podsYaml)
+		}
 
 		logsDir := filepath.Join(artifactsDir, "tests", testName, "logs", ns)
-		os.MkdirAll(logsDir, 0755)
+		if err := os.MkdirAll(logsDir, 0755); err != nil {
+			errs = append(errs, fmt.Errorf("failed to create directory %s: %w", logsDir, err))
+		}
 
-		podList, _ := exec.Command("kubectl", "get", "pods", "-n", ns, "-o", "jsonpath={.items[*].metadata.name}").Output()
-		for _, pod := range strings.Fields(string(podList)) {
-			logs, _ := exec.Command("kubectl", "logs", pod, "-n", ns, "--all-containers=true").Output()
-			os.WriteFile(filepath.Join(logsDir, pod+".log"), logs, 0644)
+		podList, err := exec.Command("kubectl", "get", "pods", "-n", ns, "-o", "jsonpath={.items[*].metadata.name}").Output()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to list pods in namespace %s: %w", ns, err))
+		} else {
+			for _, pod := range strings.Fields(string(podList)) {
+				logs, err := exec.Command("kubectl", "logs", pod, "-n", ns, "--all-containers=true").Output()
+				if err != nil {
+					errs = append(errs, fmt.Errorf("failed to get logs for pod %s in namespace %s: %w", pod, ns, err))
+					continue
+				}
+				h.MustWriteFile(filepath.Join(logsDir, pod+".log"), logs)
+			}
 		}
 	}
 
 	clusterDir := filepath.Join(artifactsDir, "tests", testName, "objects", "_cluster")
-	os.MkdirAll(clusterDir, 0755)
-	nodes, _ := exec.Command("kubectl", "get", "nodes").Output()
-	os.WriteFile(filepath.Join(clusterDir, "nodes.txt"), nodes, 0644)
-	nodesYaml, _ := exec.Command("kubectl", "get", "nodes", "-o", "yaml").Output()
-	os.WriteFile(filepath.Join(clusterDir, "nodes.yaml"), nodesYaml, 0644)
+	if err := os.MkdirAll(clusterDir, 0755); err != nil {
+		errs = append(errs, fmt.Errorf("failed to create directory %s: %w", clusterDir, err))
+	}
+	nodes, err := exec.Command("kubectl", "get", "nodes").Output()
+	if err != nil {
+		errs = append(errs, fmt.Errorf("failed to get nodes: %w", err))
+	} else {
+		h.MustWriteFile(filepath.Join(clusterDir, "nodes.txt"), nodes)
+	}
+	nodesYaml, err := exec.Command("kubectl", "get", "nodes", "-o", "yaml").Output()
+	if err != nil {
+		errs = append(errs, fmt.Errorf("failed to get nodes yaml: %w", err))
+	} else {
+		h.MustWriteFile(filepath.Join(clusterDir, "nodes.yaml"), nodesYaml)
+	}
+
+	if err := errors.Join(errs...); err != nil {
+		h.logf("failed to collect artifacts: %v", err)
+		return err
+	}
+	return nil
 }
 
 func (h *Harness) Setup() {
@@ -111,7 +183,9 @@ func (h *Harness) Setup() {
 
 	h.t.Cleanup(func() {
 		if h.t.Failed() {
-			h.CollectArtifacts(h.t.Name())
+			if err := h.CollectArtifacts(h.t.Name()); err != nil {
+				h.logf("failed to collect artifacts: %v", err)
+			}
 		}
 		h.Teardown()
 	})
@@ -201,34 +275,70 @@ func (h *Harness) WaitForDaemonSet(name, namespace string, timeout time.Duration
 	return nil
 }
 
-func (h *Harness) DeleteDeployment(name, namespace string) {
-	h.t.Helper()
-	exec.Command("kubectl", "delete", "deployment", name, "-n", namespace, "--ignore-not-found").Run()
+func (h *Harness) DeleteDeployment(name, namespace string) error {
+	if h.t != nil {
+		h.t.Helper()
+	}
+	cmd := exec.Command("kubectl", "delete", "deployment", name, "-n", namespace, "--ignore-not-found")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to delete deployment %s in namespace %s: %w\nOutput: %s", name, namespace, err, string(out))
+	}
+	return nil
 }
 
-func (h *Harness) DeleteStatefulSet(name, namespace string) {
-	h.t.Helper()
-	exec.Command("kubectl", "delete", "statefulset", name, "-n", namespace, "--ignore-not-found").Run()
+func (h *Harness) DeleteStatefulSet(name, namespace string) error {
+	if h.t != nil {
+		h.t.Helper()
+	}
+	cmd := exec.Command("kubectl", "delete", "statefulset", name, "-n", namespace, "--ignore-not-found")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to delete statefulset %s in namespace %s: %w\nOutput: %s", name, namespace, err, string(out))
+	}
+	return nil
 }
 
-func (h *Harness) DeleteDaemonSet(name, namespace string) {
-	h.t.Helper()
-	exec.Command("kubectl", "delete", "daemonset", name, "-n", namespace, "--ignore-not-found").Run()
+func (h *Harness) DeleteDaemonSet(name, namespace string) error {
+	if h.t != nil {
+		h.t.Helper()
+	}
+	cmd := exec.Command("kubectl", "delete", "daemonset", name, "-n", namespace, "--ignore-not-found")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to delete daemonset %s in namespace %s: %w\nOutput: %s", name, namespace, err, string(out))
+	}
+	return nil
 }
 
-func (h *Harness) DeleteService(name, namespace string) {
-	h.t.Helper()
-	exec.Command("kubectl", "delete", "service", name, "-n", namespace, "--ignore-not-found").Run()
+func (h *Harness) DeleteService(name, namespace string) error {
+	if h.t != nil {
+		h.t.Helper()
+	}
+	cmd := exec.Command("kubectl", "delete", "service", name, "-n", namespace, "--ignore-not-found")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to delete service %s in namespace %s: %w\nOutput: %s", name, namespace, err, string(out))
+	}
+	return nil
 }
 
-func (h *Harness) DeletePod(name, namespace string) {
-	h.t.Helper()
-	exec.Command("kubectl", "delete", "pod", name, "-n", namespace, "--ignore-not-found", "--wait=true").Run()
+func (h *Harness) DeletePod(name, namespace string) error {
+	if h.t != nil {
+		h.t.Helper()
+	}
+	cmd := exec.Command("kubectl", "delete", "pod", name, "-n", namespace, "--ignore-not-found", "--wait=true")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to delete pod %s in namespace %s: %w\nOutput: %s", name, namespace, err, string(out))
+	}
+	return nil
 }
 
-func (h *Harness) DeleteJob(name, namespace string) {
-	h.t.Helper()
-	exec.Command("kubectl", "delete", "job", name, "-n", namespace, "--ignore-not-found").Run()
+func (h *Harness) DeleteJob(name, namespace string) error {
+	if h.t != nil {
+		h.t.Helper()
+	}
+	cmd := exec.Command("kubectl", "delete", "job", name, "-n", namespace, "--ignore-not-found")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to delete job %s in namespace %s: %w\nOutput: %s", name, namespace, err, string(out))
+	}
+	return nil
 }
 
 func (h *Harness) GetPodLogs(labelSelector, namespace string) string {
@@ -300,28 +410,73 @@ func (h *Harness) WaitForJobSuccess(name, namespace string, timeout time.Duratio
 	}
 }
 
+func isNotFoundError(output string) bool {
+	return strings.Contains(output, "NotFound") || strings.Contains(strings.ToLower(output), "not found")
+}
+
 func (h *Harness) WaitForPodReady(name, namespace string, timeout time.Duration) error {
-	h.t.Helper()
-	h.t.Logf("Waiting for pod %s to be ready in namespace %s", name, namespace)
+	if h.t != nil {
+		h.t.Helper()
+	}
+	h.logf("Waiting for pod %s to be ready in namespace %s", name, namespace)
 	start := time.Now()
+	pollInterval := h.PollInterval
+	if pollInterval <= 0 {
+		pollInterval = 5 * time.Second
+	}
+	const maxConsecutiveErrors = 3
+	consecutiveErrors := 0
+
 	for {
 		if time.Since(start) > timeout {
 			return fmt.Errorf("timed out waiting for pod %s to be ready after %s", name, timeout)
 		}
+
 		cmd := exec.Command("kubectl", "get", "pod", name, "-n", namespace, "-o", "jsonpath={.status.phase}")
-		phase, _ := cmd.Output()
+		phase, err := cmd.CombinedOutput()
+		if err != nil {
+			if isNotFoundError(string(phase)) {
+				h.logf("Pod %s not found yet in namespace %s", name, namespace)
+				time.Sleep(pollInterval)
+				continue
+			}
+			consecutiveErrors++
+			h.logf("Warning: kubectl get pod phase failed for %s in namespace %s (consecutive failures: %d): %v\nOutput: %s", name, namespace, consecutiveErrors, err, phase)
+			if consecutiveErrors >= maxConsecutiveErrors {
+				return fmt.Errorf("kubectl failed persistently while waiting for pod %s: %w\nOutput: %s", name, err, phase)
+			}
+			time.Sleep(pollInterval)
+			continue
+		}
 
 		cmd = exec.Command("kubectl", "get", "pod", name, "-n", namespace, "-o", "jsonpath={.status.containerStatuses[*].ready}")
-		ready, _ := cmd.Output()
+		ready, err := cmd.CombinedOutput()
+		if err != nil {
+			if isNotFoundError(string(ready)) {
+				h.logf("Pod %s not found yet in namespace %s", name, namespace)
+				time.Sleep(pollInterval)
+				continue
+			}
+			consecutiveErrors++
+			h.logf("Warning: kubectl get pod ready status failed for %s in namespace %s (consecutive failures: %d): %v\nOutput: %s", name, namespace, consecutiveErrors, err, ready)
+			if consecutiveErrors >= maxConsecutiveErrors {
+				return fmt.Errorf("kubectl failed persistently while waiting for pod %s: %w\nOutput: %s", name, err, ready)
+			}
+			time.Sleep(pollInterval)
+			continue
+		}
 
-		h.t.Logf("Pod %s phase: %s, ready: %s", name, string(phase), string(ready))
+		consecutiveErrors = 0
+		phaseStr := strings.TrimSpace(string(phase))
+		readyStr := strings.TrimSpace(string(ready))
+		h.logf("Pod %s phase: %s, ready: %s", name, phaseStr, readyStr)
 
-		if (string(phase) == "Running" || string(phase) == "Succeeded") && !strings.Contains(string(ready), "false") && string(ready) != "" {
-			h.t.Logf("Pod %s is ready (phase: %s)", name, string(phase))
+		if (phaseStr == "Running" || phaseStr == "Succeeded") && !strings.Contains(readyStr, "false") && readyStr != "" {
+			h.logf("Pod %s is ready (phase: %s)", name, phaseStr)
 			return nil
 		}
 
-		time.Sleep(5 * time.Second)
+		time.Sleep(pollInterval)
 	}
 }
 
