@@ -91,7 +91,9 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	// so local developer builds don't fail due to repository-wide multi-platform settings.
 	if t.Push && len(platforms) > 1 {
 		if !t.supportsMultiPlatform(ctx) {
-			_ = t.ensureMultiPlatformBuilder(ctx)
+			if err := t.ensureMultiPlatformBuilder(ctx); err != nil {
+				return fmt.Errorf("failed to ensure multi-platform builder: %w", err)
+			}
 		}
 		if !t.supportsMultiPlatform(ctx) {
 			return fmt.Errorf("multi-platform build (platforms: %v) is not supported for the default docker driver. "+
@@ -117,8 +119,8 @@ func (t *DockerBuildTask) ensureMultiPlatformBuilder(ctx context.Context) error 
 	}
 	// Create new ap-builder with docker-container driver and host networking
 	createCmd := execCommandContext(ctx, "docker", "buildx", "create", "--name", "ap-builder", "--driver", "docker-container", "--driver-opt", "network=host", "--use")
-	if err := createCmd.Run(); err == nil && t.supportsMultiPlatform(ctx) {
-		return nil
+	if err := createCmd.Run(); err != nil {
+		return fmt.Errorf("failed to create multi-platform builder: %w", err)
 	}
 	return nil
 }

@@ -18,10 +18,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
+
+	"k8s.io/klog/v2"
 )
 
 type Caches struct {
@@ -52,28 +57,38 @@ func NewManager() (*Manager, error) {
 			Gofmt:    make(map[string]bool),
 		},
 	}
-	// Ignore errors on load (start fresh)
-	_ = m.load()
+	if err := m.load(); err != nil {
+		klog.Warningf("falling back to empty codestyle cache: %v", err)
+	}
 	return m, nil
 }
 
 func (m *Manager) load() error {
+	var errs []error
+
 	metaPath := filepath.Join(m.dir, "metadata.json")
-	if data, err := os.ReadFile(metaPath); err == nil {
-		var meta map[string]*FileMetadata
-		if err := json.Unmarshal(data, &meta); err == nil {
-			m.caches.Metadata = meta
+	if data, err := os.ReadFile(metaPath); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			klog.Warningf("failed to read metadata cache %s: %v", metaPath, err)
+			errs = append(errs, fmt.Errorf("failed to read metadata cache %s: %w", metaPath, err))
 		}
+	} else if err := json.Unmarshal(data, &m.caches.Metadata); err != nil {
+		klog.Warningf("failed to parse metadata cache %s: %v", metaPath, err)
+		errs = append(errs, fmt.Errorf("failed to parse metadata cache %s: %w", metaPath, err))
 	}
 
 	gofmtPath := filepath.Join(m.dir, "gofmt.json")
-	if data, err := os.ReadFile(gofmtPath); err == nil {
-		var gofmt map[string]bool
-		if err := json.Unmarshal(data, &gofmt); err == nil {
-			m.caches.Gofmt = gofmt
+	if data, err := os.ReadFile(gofmtPath); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			klog.Warningf("failed to read gofmt cache %s: %v", gofmtPath, err)
+			errs = append(errs, fmt.Errorf("failed to read gofmt cache %s: %w", gofmtPath, err))
 		}
+	} else if err := json.Unmarshal(data, &m.caches.Gofmt); err != nil {
+		klog.Warningf("failed to parse gofmt cache %s: %v", gofmtPath, err)
+		errs = append(errs, fmt.Errorf("failed to parse gofmt cache %s: %w", gofmtPath, err))
 	}
-	return nil
+
+	return errors.Join(errs...)
 }
 
 func (m *Manager) Save() error {

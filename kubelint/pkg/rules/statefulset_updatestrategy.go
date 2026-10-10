@@ -15,6 +15,8 @@
 package rules
 
 import (
+	"fmt"
+
 	"github.com/gke-labs/gke-labs-infra/kubelint/pkg/manifests"
 	"github.com/gke-labs/gke-labs-infra/kubelint/rules"
 )
@@ -35,24 +37,68 @@ func (r *StatefulSetUpdateStrategy) Name() string {
 	return r.name
 }
 
+func getLine(obj *manifests.Object, path string, fallbacks ...string) int {
+	line, err := obj.GetLine(path)
+	if err != nil {
+		for _, fb := range fallbacks {
+			fbLine, fbErr := obj.GetLine(fb)
+			if fbErr != nil {
+				continue
+			}
+			return fbLine
+		}
+		if obj.Node != nil && obj.Node.Line > 0 {
+			return obj.Node.Line
+		}
+		return 1
+	}
+	return line
+}
+
 func (r *StatefulSetUpdateStrategy) Check(obj *manifests.Object) []Diagnostic {
 	r.init()
-	kind, _, _ := obj.Kind()
+	kind, _, err := obj.Kind()
+	if err != nil {
+		return []Diagnostic{
+			{
+				RuleName: r.Name(),
+				Message:  fmt.Sprintf("malformed manifest: failed to read kind: %v", err),
+				Line:     getLine(obj, "kind"),
+			},
+		}
+	}
 	if kind != "StatefulSet" {
 		return nil
 	}
 
-	_, found, _ := obj.GetString("spec.updateStrategy.type")
+	_, found, err := obj.GetString("spec.updateStrategy.type")
+	if err != nil {
+		return []Diagnostic{
+			{
+				RuleName: r.Name(),
+				Message:  fmt.Sprintf("malformed manifest: failed to read spec.updateStrategy.type: %v", err),
+				Line:     getLine(obj, "spec.updateStrategy.type", "spec.updateStrategy", "kind"),
+			},
+		}
+	}
 	if !found {
 		// Also check if spec.updateStrategy is set but type is missing (though type is required if updateStrategy is present)
-		_, found, _ = obj.GetString("spec.updateStrategy")
-		if !found {
-			line, _ := obj.GetLine("kind")
+		_, stratFound, stratErr := obj.GetString("spec.updateStrategy")
+		if stratErr != nil {
 			return []Diagnostic{
 				{
 					RuleName: r.Name(),
 					Message:  r.message,
-					Line:     line,
+					Line:     getLine(obj, "spec.updateStrategy", "kind"),
+				},
+			}
+		}
+		if !stratFound {
+			return []Diagnostic{
+				{
+					RuleName: r.Name(),
+					Message:  r.message,
+					Line:     getLine(obj, "kind"),
 				},
 			}
 		}

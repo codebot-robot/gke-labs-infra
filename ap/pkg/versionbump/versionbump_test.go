@@ -113,3 +113,23 @@ func TestBumpContent(t *testing.T) {
 		})
 	}
 }
+
+func TestGetGoDirectiveVersion(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"1.26.1", "1.26.0"},
+		{"1.26.0", "1.26"},
+		{"1.26", "1.26"},
+		{"1.26.invalid", "1.26"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got := getGoDirectiveVersion(tt.input)
+			if got != tt.want {
+				t.Errorf("getGoDirectiveVersion(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

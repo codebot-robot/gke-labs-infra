@@ -1,21 +1,4 @@
 # Baseline for ap droppederrors ratchet.
 # Entries: <file>:<enclosing-function>[:<category>]:<callee>
 # Do not add entries manually; fix errors or run 'ap lint droppederrors --write-baseline' if approved.
-ap/pkg/codestyle/cache/cache.go:(*Manager).load:error-only-checked-for-success:encoding/json.Unmarshal
-ap/pkg/codestyle/cache/cache.go:(*Manager).load:error-only-checked-for-success:encoding/json.Unmarshal
-ap/pkg/codestyle/cache/cache.go:(*Manager).load:error-only-checked-for-success:os.ReadFile
-ap/pkg/codestyle/cache/cache.go:(*Manager).load:error-only-checked-for-success:os.ReadFile
-ap/pkg/codestyle/cache/cache.go:NewManager:(*github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/cache.Manager).load
-ap/pkg/codestyle/droppederrors/checker.go:Run:github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/droppederrors.LoadBaseline
-ap/pkg/codestyle/walker/ignore.go:(globMatcher).Match:path/filepath.Match
-ap/pkg/format/format.go:FormatTasks:error-only-checked-for-success:os.ReadDir
-ap/pkg/generate/generate.go:GenerateTasks:error-only-checked-for-success:os.ReadDir
-ap/pkg/images/build.go:(*DockerBuildTask).Run:(*github.com/gke-labs/gke-labs-infra/ap/pkg/images.DockerBuildTask).ensureMultiPlatformBuilder
-ap/pkg/versionbump/versionbump.go:fetchLatestGoVersion:io.ReadAll
-ap/pkg/versionbump/versionbump.go:getGoDirectiveVersion:error-only-checked-for-success:fmt.Sscanf
 autodeploy/examples/helloworld/main.go:main:fmt.Fprintf
-autodeploy/pkg/controller/controller.go:(*PackageReconciler).Reconcile:error-only-checked-for-success:time.ParseDuration
-kubelint/pkg/rules/statefulset_updatestrategy.go:(*StatefulSetUpdateStrategy).Check:(*github.com/gke-labs/gke-labs-infra/kubelint/pkg/manifests.Object).GetLine
-kubelint/pkg/rules/statefulset_updatestrategy.go:(*StatefulSetUpdateStrategy).Check:(*github.com/gke-labs/gke-labs-infra/kubelint/pkg/manifests.Object).GetString
-kubelint/pkg/rules/statefulset_updatestrategy.go:(*StatefulSetUpdateStrategy).Check:(*github.com/gke-labs/gke-labs-infra/kubelint/pkg/manifests.Object).GetString
-kubelint/pkg/rules/statefulset_updatestrategy.go:(*StatefulSetUpdateStrategy).Check:(*github.com/gke-labs/gke-labs-infra/kubelint/pkg/manifests.Object).Kind

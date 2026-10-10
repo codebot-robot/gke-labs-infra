@@ -16,7 +16,9 @@ package format
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -89,6 +91,9 @@ func FormatTasks(root string, files ...string) (tasks.Task, error) {
 	// 2. Run legacy format scripts
 	tasksDir := filepath.Join(root, "dev", "tasks")
 	entries, err := os.ReadDir(tasksDir)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("failed to read tasks dir %s: %w", tasksDir, err)
+	}
 	if err == nil {
 		for _, entry := range entries {
 			name := entry.Name()
