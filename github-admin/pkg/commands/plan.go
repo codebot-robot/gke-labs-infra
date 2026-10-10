@@ -16,7 +16,6 @@ package commands
 
 import (
 	"fmt"
-	"io"
 	"slices"
 	"strings"
 
@@ -201,8 +200,11 @@ func diffYAML(current, desired any) (lines []string, changed bool, err error) {
 	return lines, changed, nil
 }
 
-func printIndented(w io.Writer, indent string, lines []string) {
+func printIndented(p *printer, indent string, lines []string) {
+	if p == nil {
+		return
+	}
 	for _, l := range lines {
-		fmt.Fprintf(w, "%s%s\n", indent, l)
+		p.Printf("%s%s\n", indent, l)
 	}
 }
