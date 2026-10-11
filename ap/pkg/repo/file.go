@@ -26,23 +26,31 @@ import (
 
 // File represents a file in the repository tree.
 type File struct {
-	Path    string      // Absolute path on disk
-	RelPath string      // Path relative to repo root (forward slash separated)
-	Name    string      // File base name
-	Size    int64       // File size in bytes
-	ModTime time.Time   // File modification time
-	Mode    os.FileMode // File mode bits
+	Path    string // Absolute path on disk
+	RelPath string // Path relative to view root (forward slash separated)
+	Name    string // File base name
 
 	apRoot string // Enclosing AP root directory path
 	module string // Enclosing Go module directory path
 
 	isGeneratedOnce sync.Once
 	isGenerated     bool
+
+	infoOnce sync.Once
+	info     os.FileInfo
 }
 
-// Info returns an os.FileInfo representation of the file.
+// Info returns an os.FileInfo representation of the file, resolved lazily.
 func (f *File) Info() os.FileInfo {
-	return &fileInfo{f: f}
+	f.infoOnce.Do(func() {
+		fi, err := os.Stat(f.Path)
+		if err != nil {
+			f.info = &fileInfo{name: f.Name}
+			return
+		}
+		f.info = fi
+	})
+	return f.info
 }
 
 // APRoot returns the path to the closest enclosing AP root directory.
@@ -58,16 +66,6 @@ func (f *File) Module() string {
 // IsTest reports whether this file is a Go test file.
 func (f *File) IsTest() bool {
 	return strings.HasSuffix(f.Name, "_test.go")
-}
-
-// IsVendored reports whether this file is located inside a vendor directory.
-func (f *File) IsVendored() bool {
-	for _, seg := range strings.Split(f.RelPath, "/") {
-		if seg == "vendor" {
-			return true
-		}
-	}
-	return false
 }
 
 // IsGenerated reports whether this file is generated code (per https://go.dev/s/generatedcode).
@@ -91,12 +89,12 @@ func checkIsGenerated(path string) bool {
 }
 
 type fileInfo struct {
-	f *File
+	name string
 }
 
-func (fi *fileInfo) Name() string       { return fi.f.Name }
-func (fi *fileInfo) Size() int64        { return fi.f.Size }
-func (fi *fileInfo) Mode() os.FileMode  { return fi.f.Mode }
-func (fi *fileInfo) ModTime() time.Time { return fi.f.ModTime }
+func (fi *fileInfo) Name() string       { return fi.name }
+func (fi *fileInfo) Size() int64        { return 0 }
+func (fi *fileInfo) Mode() os.FileMode  { return 0644 }
+func (fi *fileInfo) ModTime() time.Time { return time.Time{} }
 func (fi *fileInfo) IsDir() bool        { return false }
 func (fi *fileInfo) Sys() any           { return nil }

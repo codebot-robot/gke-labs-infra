@@ -27,18 +27,7 @@ import (
 )
 
 // DiscoverScopes discovers all tasks for all given AP roots.
-func DiscoverScopes(repoRoot string, apRoots []string, repos ...*repo.Repo) ([]*tasks.APScope, error) {
-	var r *repo.Repo
-	if len(repos) > 0 && repos[0] != nil {
-		r = repos[0]
-	} else {
-		var err error
-		r, err = repo.Open(repoRoot)
-		if err != nil {
-			return nil, err
-		}
-	}
-
+func DiscoverScopes(r *repo.Repo, repoRoot string, apRoots []string) ([]*tasks.APScope, error) {
 	var scopes []*tasks.APScope
 
 	for _, apRoot := range apRoots {
@@ -127,7 +116,7 @@ func DiscoverScopes(repoRoot string, apRoots []string, repos ...*repo.Repo) ([]*
 		}
 
 		// Go Test tasks
-		goTestTasks, err := golang.TestTasks(apRoot, scope.Repo)
+		goTestTasks, err := golang.TestTasks(scope.Repo, apRoot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover test tasks in %s: %w", apRoot, err)
 		}
@@ -136,7 +125,7 @@ func DiscoverScopes(repoRoot string, apRoots []string, repos ...*repo.Repo) ([]*
 		}
 
 		// Go lint tasks
-		goLintTasks, err := golang.LintTasks(apRoot, scope.Repo)
+		goLintTasks, err := golang.LintTasks(scope.Repo, apRoot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover lint tasks in %s: %w", apRoot, err)
 		}

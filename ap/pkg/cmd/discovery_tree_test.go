@@ -85,7 +85,7 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 	}
 
 	// Step 2: Run DiscoverScopes with the shared repo
-	scopes, err := DiscoverScopes(rootOpt.RepoRoot, rootOpt.APRoots, r)
+	scopes, err := DiscoverScopes(r, rootOpt.RepoRoot, rootOpt.APRoots)
 	if err != nil {
 		t.Fatalf("DiscoverScopes failed: %v", err)
 	}
@@ -97,16 +97,16 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 
 	// Step 3: Run all task discovery functions using scopes and shared tree
 	for _, scope := range scopes {
-		if _, err := images.BuildTasks(scope.Dir, false, "", scope.Repo); err != nil {
+		if _, err := images.BuildTasks(scope.Repo, scope.Dir, false, ""); err != nil {
 			t.Fatalf("BuildTasks failed for %s: %v", scope.Dir, err)
 		}
-		if _, err := k8s.DeployTasks(scope.Dir, scope.Repo); err != nil {
+		if _, err := k8s.DeployTasks(scope.Repo, scope.Dir); err != nil {
 			t.Fatalf("DeployTasks failed for %s: %v", scope.Dir, err)
 		}
-		if _, err := golang.LintTasks(scope.Dir, scope.Repo); err != nil {
+		if _, err := golang.LintTasks(scope.Repo, scope.Dir); err != nil {
 			t.Fatalf("LintTasks failed for %s: %v", scope.Dir, err)
 		}
-		if _, err := golang.TestTasks(scope.Dir, scope.Repo); err != nil {
+		if _, err := golang.TestTasks(scope.Repo, scope.Dir); err != nil {
 			t.Fatalf("TestTasks failed for %s: %v", scope.Dir, err)
 		}
 	}
@@ -146,7 +146,12 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 		}
 	}
 
-	r, err := repo.Open(tempDir)
+	cfg, err := config.Load(tempDir)
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+
+	r, err := repo.Open(tempDir, repo.WithSkip(cfg.Skip...))
 	if err != nil {
 		t.Fatalf("repo.Open failed: %v", err)
 	}
@@ -154,7 +159,7 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 	ignoredDir := filepath.Join(tempDir, "ignored")
 
 	// 1. DiscoverScopes must not see ignored/.ap
-	scopes, err := DiscoverScopes(tempDir, []string{tempDir}, r)
+	scopes, err := DiscoverScopes(r, tempDir, []string{tempDir})
 	if err != nil {
 		t.Fatalf("DiscoverScopes failed: %v", err)
 	}
@@ -165,7 +170,7 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 	}
 
 	// 2. FindAllAPRoots must not see ignored
-	apRoots, err := config.FindAllAPRoots(tempDir, r)
+	apRoots, err := config.FindAllAPRoots(r, tempDir)
 	if err != nil {
 		t.Fatalf("FindAllAPRoots failed: %v", err)
 	}
@@ -197,7 +202,7 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 	}
 
 	// 6. HasGoTests must be false for ignored
-	hasTests, err := golang.HasGoTests(ignoredDir, r)
+	hasTests, err := golang.HasGoTests(r, ignoredDir)
 	if err != nil {
 		t.Fatalf("HasGoTests failed: %v", err)
 	}
@@ -206,7 +211,7 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 	}
 
 	// 7. walker.Walk must not see files in ignored
-	walkedFiles, err := walker.Walk(tempDir, nil, nil)
+	walkedFiles, err := walker.Walk(r, tempDir, nil, nil)
 	if err != nil {
 		t.Fatalf("walker.Walk failed: %v", err)
 	}
@@ -218,7 +223,7 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 	}
 
 	// 8. walker.ExpandPaths must not see files in ignored
-	expandedFiles, err := walker.ExpandPaths(tempDir, []string{}, nil)
+	expandedFiles, err := walker.ExpandPaths(r, tempDir, []string{}, nil)
 	if err != nil {
 		t.Fatalf("walker.ExpandPaths failed: %v", err)
 	}

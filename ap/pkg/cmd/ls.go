@@ -62,7 +62,7 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 		return err
 	}
 
-	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots, r)
+	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.APRoots)
 	if err != nil {
 		return err
 	}
@@ -81,7 +81,7 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 		var all []tasks.Task
 
 		// Build tasks
-		buildTasks, err := images.BuildTasks(apRoot, false, "", scope.Repo)
+		buildTasks, err := images.BuildTasks(scope.Repo, apRoot, false, "")
 		if err == nil && buildTasks != nil {
 			all = append(all, buildTasks)
 		}

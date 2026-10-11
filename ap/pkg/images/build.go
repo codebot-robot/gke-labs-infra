@@ -272,7 +272,7 @@ func (t *DockerBuildTask) GetChildren() []tasks.Task {
 }
 
 // BuildTasks returns a task group for building all docker images found in images/<name>/Dockerfile.
-func BuildTasks(root string, push bool, buildkitHost string, repos ...*repo.Repo) (tasks.Task, error) {
+func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
@@ -282,7 +282,7 @@ func BuildTasks(root string, push bool, buildkitHost string, repos ...*repo.Repo
 		buildkitHost = "k8s://autodeploy-system/buildkit"
 	}
 
-	dockerfiles, err := findDockerfiles(root, repos...)
+	dockerfiles, err := findDockerfiles(r, root)
 	if err != nil {
 		return nil, err
 	}
@@ -327,17 +327,17 @@ func BuildTasks(root string, push bool, buildkitHost string, repos ...*repo.Repo
 }
 
 // Build builds docker images found in images/<name>/Dockerfile.
-func Build(ctx context.Context, root string, push bool, buildkitHost string) error {
-	t, err := BuildTasks(root, push, buildkitHost)
+func Build(ctx context.Context, r *repo.Repo, root string, push bool, buildkitHost string) error {
+	t, err := BuildTasks(r, root, push, buildkitHost)
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r})
 }
 
 // HasImages returns true if there are any images to build under root.
-func HasImages(root string, repos ...*repo.Repo) (bool, error) {
-	dockerfiles, err := findDockerfiles(root, repos...)
+func HasImages(r *repo.Repo, root string) (bool, error) {
+	dockerfiles, err := findDockerfiles(r, root)
 	if err != nil {
 		return false, err
 	}
@@ -355,17 +355,7 @@ func HasImages(root string, repos ...*repo.Repo) (bool, error) {
 	return false, nil
 }
 
-func findDockerfiles(root string, repos ...*repo.Repo) ([]string, error) {
-	var r *repo.Repo
-	if len(repos) > 0 && repos[0] != nil {
-		r = repos[0]
-	} else {
-		var err error
-		r, err = repo.Open(root)
-		if err != nil {
-			return nil, err
-		}
-	}
+func findDockerfiles(r *repo.Repo, root string) ([]string, error) {
 	return r.Under(root).FindDockerfiles(), nil
 }
 

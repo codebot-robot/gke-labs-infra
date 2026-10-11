@@ -24,10 +24,11 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/cache"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"k8s.io/klog/v2"
 )
 
-func Run(ctx context.Context, repoRoot string, files []string) error {
+func Run(ctx context.Context, r *repo.Repo, repoRoot string, files []string) error {
 	log := klog.FromContext(ctx)
 
 	// Initialize cache
@@ -48,7 +49,7 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 	}
 
 	if cfg.IsGofmtEnabled() {
-		if err := runGofmt(ctx, repoRoot, files, cfg.Skip, cm); err != nil {
+		if err := runGofmt(ctx, r, repoRoot, files, cfg.Skip, cm); err != nil {
 			return err
 		}
 	}
@@ -56,11 +57,11 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 	return nil
 }
 
-func runGofmt(ctx context.Context, repoRoot string, files []string, skip []string, cm *cache.Manager) error {
+func runGofmt(ctx context.Context, r *repo.Repo, repoRoot string, files []string, skip []string, cm *cache.Manager) error {
 	log := klog.FromContext(ctx)
 
 	ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
-	expandedFiles, err := walker.ExpandPaths(repoRoot, files, ignoreList)
+	expandedFiles, err := walker.ExpandPaths(r, repoRoot, files, ignoreList)
 	if err != nil {
 		return err
 	}

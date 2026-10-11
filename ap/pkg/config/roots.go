@@ -19,16 +19,6 @@ import (
 )
 
 // FindAllAPRoots finds all directories containing a .ap directory within the given repoRoot.
-func FindAllAPRoots(repoRoot string, repos ...*repo.Repo) ([]string, error) {
-	var r *repo.Repo
-	if len(repos) > 0 && repos[0] != nil {
-		r = repos[0]
-	} else {
-		var err error
-		r, err = repo.Open(repoRoot)
-		if err != nil {
-			return nil, err
-		}
-	}
+func FindAllAPRoots(r *repo.Repo, repoRoot string) ([]string, error) {
 	return r.Under(repoRoot).APRoots(), nil
 }

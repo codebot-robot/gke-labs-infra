@@ -29,18 +29,7 @@ import (
 //	./... - Current AP root and all child AP roots
 //	//... - Repository root AP root and all child AP roots
 //	//foo - The AP root at repoRoot/foo
-func ResolveTargets(repoRoot, currentAPRoot string, args []string, repos ...*repo.Repo) ([]string, error) {
-	var r *repo.Repo
-	if len(repos) > 0 && repos[0] != nil {
-		r = repos[0]
-	} else if repoRoot != "" {
-		var err error
-		r, err = repo.Open(repoRoot)
-		if err != nil {
-			return nil, err
-		}
-	}
-
+func ResolveTargets(r *repo.Repo, repoRoot, currentAPRoot string, args []string) ([]string, error) {
 	if len(args) == 0 {
 		args = []string{"."}
 	}
@@ -59,7 +48,7 @@ func ResolveTargets(repoRoot, currentAPRoot string, args []string, repos ...*rep
 			}
 		case arg == "./...":
 			if currentAPRoot != "" {
-				resolved, err = FindAllAPRoots(currentAPRoot, r)
+				resolved, err = FindAllAPRoots(r, currentAPRoot)
 				if err != nil {
 					return nil, fmt.Errorf("failed to find AP roots in %s: %w", currentAPRoot, err)
 				}
@@ -71,7 +60,7 @@ func ResolveTargets(repoRoot, currentAPRoot string, args []string, repos ...*rep
 			}
 		case arg == "//...":
 			if repoRoot != "" {
-				resolved, err = FindAllAPRoots(repoRoot, r)
+				resolved, err = FindAllAPRoots(r, repoRoot)
 				if err != nil {
 					return nil, fmt.Errorf("failed to find AP roots in %s: %w", repoRoot, err)
 				}
@@ -93,7 +82,7 @@ func ResolveTargets(repoRoot, currentAPRoot string, args []string, repos ...*rep
 			path := filepath.Join(repoRoot, pathPart)
 			if strings.HasSuffix(path, "/...") {
 				basePath := strings.TrimSuffix(path, "/...")
-				resolved, err = FindAllAPRoots(basePath, r)
+				resolved, err = FindAllAPRoots(r, basePath)
 				if err != nil {
 					return nil, fmt.Errorf("failed to find AP roots in %s: %w", basePath, err)
 				}
@@ -114,7 +103,7 @@ func ResolveTargets(repoRoot, currentAPRoot string, args []string, repos ...*rep
 			path := filepath.Join(currentAPRoot, pathPart)
 			if strings.HasSuffix(path, "/...") {
 				basePath := strings.TrimSuffix(path, "/...")
-				resolved, err = FindAllAPRoots(basePath, r)
+				resolved, err = FindAllAPRoots(r, basePath)
 				if err != nil {
 					return nil, fmt.Errorf("failed to find AP roots in %s: %w", basePath, err)
 				}
@@ -133,7 +122,7 @@ func ResolveTargets(repoRoot, currentAPRoot string, args []string, repos ...*rep
 			path := filepath.Join(currentAPRoot, pathPart)
 			if strings.HasSuffix(path, "/...") {
 				basePath := strings.TrimSuffix(path, "/...")
-				resolved, err = FindAllAPRoots(basePath, r)
+				resolved, err = FindAllAPRoots(r, basePath)
 				if err != nil {
 					return nil, fmt.Errorf("failed to find AP roots in %s: %w", basePath, err)
 				}

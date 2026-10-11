@@ -63,7 +63,7 @@ func main() {}
 
 	// Run fileheaders
 	ctx := t.Context()
-	if err := Run(ctx, tmpDir, nil); err != nil {
+	if err := runTest(ctx, tmpDir, nil); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 
@@ -116,7 +116,7 @@ func main() {}
 
 	// Run fileheaders
 	ctx := t.Context()
-	if err := Run(ctx, tmpDir, nil); err != nil {
+	if err := runTest(ctx, tmpDir, nil); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 
@@ -161,7 +161,7 @@ func main() {}
 
 	// Run fileheaders
 	ctx := t.Context()
-	if err := Run(ctx, tmpDir, nil); err != nil {
+	if err := runTest(ctx, tmpDir, nil); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 

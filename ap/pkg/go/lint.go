@@ -258,27 +258,17 @@ func (t *DroppedErrorsCheckTask) GetChildren() []tasks.Task {
 }
 
 // LintTasks returns a task group for running go linting in discovered modules.
-func LintTasks(root string, repos ...*repo.Repo) (tasks.Task, error) {
+func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
-	}
-
-	var r *repo.Repo
-	if len(repos) > 0 && repos[0] != nil {
-		r = repos[0]
-	} else {
-		r, err = repo.Open(root)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	modules := r.Under(root).Modules()
 
 	var moduleTasks []tasks.Task
 	for _, dir := range modules {
-		hasGo, err := hasGoFiles(dir, r)
+		hasGo, err := hasGoFiles(r, dir)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check for Go files in %s: %w", dir, err)
 		}
@@ -348,26 +338,16 @@ func LintTasks(root string, repos ...*repo.Repo) (tasks.Task, error) {
 }
 
 // Lint runs go vet and govulncheck in discovered modules.
-func Lint(ctx context.Context, root string) error {
-	t, err := LintTasks(root)
+func Lint(ctx context.Context, r *repo.Repo, root string) error {
+	t, err := LintTasks(r, root)
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r})
 }
 
 // hasGoFiles returns true if the directory or any of its subdirectories
 // (excluding those that are themselves Go modules) contain at least one .go file.
-func hasGoFiles(root string, repos ...*repo.Repo) (bool, error) {
-	var r *repo.Repo
-	if len(repos) > 0 && repos[0] != nil {
-		r = repos[0]
-	} else {
-		var err error
-		r, err = repo.Open(root)
-		if err != nil {
-			return false, err
-		}
-	}
+func hasGoFiles(r *repo.Repo, root string) (bool, error) {
 	return r.Under(root).HasGoFiles(), nil
 }

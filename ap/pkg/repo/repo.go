@@ -23,8 +23,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-
-	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -34,16 +32,17 @@ var (
 )
 
 // WalkCount returns the total number of filesystem tree walks performed by the repo package.
+// Intended for tests to verify the single-walk property.
 func WalkCount() int64 {
 	return atomic.LoadInt64(&walkCounter)
 }
 
-// ResetWalkCount resets the walk counter to zero.
+// ResetWalkCount resets the walk counter to zero. Intended for tests.
 func ResetWalkCount() {
 	atomic.StoreInt64(&walkCounter, 0)
 }
 
-// ResetCache clears the in-memory cached repo trees and resets the walk counter.
+// ResetCache clears the in-memory cached repo trees and resets the walk counter. Intended for tests.
 func ResetCache() {
 	openMu.Lock()
 	defer openMu.Unlock()
@@ -79,17 +78,20 @@ func WithIgnore(patterns ...string) Option {
 	}
 }
 
-// Repo represents an in-memory view of a repository directory tree.
+// Repo represents an in-memory snapshot of a repository directory tree.
 type Repo struct {
 	root     string // root directory of this view
 	repoRoot string // anchor root of the entire repository
 
-	files          []*File
-	filesByPath    map[string]*File
-	filesByRelPath map[string]*File // relative to root
+	files       []*File
+	filesByPath map[string]*File
 
 	dirs    []string
 	dirsSet map[string]bool
+
+	// Precomputed indices for fast queries:
+	filesByDir   map[string][]*File // directory path -> files directly within it
+	hasTestsDirs map[string]bool    // directory path -> true if dir or any descendant has a test file
 
 	apRoots []string // sorted
 	modules []string // sorted
@@ -97,9 +99,8 @@ type Repo struct {
 	ignoreList *IgnoreList
 }
 
-// Open opens an in-memory view of the repository. If root has already been opened,
-// or is a subdirectory of an already-opened repo root, it returns the cached in-memory view
-// without walking the filesystem again.
+// Open opens an in-memory snapshot of the repository. If root has already been opened,
+// it returns the cached in-memory view without walking the filesystem again.
 func Open(root string, opts ...Option) (*Repo, error) {
 	absRoot, err := filepath.Abs(filepath.Clean(root))
 	if err != nil {
@@ -109,22 +110,8 @@ func Open(root string, opts ...Option) (*Repo, error) {
 	openMu.Lock()
 	defer openMu.Unlock()
 
-	// If no custom options were provided, check the cache
-	if len(opts) == 0 {
-		if r, ok := openCache[absRoot]; ok {
-			return r, nil
-		}
-		// Check if an existing cached repo is an ancestor
-		for cachedRoot, r := range openCache {
-			if absRoot == cachedRoot {
-				return r, nil
-			}
-			if strings.HasPrefix(absRoot, cachedRoot+string(filepath.Separator)) {
-				sub := r.Under(absRoot)
-				openCache[absRoot] = sub
-				return sub, nil
-			}
-		}
+	if r, ok := openCache[absRoot]; ok {
+		return r, nil
 	}
 
 	r, err := loadRepo(absRoot, opts...)
@@ -132,9 +119,7 @@ func Open(root string, opts ...Option) (*Repo, error) {
 		return nil, err
 	}
 
-	if len(opts) == 0 {
-		openCache[absRoot] = r
-	}
+	openCache[absRoot] = r
 	return r, nil
 }
 
@@ -151,17 +136,6 @@ func loadRepo(root string, opts ...Option) (*Repo, error) {
 	var opt options
 	for _, o := range opts {
 		o(&opt)
-	}
-
-	// Read skip globs from .ap/go.yaml if present in root
-	configPath := filepath.Join(root, ".ap", "go.yaml")
-	if data, err := os.ReadFile(configPath); err == nil {
-		var raw struct {
-			Skip []string `yaml:"skip"`
-		}
-		if err := yaml.Unmarshal(data, &raw); err == nil && len(raw.Skip) > 0 {
-			opt.skips = append(opt.skips, raw.Skip...)
-		}
 	}
 
 	// Combine default ignores with skips and custom ignores
@@ -195,7 +169,7 @@ func loadRepo(root string, opts ...Option) (*Repo, error) {
 
 		relPath, err := filepath.Rel(root, path)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to determine relative path for %s: %w", path, err)
 		}
 		if relPath == "." {
 			return nil
@@ -223,11 +197,6 @@ func loadRepo(root string, opts ...Option) (*Repo, error) {
 			return nil
 		}
 
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-
 		if d.Name() == "go.mod" {
 			parent := filepath.Dir(path)
 			modules = append(modules, parent)
@@ -237,9 +206,6 @@ func loadRepo(root string, opts ...Option) (*Repo, error) {
 			Path:    path,
 			RelPath: relSlash,
 			Name:    d.Name(),
-			Size:    info.Size(),
-			ModTime: info.ModTime(),
-			Mode:    info.Mode(),
 		})
 		return nil
 	})
@@ -270,18 +236,30 @@ func loadRepo(root string, opts ...Option) (*Repo, error) {
 
 func newRepo(root, repoRoot string, files []*File, dirs, apRoots, modules []string, ignoreList *IgnoreList) *Repo {
 	filesByPath := make(map[string]*File, len(files))
-	filesByRelPath := make(map[string]*File, len(files))
-	for _, f := range files {
-		filesByPath[f.Path] = f
-		if rel, err := filepath.Rel(root, f.Path); err == nil {
-			filesByRelPath[filepath.ToSlash(rel)] = f
-		}
-	}
+	filesByDir := make(map[string][]*File)
+	hasTestsDirs := make(map[string]bool)
 
 	dirsSet := make(map[string]bool, len(dirs)+1)
 	dirsSet[root] = true
 	for _, d := range dirs {
 		dirsSet[d] = true
+	}
+
+	for _, f := range files {
+		filesByPath[f.Path] = f
+		parentDir := filepath.Dir(f.Path)
+		filesByDir[parentDir] = append(filesByDir[parentDir], f)
+
+		if f.IsTest() {
+			// Mark parent directory and all ancestors up to root as containing tests
+			for curr := parentDir; ; {
+				hasTestsDirs[curr] = true
+				if curr == root || curr == filepath.Dir(curr) {
+					break
+				}
+				curr = filepath.Dir(curr)
+			}
+		}
 	}
 
 	sort.Slice(files, func(i, j int) bool {
@@ -290,16 +268,17 @@ func newRepo(root, repoRoot string, files []*File, dirs, apRoots, modules []stri
 	sort.Strings(dirs)
 
 	return &Repo{
-		root:           root,
-		repoRoot:       repoRoot,
-		files:          files,
-		filesByPath:    filesByPath,
-		filesByRelPath: filesByRelPath,
-		dirs:           dirs,
-		dirsSet:        dirsSet,
-		apRoots:        apRoots,
-		modules:        modules,
-		ignoreList:     ignoreList,
+		root:         root,
+		repoRoot:     repoRoot,
+		files:        files,
+		filesByPath:  filesByPath,
+		dirs:         dirs,
+		dirsSet:      dirsSet,
+		filesByDir:   filesByDir,
+		hasTestsDirs: hasTestsDirs,
+		apRoots:      apRoots,
+		modules:      modules,
+		ignoreList:   ignoreList,
 	}
 }
 
@@ -379,10 +358,6 @@ func (r *Repo) FilePaths(filters ...Filter) []string {
 func (r *Repo) File(path string) *File {
 	clean := filepath.Clean(path)
 	if f, ok := r.filesByPath[clean]; ok {
-		return f
-	}
-	slash := filepath.ToSlash(clean)
-	if f, ok := r.filesByRelPath[slash]; ok {
 		return f
 	}
 	if !filepath.IsAbs(clean) {
@@ -473,18 +448,21 @@ func (r *Repo) Under(dir string) *Repo {
 
 	prefix := cleanDir + string(filepath.Separator)
 
-	var subFiles []*File
-	for _, f := range r.files {
-		if f.Path == cleanDir || strings.HasPrefix(f.Path, prefix) {
-			subFiles = append(subFiles, f)
+	// Collect subDirs efficiently
+	var subDirs []string
+	if r.dirsSet[cleanDir] {
+		subDirs = append(subDirs, cleanDir)
+	}
+	for _, d := range r.dirs {
+		if strings.HasPrefix(d, prefix) {
+			subDirs = append(subDirs, d)
 		}
 	}
 
-	var subDirs []string
-	for _, d := range r.dirs {
-		if d == cleanDir || strings.HasPrefix(d, prefix) {
-			subDirs = append(subDirs, d)
-		}
+	// Collect files directly from the collected subdirectories
+	var subFiles []*File
+	for _, d := range subDirs {
+		subFiles = append(subFiles, r.filesByDir[d]...)
 	}
 
 	var subAPRoots []string
@@ -494,7 +472,6 @@ func (r *Repo) Under(dir string) *Repo {
 		}
 	}
 	if len(subAPRoots) == 0 {
-		// If no child .ap root exists, the subview falls back to cleanDir
 		subAPRoots = []string{cleanDir}
 	}
 
@@ -509,12 +486,12 @@ func (r *Repo) Under(dir string) *Repo {
 }
 
 // Glob returns absolute file paths matching the given glob pattern.
-func (r *Repo) Glob(pattern string) []string {
+func (r *Repo) Glob(pattern string) ([]string, error) {
 	var matches []string
 	for _, f := range r.files {
 		relToView, err := filepath.Rel(r.root, f.Path)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("failed to determine relative path for %s: %w", f.Path, err)
 		}
 		relSlash := filepath.ToSlash(relToView)
 
@@ -523,27 +500,29 @@ func (r *Repo) Glob(pattern string) []string {
 				matches = append(matches, f.Path)
 			}
 		} else {
-			if matched, _ := filepath.Match(pattern, f.Name); matched {
+			matched, err := filepath.Match(pattern, f.Name)
+			if err != nil {
+				return nil, fmt.Errorf("invalid glob pattern %q: %w", pattern, err)
+			}
+			if matched {
 				matches = append(matches, f.Path)
 			}
 		}
 	}
 	sort.Strings(matches)
-	return matches
+	return matches, nil
 }
 
 // HasGoTests reports whether the view (or any subdirectory under dir if specified) contains a _test.go file.
 func (r *Repo) HasGoTests(dir ...string) bool {
-	view := r
+	target := r.root
 	if len(dir) > 0 && dir[0] != "" {
-		view = r.Under(dir[0])
-	}
-	for _, f := range view.files {
-		if f.IsTest() {
-			return true
+		target = filepath.Clean(dir[0])
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(r.root, target)
 		}
 	}
-	return false
+	return r.hasTestsDirs[target]
 }
 
 // HasGoFiles reports whether the view (or any subdirectory under dir if specified) contains
@@ -632,7 +611,7 @@ func (r *Repo) Walk(root string, ignore *IgnoreList, filter func(path string, in
 	return files, nil
 }
 
-// ExpandPaths expands target paths into individual file paths using the in-memory tree.
+// ExpandPaths expands target paths into individual file paths using the in-memory tree snapshot.
 func (r *Repo) ExpandPaths(repoRoot string, paths []string, ignore *IgnoreList) ([]string, error) {
 	if len(paths) == 0 {
 		paths = []string{repoRoot}
@@ -659,22 +638,6 @@ func (r *Repo) ExpandPaths(repoRoot string, paths []string, ignore *IgnoreList) 
 			if !seen[f.Path] {
 				seen[f.Path] = true
 				files = append(files, f.Path)
-			}
-			continue
-		}
-
-		// Fallback for explicitly specified files that may be newly created on disk
-		if fi, err := os.Stat(absPath); err == nil && !fi.IsDir() {
-			relPath, err := filepath.Rel(repoRoot, absPath)
-			if err != nil {
-				return nil, err
-			}
-			if ignore != nil && ignore.ShouldIgnore(relPath, false) {
-				continue
-			}
-			if !seen[absPath] {
-				seen[absPath] = true
-				files = append(files, absPath)
 			}
 			continue
 		}

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
@@ -46,7 +47,15 @@ func (opt *RootOptions) GetRepo() (*repo.Repo, error) {
 	if opt.RepoRoot == "" {
 		return nil, fmt.Errorf("repo root is not set")
 	}
-	r, err := repo.Open(opt.RepoRoot)
+	cfg, err := config.Load(opt.RepoRoot)
+	if err != nil {
+		return nil, err
+	}
+	var skips []string
+	if cfg != nil {
+		skips = cfg.Skip
+	}
+	r, err := repo.Open(opt.RepoRoot, repo.WithSkip(skips...))
 	if err != nil {
 		return nil, err
 	}
@@ -60,11 +69,6 @@ func (opt *RootOptions) Resolve(args []string) error {
 		return fmt.Errorf("repo root is not set")
 	}
 
-	r, err := opt.GetRepo()
-	if err != nil {
-		return err
-	}
-
 	if opt.RootFlag != "" {
 		absRoot := opt.RootFlag
 		if !filepath.IsAbs(absRoot) {
@@ -74,17 +78,38 @@ func (opt *RootOptions) Resolve(args []string) error {
 			}
 			absRoot = filepath.Join(wd, opt.RootFlag)
 		}
-		if !r.DirExists(absRoot) {
-			return fmt.Errorf("specified root %q does not exist", opt.RootFlag)
+		fi, err := os.Stat(absRoot)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("specified root %q does not exist", opt.RootFlag)
+			}
+			return fmt.Errorf("failed to stat specified root %q: %w", opt.RootFlag, err)
 		}
-		if !r.DirExists(filepath.Join(absRoot, ".ap")) {
-			return fmt.Errorf("specified root %q is not an AP root (missing .ap directory)", opt.RootFlag)
+		if !fi.IsDir() {
+			return fmt.Errorf("specified root %q is not a directory", opt.RootFlag)
+		}
+		if _, err := os.Stat(filepath.Join(absRoot, ".ap")); err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("specified root %q is not an AP root (missing .ap directory)", opt.RootFlag)
+			}
+			return fmt.Errorf("failed to check for .ap directory in %q: %w", opt.RootFlag, err)
 		}
 		opt.APRoots = []string{absRoot}
+
+		// If absRoot is outside RepoRoot, anchor RepoRoot to absRoot
+		if opt.RepoRoot == "" || (!strings.HasPrefix(absRoot, opt.RepoRoot+string(filepath.Separator)) && absRoot != opt.RepoRoot) {
+			opt.RepoRoot = absRoot
+			opt.Repo = nil
+		}
 		return nil
 	}
 
-	roots, err := config.ResolveTargets(opt.RepoRoot, opt.APRoot, args, r)
+	r, err := opt.GetRepo()
+	if err != nil {
+		return err
+	}
+
+	roots, err := config.ResolveTargets(r, opt.RepoRoot, opt.APRoot, args)
 	if err != nil {
 		return err
 	}

@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 )
 
 func TestResolveTargets(t *testing.T) {
@@ -117,7 +119,11 @@ func TestResolveTargets(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ResolveTargets(repoRoot, tt.currentAPRoot, tt.args)
+			r, err := repo.Open(repoRoot)
+			if err != nil {
+				t.Fatalf("repo.Open failed: %v", err)
+			}
+			got, err := ResolveTargets(r, repoRoot, tt.currentAPRoot, tt.args)
 			if err != nil {
 				t.Fatalf("ResolveTargets failed: %v", err)
 			}

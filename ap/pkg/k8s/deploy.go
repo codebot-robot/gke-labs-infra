@@ -341,8 +341,8 @@ func getCRDNames(content []byte) ([]string, error) {
 }
 
 // DeployTasks returns a task group for deploying all k8s manifests found in k8s directories.
-func DeployTasks(root string, repos ...*repo.Repo) (tasks.Task, error) {
-	manifests, err := findManifests(root, repos...)
+func DeployTasks(r *repo.Repo, root string) (tasks.Task, error) {
+	manifests, err := findManifests(r, root)
 	if err != nil {
 		return nil, err
 	}
@@ -361,24 +361,14 @@ func DeployTasks(root string, repos ...*repo.Repo) (tasks.Task, error) {
 }
 
 // Deploy deploys k8s manifests found in k8s directories.
-func Deploy(ctx context.Context, root string) error {
-	t, err := DeployTasks(root)
+func Deploy(ctx context.Context, r *repo.Repo, root string) error {
+	t, err := DeployTasks(r, root)
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r})
 }
 
-func findManifests(root string, repos ...*repo.Repo) ([]string, error) {
-	var r *repo.Repo
-	if len(repos) > 0 && repos[0] != nil {
-		r = repos[0]
-	} else {
-		var err error
-		r, err = repo.Open(root)
-		if err != nil {
-			return nil, err
-		}
-	}
+func findManifests(r *repo.Repo, root string) ([]string, error) {
 	return r.Under(root).FindManifests(), nil
 }

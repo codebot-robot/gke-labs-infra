@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"k8s.io/klog/v2"
 )
 
@@ -38,7 +39,7 @@ type GoVersion struct {
 }
 
 // Run executes the versionbump command.
-func Run(ctx context.Context, root string, targetGoVersion string) error {
+func Run(ctx context.Context, r *repo.Repo, root string, targetGoVersion string) error {
 	var latestGo string
 	var err error
 	if targetGoVersion != "" {
@@ -56,7 +57,7 @@ func Run(ctx context.Context, root string, targetGoVersion string) error {
 
 	ignore := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
 
-	files, err := walker.Walk(root, ignore, func(path string, _ os.FileInfo) bool {
+	files, err := walker.Walk(r, root, ignore, func(path string, _ os.FileInfo) bool {
 		name := filepath.Base(path)
 		return name == "go.mod" || name == "Dockerfile" || strings.HasPrefix(name, "Dockerfile.")
 	})

@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 )
 
 func TestExpandPaths(t *testing.T) {
@@ -101,7 +103,11 @@ func TestExpandPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ExpandPaths(repoRoot, tt.paths, ignore)
+			r, err := repo.Open(repoRoot)
+			if err != nil {
+				t.Fatalf("repo.Open failed: %v", err)
+			}
+			got, err := ExpandPaths(r, repoRoot, tt.paths, ignore)
 			if err != nil {
 				t.Fatalf("ExpandPaths failed: %v", err)
 			}

@@ -18,13 +18,19 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 )
 
 func TestHasGoTests(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// 1. Non-existent directory should return false, nil
-	hasTests, err := HasGoTests(filepath.Join(tmpDir, "nonexistent"))
+	r1, err := repo.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasTests, err := HasGoTests(r1, filepath.Join(tmpDir, "nonexistent"))
 	if err != nil {
 		t.Fatalf("expected nil error for nonexistent dir, got: %v", err)
 	}
@@ -37,7 +43,11 @@ func TestHasGoTests(t *testing.T) {
 	if err := os.Mkdir(emptyDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	hasTests, err = HasGoTests(emptyDir)
+	r2, err := repo.Open(emptyDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasTests, err = HasGoTests(r2, emptyDir)
 	if err != nil {
 		t.Fatalf("unexpected error for empty dir: %v", err)
 	}
@@ -53,7 +63,11 @@ func TestHasGoTests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(noTestDir, "foo.go"), []byte("package foo"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	hasTests, err = HasGoTests(noTestDir)
+	r3, err := repo.Open(noTestDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasTests, err = HasGoTests(r3, noTestDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -69,7 +83,11 @@ func TestHasGoTests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(withTestDir, "foo_test.go"), []byte("package foo"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	hasTests, err = HasGoTests(withTestDir)
+	r4, err := repo.Open(withTestDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasTests, err = HasGoTests(r4, withTestDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,7 +104,11 @@ func TestHasGoTests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(subNested, "bar_test.go"), []byte("package bar"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	hasTests, err = HasGoTests(nestedDir)
+	r5, err := repo.Open(nestedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasTests, err = HasGoTests(r5, nestedDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

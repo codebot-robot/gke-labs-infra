@@ -205,14 +205,23 @@ func TestBuildInitCommand_HiddenFlag(t *testing.T) {
 func TestDetectGitUserName(t *testing.T) {
 	tempDir := t.TempDir()
 
+	var env []string
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "GIT_CONFIG_") {
+			env = append(env, e)
+		}
+	}
+
 	// Initialize git repo and set local user.name
 	cmd := exec.Command("git", "init")
 	cmd.Dir = tempDir
+	cmd.Env = env
 	if err := cmd.Run(); err != nil {
 		t.Fatal(err)
 	}
 	cfgCmd := exec.Command("git", "config", "user.name", "Test Specific User")
 	cfgCmd.Dir = tempDir
+	cfgCmd.Env = env
 	if err := cfgCmd.Run(); err != nil {
 		t.Fatal(err)
 	}

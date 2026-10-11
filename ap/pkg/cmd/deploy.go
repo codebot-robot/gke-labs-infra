@@ -81,13 +81,13 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		}
 
 		// Deploy typically also builds
-		buildTasks, err := images.BuildTasks(apRoot, !opt.SkipPush, "", r.Under(apRoot))
+		buildTasks, err := images.BuildTasks(r.Under(apRoot), apRoot, !opt.SkipPush, "")
 		if err != nil {
 			return fmt.Errorf("build failed during deploy for %s: %w", apRoot, err)
 		}
 		group.Tasks = append(group.Tasks, buildTasks)
 
-		deployTasks, err := k8s.DeployTasks(apRoot, r.Under(apRoot))
+		deployTasks, err := k8s.DeployTasks(r.Under(apRoot), apRoot)
 		if err != nil {
 			return fmt.Errorf("deploy failed for %s: %w", apRoot, err)
 		}

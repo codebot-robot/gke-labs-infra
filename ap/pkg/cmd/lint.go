@@ -65,7 +65,7 @@ func RunLint(ctx context.Context, opt LintOptions) error {
 		return err
 	}
 
-	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots, r)
+	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.APRoots)
 	if err != nil {
 		return err
 	}

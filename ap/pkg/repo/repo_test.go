@@ -26,49 +26,8 @@ func setupTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
-	// Structure:
-	// dir/
-	//   .git/
-	//   .ap/
-	//     go.yaml
-	//   go.mod
-	//   main.go
-	//   main_test.go
-	//   generated.go ("// Code generated ... DO NOT EDIT.")
-	//   vendor/
-	//     lib/
-	//       lib.go
-	//   k8s/
-	//     manifest.yaml
-	//     crds/
-	//       crd.yml
-	//   images/
-	//     app/
-	//       Dockerfile
-	//   sub/
-	//     .ap/
-	//     go.mod
-	//     sub.go
-	//     images/
-	//       subapp/
-	//         Dockerfile
-	//     k8s/
-	//       sub.yaml
-	//   skipped/
-	//     .ap/
-	//     go.mod
-	//     skipped.go
-	//     skipped_test.go
-	//     images/
-	//       skip/
-	//         Dockerfile
-	//     k8s/
-	//       skip.yaml
-
 	files := map[string]string{
-		".ap/go.yaml": `skip:
-  - skipped/**
-`,
+		".ap/ap.yaml":                    "",
 		"go.mod":                         "module example.com/root\n\ngo 1.26\n",
 		"main.go":                        "package main\n\nfunc main() {}\n",
 		"main_test.go":                   "package main\n\nimport \"testing\"\nfunc TestMain(t *testing.T) {}\n",
@@ -112,7 +71,7 @@ func TestRepoSingleWalkAndCache(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
-	r1, err := Open(dir)
+	r1, err := Open(dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -132,26 +91,13 @@ func TestRepoSingleWalkAndCache(t *testing.T) {
 	if count := WalkCount(); count != 1 {
 		t.Fatalf("expected WalkCount to remain 1, got %d", count)
 	}
-
-	// Opening a subdirectory should reuse cached parent repo view without walking
-	subDir := filepath.Join(dir, "sub")
-	rSub, err := Open(subDir)
-	if err != nil {
-		t.Fatalf("Open subDir failed: %v", err)
-	}
-	if count := WalkCount(); count != 1 {
-		t.Fatalf("expected WalkCount to remain 1 after opening subDir, got %d", count)
-	}
-	if rSub.Root() != subDir {
-		t.Fatalf("expected rSub.Root()=%s, got %s", subDir, rSub.Root())
-	}
 }
 
 func TestAPRootsAndModules(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
-	r, err := Open(dir)
+	r, err := Open(dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -183,7 +129,7 @@ func TestSkipUniformlyApplied(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
-	r, err := Open(dir)
+	r, err := Open(dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -236,7 +182,7 @@ func TestFileClassification(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
-	r, err := Open(dir)
+	r, err := Open(dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -269,7 +215,7 @@ func TestFindDockerfilesAndManifests(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
-	r, err := Open(dir)
+	r, err := Open(dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -312,13 +258,16 @@ func TestGlobAndQueries(t *testing.T) {
 	ResetCache()
 	dir := setupTestRepo(t)
 
-	r, err := Open(dir)
+	r, err := Open(dir, WithSkip("skipped/**"))
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
 
 	// Glob
-	matches := r.Glob("k8s/*.yaml")
+	matches, err := r.Glob("k8s/*.yaml")
+	if err != nil {
+		t.Fatalf("Glob failed: %v", err)
+	}
 	expectedMatches := []string{filepath.Join(dir, "k8s", "manifest.yaml")}
 	if !reflect.DeepEqual(matches, expectedMatches) {
 		t.Errorf("Glob(k8s/*.yaml) = %v, want %v", matches, expectedMatches)

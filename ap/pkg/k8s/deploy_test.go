@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 )
 
 func TestFindManifests(t *testing.T) {
@@ -95,7 +97,12 @@ func TestFindManifests(t *testing.T) {
 				}
 			}
 
-			got, err := findManifests(root)
+			r, err := repo.Open(root)
+			if err != nil {
+				t.Fatalf("repo.Open failed: %v", err)
+			}
+
+			got, err := findManifests(r, root)
 			if err != nil {
 				t.Fatalf("findManifests() error = %v", err)
 			}

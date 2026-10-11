@@ -92,33 +92,12 @@ func (t *GoE2eTask) GetChildren() []tasks.Task {
 }
 
 // HasGoTests returns true if the directory or any subdirectory contains a .go file with a _test.go suffix.
-func HasGoTests(dir string, repos ...*repo.Repo) (bool, error) {
-	var r *repo.Repo
-	if len(repos) > 0 && repos[0] != nil {
-		r = repos[0]
-	} else {
-		var err error
-		r, err = repo.Open(dir)
-		if err != nil {
-			return false, err
-		}
-	}
+func HasGoTests(r *repo.Repo, dir string) (bool, error) {
 	return r.Under(dir).HasGoTests(), nil
 }
 
 // TestTasks returns a task group for running go tests in discovered modules.
-func TestTasks(root string, repos ...*repo.Repo) (tasks.Task, error) {
-	var r *repo.Repo
-	if len(repos) > 0 && repos[0] != nil {
-		r = repos[0]
-	} else {
-		var err error
-		r, err = repo.Open(root)
-		if err != nil {
-			return nil, err
-		}
-	}
-
+func TestTasks(r *repo.Repo, root string) (tasks.Task, error) {
 	modules := r.Under(root).Modules()
 
 	buildDir := filepath.Join(root, ".build", "test-results", "go")
@@ -159,12 +138,12 @@ func TestTasks(root string, repos ...*repo.Repo) (tasks.Task, error) {
 }
 
 // Test runs go tests in discovered modules.
-func Test(ctx context.Context, root string) error {
-	t, err := TestTasks(root)
+func Test(ctx context.Context, r *repo.Repo, root string) error {
+	t, err := TestTasks(r, root)
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r})
 }
 
 // RunGoTestOptions holds options for running go tests.

@@ -23,24 +23,16 @@ import (
 // Filter is a function that returns true if the file should be included.
 type Filter func(path string, info os.FileInfo) bool
 
-// Walk walks the directory tree rooted at root and returns a list of files.
+// Walk walks the directory tree rooted at root and returns a list of files using the shared repo tree.
 // It skips paths matched by the ignore list.
 // If filter is provided, it only returns files for which filter returns true.
-func Walk(root string, ignore *IgnoreList, filter Filter) ([]string, error) {
-	r, err := repo.Open(root)
-	if err != nil {
-		return nil, err
-	}
+func Walk(r *repo.Repo, root string, ignore *IgnoreList, filter Filter) ([]string, error) {
 	return r.Walk(root, ignore, filter)
 }
 
 // ExpandPaths expands a list of target paths (which can be files or directories)
 // into a list of individual file paths, skipping files/dirs matched by the ignore list.
 // If paths is empty, it defaults to repoRoot.
-func ExpandPaths(repoRoot string, paths []string, ignore *IgnoreList) ([]string, error) {
-	r, err := repo.Open(repoRoot)
-	if err != nil {
-		return nil, err
-	}
+func ExpandPaths(r *repo.Repo, repoRoot string, paths []string, ignore *IgnoreList) ([]string, error) {
 	return r.ExpandPaths(repoRoot, paths, ignore)
 }

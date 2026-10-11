@@ -67,7 +67,7 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		return err
 	}
 
-	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots, r)
+	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.APRoots)
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 			buildkitHost = "k8s://autodeploy-system/buildkit"
 		}
 
-		imageTasks, err := images.BuildTasks(scope.Dir, opt.Push, buildkitHost, scope.Repo)
+		imageTasks, err := images.BuildTasks(scope.Repo, scope.Dir, opt.Push, buildkitHost)
 		if err != nil {
 			return err
 		}

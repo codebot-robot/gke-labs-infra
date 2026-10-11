@@ -18,6 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 )
 
 func TestRun_NoConfig(t *testing.T) {
@@ -31,7 +33,11 @@ func TestRun_NoConfig(t *testing.T) {
 	ctx := t.Context()
 
 	// Run should succeed (do nothing) when no config exists
-	err = Run(ctx, tmpDir, nil)
+	r, err := repo.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = Run(ctx, r, tmpDir, nil)
 	if err != nil {
 		t.Errorf("Expected success from Run (no config), got error: %v", err)
 	}
@@ -68,7 +74,11 @@ gofmt:
 	}
 
 	ctx := t.Context()
-	if err := Run(ctx, tmpDir, nil); err != nil {
+	r, err := repo.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(ctx, r, tmpDir, nil); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 

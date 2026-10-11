@@ -29,13 +29,15 @@ type File struct {
 
 // FileView represents a view of a directory tree, with ignore patterns.
 type FileView struct {
+	Repo   *repo.Repo
 	Dir    string
 	Ignore *IgnoreList
 }
 
-// NewFileView creates a new FileView.
-func NewFileView(dir string, ignorePatterns []string) *FileView {
+// NewFileView creates a new FileView backed by the repo tree snapshot.
+func NewFileView(r *repo.Repo, dir string, ignorePatterns []string) *FileView {
 	return &FileView{
+		Repo:   r,
 		Dir:    dir,
 		Ignore: NewIgnoreList(ignorePatterns),
 	}
@@ -43,11 +45,7 @@ func NewFileView(dir string, ignorePatterns []string) *FileView {
 
 // Walk walks the directory tree and calls callback for each file.
 func (v *FileView) Walk(callback func(File) error) error {
-	r, err := repo.Open(v.Dir)
-	if err != nil {
-		return err
-	}
-	return r.WalkFileView(v.Dir, v.Ignore, func(f *repo.File, relPath string) error {
+	return v.Repo.WalkFileView(v.Dir, v.Ignore, func(f *repo.File, relPath string) error {
 		return callback(File{
 			Path:    f.Path,
 			Info:    f.Info(),

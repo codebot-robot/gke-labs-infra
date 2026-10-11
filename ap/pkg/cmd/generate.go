@@ -62,7 +62,7 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 
 	var allTasks []tasks.Task
 
-	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots, r)
+	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.APRoots)
 	if err != nil {
 		return err
 	}
