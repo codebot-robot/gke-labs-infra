@@ -15,38 +15,20 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
-
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 )
 
 // FindAllAPRoots finds all directories containing a .ap directory within the given repoRoot.
-func FindAllAPRoots(repoRoot string) ([]string, error) {
-	var roots []string
-	err := filepath.Walk(repoRoot, func(path string, info os.FileInfo, err error) error {
+func FindAllAPRoots(repoRoot string, repos ...*repo.Repo) ([]string, error) {
+	var r *repo.Repo
+	if len(repos) > 0 && repos[0] != nil {
+		r = repos[0]
+	} else {
+		var err error
+		r, err = repo.Open(repoRoot)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if info.IsDir() {
-			if info.Name() == ".git" && path != filepath.Join(repoRoot, ".git") {
-				return filepath.SkipDir
-			}
-			if info.Name() == "vendor" || info.Name() == "node_modules" {
-				return filepath.SkipDir
-			}
-			hasAP, err := fileutils.FileExists(filepath.Join(path, ".ap"))
-			if err != nil {
-				return err
-			}
-			if hasAP {
-				roots = append(roots, path)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
-	return roots, nil
+	return r.Under(repoRoot).APRoots(), nil
 }

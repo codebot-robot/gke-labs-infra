@@ -23,6 +23,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 )
@@ -34,12 +35,34 @@ type RootOptions struct {
 	APRoots  []string
 	DryRun   bool
 	RootFlag string
+	Repo     *repo.Repo
+}
+
+// GetRepo returns the repository tree associated with the root options.
+func (opt *RootOptions) GetRepo() (*repo.Repo, error) {
+	if opt.Repo != nil {
+		return opt.Repo, nil
+	}
+	if opt.RepoRoot == "" {
+		return nil, fmt.Errorf("repo root is not set")
+	}
+	r, err := repo.Open(opt.RepoRoot)
+	if err != nil {
+		return nil, err
+	}
+	opt.Repo = r
+	return r, nil
 }
 
 // Resolve resolves the target paths based on args.
 func (opt *RootOptions) Resolve(args []string) error {
 	if opt.RepoRoot == "" {
 		return fmt.Errorf("repo root is not set")
+	}
+
+	r, err := opt.GetRepo()
+	if err != nil {
+		return err
 	}
 
 	if opt.RootFlag != "" {
@@ -51,27 +74,17 @@ func (opt *RootOptions) Resolve(args []string) error {
 			}
 			absRoot = filepath.Join(wd, opt.RootFlag)
 		}
-		fi, err := os.Stat(absRoot)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("specified root %q does not exist", opt.RootFlag)
-			}
-			return fmt.Errorf("failed to stat specified root %q: %w", opt.RootFlag, err)
+		if !r.DirExists(absRoot) {
+			return fmt.Errorf("specified root %q does not exist", opt.RootFlag)
 		}
-		if !fi.IsDir() {
-			return fmt.Errorf("specified root %q is not a directory", opt.RootFlag)
-		}
-		if _, err := os.Stat(filepath.Join(absRoot, ".ap")); err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("specified root %q is not an AP root (missing .ap directory)", opt.RootFlag)
-			}
-			return fmt.Errorf("failed to check for .ap directory in %q: %w", opt.RootFlag, err)
+		if !r.DirExists(filepath.Join(absRoot, ".ap")) {
+			return fmt.Errorf("specified root %q is not an AP root (missing .ap directory)", opt.RootFlag)
 		}
 		opt.APRoots = []string{absRoot}
 		return nil
 	}
 
-	roots, err := config.ResolveTargets(opt.RepoRoot, opt.APRoot, args)
+	roots, err := config.ResolveTargets(opt.RepoRoot, opt.APRoot, args, r)
 	if err != nil {
 		return err
 	}

@@ -55,7 +55,12 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 		return err
 	}
 
-	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots)
+	r, err := opt.GetRepo()
+	if err != nil {
+		return err
+	}
+
+	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots, r)
 	if err != nil {
 		return err
 	}
@@ -71,5 +76,5 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 		}
 	}
 
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

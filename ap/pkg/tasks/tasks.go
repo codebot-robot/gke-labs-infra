@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"k8s.io/klog/v2"
 )
 
@@ -30,6 +31,7 @@ import (
 type APScope struct {
 	RepoRoot string
 	Dir      string
+	Repo     *repo.Repo
 
 	// Discovered Tasks
 	BuildTasks    []Task
@@ -38,6 +40,23 @@ type APScope struct {
 	LintTasks     []Task
 	GenerateTasks []Task
 	FormatTasks   []Task
+}
+
+// GetRepo returns the repository tree associated with this scope, loading it if needed.
+func (s *APScope) GetRepo() (*repo.Repo, error) {
+	if s.Repo != nil {
+		return s.Repo, nil
+	}
+	root := s.RepoRoot
+	if root == "" {
+		root = s.Dir
+	}
+	r, err := repo.Open(root)
+	if err != nil {
+		return nil, err
+	}
+	s.Repo = r
+	return r, nil
 }
 
 // Task is the interface that all tasks must implement.

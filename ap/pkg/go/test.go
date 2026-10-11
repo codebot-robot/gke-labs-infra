@@ -17,17 +17,15 @@ package golang
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
 )
@@ -94,37 +92,34 @@ func (t *GoE2eTask) GetChildren() []tasks.Task {
 }
 
 // HasGoTests returns true if the directory or any subdirectory contains a .go file with a _test.go suffix.
-func HasGoTests(dir string) (bool, error) {
-	found := false
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+func HasGoTests(dir string, repos ...*repo.Repo) (bool, error) {
+	var r *repo.Repo
+	if len(repos) > 0 && repos[0] != nil {
+		r = repos[0]
+	} else {
+		var err error
+		r, err = repo.Open(dir)
 		if err != nil {
-			return err
+			return false, err
 		}
-		if !info.IsDir() && strings.HasSuffix(info.Name(), "_test.go") {
-			found = true
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		return false, err
 	}
-	return found, nil
+	return r.Under(dir).HasGoTests(), nil
 }
 
 // TestTasks returns a task group for running go tests in discovered modules.
-func TestTasks(root string) (tasks.Task, error) {
-	// Find all go.mod files
-	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
-	goMods, err := walker.Walk(root, ignoreList, func(_ string, info os.FileInfo) bool {
-		return info.Name() == "go.mod"
-	})
-	if err != nil {
-		return nil, err
+func TestTasks(root string, repos ...*repo.Repo) (tasks.Task, error) {
+	var r *repo.Repo
+	if len(repos) > 0 && repos[0] != nil {
+		r = repos[0]
+	} else {
+		var err error
+		r, err = repo.Open(root)
+		if err != nil {
+			return nil, err
+		}
 	}
+
+	modules := r.Under(root).Modules()
 
 	buildDir := filepath.Join(root, ".build", "test-results", "go")
 	if artifactsDir := os.Getenv("ARTIFACTS"); artifactsDir != "" {
@@ -135,8 +130,7 @@ func TestTasks(root string) (tasks.Task, error) {
 	}
 
 	var testTasks []tasks.Task
-	for _, goMod := range goMods {
-		dir := filepath.Dir(goMod)
+	for _, dir := range modules {
 		rel, err := filepath.Rel(root, dir)
 		if err != nil {
 			return nil, err

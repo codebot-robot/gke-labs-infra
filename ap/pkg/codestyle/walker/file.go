@@ -16,7 +16,8 @@ package walker
 
 import (
 	"os"
-	"path/filepath"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 )
 
 // File represents a file in the file system.
@@ -42,33 +43,14 @@ func NewFileView(dir string, ignorePatterns []string) *FileView {
 
 // Walk walks the directory tree and calls callback for each file.
 func (v *FileView) Walk(callback func(File) error) error {
-	return filepath.Walk(v.Dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relPath, err := filepath.Rel(v.Dir, path)
-		if err != nil {
-			return err
-		}
-		if relPath == "." {
-			return nil
-		}
-
-		if v.Ignore != nil && v.Ignore.ShouldIgnore(relPath, info.IsDir()) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if info.IsDir() {
-			return nil
-		}
-
+	r, err := repo.Open(v.Dir)
+	if err != nil {
+		return err
+	}
+	return r.WalkFileView(v.Dir, v.Ignore, func(f *repo.File, relPath string) error {
 		return callback(File{
-			Path:    path,
-			Info:    info,
+			Path:    f.Path,
+			Info:    f.Info(),
 			RelPath: relPath,
 		})
 	})
