@@ -141,9 +141,11 @@ spec:
             - --replicas=2
             - --github-token-file=/var/run/secrets/github/token
             # Go builds and govulncheck want a few cores and GBs.
-            - --runner-cpu-request=2
+            - --runner-cpu-request=4
+            - --runner-cpu-limit=4
             - --runner-memory-request=4Gi
             - --runner-memory-limit=8Gi
+            - --runtime-class=microvm
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

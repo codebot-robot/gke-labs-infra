@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -77,7 +78,7 @@ func Run(ctx context.Context) error {
 	f.StringSliceVar(&opt.RunnerLabels, "runner-labels", opt.RunnerLabels, "GitHub runner labels in addition to self-hosted (defaults to the pool name); workflows select them with runs-on")
 	f.Int64Var(&opt.RunnerGroupID, "runner-group-id", opt.RunnerGroupID, "GitHub runner group ID to register runners into")
 	f.StringVar(&opt.RunnerImage, "runner-image", opt.RunnerImage, "GitHub Actions runner image")
-	f.StringVar(&opt.RuntimeClassName, "runtime-class", opt.RuntimeClassName, "RuntimeClass for runner pods (empty for the cluster default)")
+	f.StringVar(&opt.RuntimeClassName, "runtime-class", opt.RuntimeClassName, "RuntimeClass for runner pods (empty string --runtime-class= for the cluster default)")
 	f.DurationVar(&opt.MaxRunnerLifetime, "max-runner-lifetime", opt.MaxRunnerLifetime, "Sandboxes are torn down after this long, whatever state they are in")
 	f.StringVar(&opt.CPURequest, "runner-cpu-request", opt.CPURequest, "CPU request for the runner container")
 	f.StringVar(&opt.MemoryRequest, "runner-memory-request", opt.MemoryRequest, "Memory request for the runner container")
@@ -133,9 +134,11 @@ func (o *Options) InitDefaults() {
 	o.Replicas = 1
 	o.RunnerGroupID = 1
 	o.RunnerImage = "ghcr.io/actions/actions-runner:2.338.0"
+	o.RuntimeClassName = "microvm"
 	// GitHub's own hosted runners cap a job at 6 hours.
 	o.MaxRunnerLifetime = 6 * time.Hour
-	o.CPURequest = "1"
+	o.CPURequest = "4"
+	o.CPULimit = "4"
 	o.MemoryRequest = "2Gi"
 	o.MemoryLimit = "4Gi"
 	o.WorkVolumeSizeLimit = "20Gi"
@@ -339,10 +342,15 @@ func loadRESTConfig(kubeconfig string) (*rest.Config, error) {
 		}
 		return cfg, nil
 	}
-	if cfg, err := rest.InClusterConfig(); err == nil {
+	cfg, err := rest.InClusterConfig()
+	if err == nil {
 		return cfg, nil
 	}
-	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+	if !errors.Is(err, rest.ErrNotInCluster) {
+		return nil, fmt.Errorf("loading in-cluster config: %w", err)
+	}
+	klog.V(2).Infof("not running in a cluster (%v); using kubeconfig", err)
+	cfg, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(), &clientcmd.ConfigOverrides{}).ClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("loading kubernetes config: %w", err)
