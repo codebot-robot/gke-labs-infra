@@ -16,13 +16,17 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 )
 
 func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Hello world")
+		if _, err := fmt.Fprintf(w, "Hello world"); err != nil {
+			log.Printf("writing response: %v", err)
+			return
+		}
 	})
 
 	port := os.Getenv("PORT")
