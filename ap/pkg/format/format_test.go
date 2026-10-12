@@ -18,11 +18,17 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 )
 
 func TestFormatTasks_NotExist(t *testing.T) {
 	tmpDir := t.TempDir()
-	task, err := FormatTasks(tmpDir)
+	r, err := repo.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := FormatTasks(r, tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error when dev/tasks does not exist: %v", err)
 	}
@@ -42,12 +48,25 @@ func TestFormatTasks_WithTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	task, err := FormatTasks(tmpDir)
+	r, err := repo.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := FormatTasks(r, tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if task == nil {
 		t.Fatal("expected non-nil task")
+	}
+}
+
+func TestFormatTasks_NilRepo(t *testing.T) {
+	tmpDir := t.TempDir()
+	_, err := FormatTasks(nil, tmpDir)
+	if err == nil {
+		t.Fatal("expected error when repo is nil, got nil")
 	}
 }
 
@@ -73,7 +92,7 @@ func TestFormatTasks_UnreadableTasksDir(t *testing.T) {
 		}
 	})
 
-	_, err := FormatTasks(tmpDir)
+	_, err := repo.Open(tmpDir)
 	if err == nil {
 		t.Fatal("expected error when dev/tasks is unreadable, got nil")
 	}

@@ -18,6 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 )
 
 func TestFindTaskScripts(t *testing.T) {
@@ -37,7 +39,12 @@ func TestFindTaskScripts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	foundTasks, err := FindTaskScripts(tmpDir, WithPrefix("build-"))
+	r, err := repo.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	foundTasks, err := FindTaskScripts(r, tmpDir, WithPrefix("build-"))
 	if err != nil {
 		t.Fatalf("FindTaskScripts() error = %v", err)
 	}
@@ -57,5 +64,34 @@ func TestFindTaskScripts(t *testing.T) {
 
 	if ts.Root != tmpDir {
 		t.Errorf("expected Root %s, got %s", tmpDir, ts.Root)
+	}
+
+	if _, err := FindTaskScripts(nil, tmpDir); err == nil {
+		t.Errorf("expected error when repo is nil, got nil")
+	}
+}
+
+func TestAPScopeGetRepo(t *testing.T) {
+	// Nil repo should return an error
+	scope := &APScope{
+		Dir: "/some/path",
+	}
+	if _, err := scope.GetRepo(); err == nil {
+		t.Fatalf("expected error from GetRepo() when Repo is nil, got nil")
+	}
+
+	// Non-nil repo should return the repo
+	tmpDir := t.TempDir()
+	r, err := repo.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope.Repo = r
+	got, err := scope.GetRepo()
+	if err != nil {
+		t.Fatalf("unexpected error from GetRepo(): %v", err)
+	}
+	if got != r {
+		t.Fatalf("GetRepo() = %v, want %v", got, r)
 	}
 }

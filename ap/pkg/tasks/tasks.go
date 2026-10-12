@@ -42,21 +42,15 @@ type APScope struct {
 	FormatTasks   []Task
 }
 
-// GetRepo returns the repository tree associated with this scope, loading it if needed.
+// GetRepo returns the repository tree associated with this scope.
 func (s *APScope) GetRepo() (*repo.Repo, error) {
 	if s.Repo != nil {
 		return s.Repo, nil
 	}
-	root := s.RepoRoot
-	if root == "" {
-		root = s.Dir
+	if s.Dir != "" {
+		return nil, fmt.Errorf("repo is not set on scope %s", s.Dir)
 	}
-	r, err := repo.Open(root)
-	if err != nil {
-		return nil, err
-	}
-	s.Repo = r
-	return r, nil
+	return nil, fmt.Errorf("repo is not set on scope")
 }
 
 // Task is the interface that all tasks must implement.
@@ -154,27 +148,19 @@ func WithExcludePrefix(prefix string) FindOption {
 }
 
 // FindTaskScripts looks for executable scripts in dev/tasks that match the prefix.
-func FindTaskScripts(root string, opts ...FindOption) ([]Task, error) {
+func FindTaskScripts(r *repo.Repo, root string, opts ...FindOption) ([]Task, error) {
+	if r == nil {
+		return nil, fmt.Errorf("repo is nil")
+	}
 	options := FindOptions{}
 	for _, o := range opts {
 		o(&options)
 	}
 
 	tasksDir := filepath.Join(root, "dev", "tasks")
-	entries, err := os.ReadDir(tasksDir)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to read tasks dir: %w", err)
-	}
-
 	var tasks []Task
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
+	for _, f := range r.FilesInDir(tasksDir) {
+		name := f.Name
 		if options.Prefix != "" && !strings.HasPrefix(name, options.Prefix) {
 			continue
 		}
@@ -183,7 +169,7 @@ func FindTaskScripts(root string, opts ...FindOption) ([]Task, error) {
 		}
 		tasks = append(tasks, &TaskScript{
 			Name: name,
-			Path: filepath.Join(tasksDir, name),
+			Path: f.Path,
 			Root: root,
 		})
 	}

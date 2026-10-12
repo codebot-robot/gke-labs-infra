@@ -21,10 +21,13 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/generate"
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
 func TestSingleWalkPerInvocation(t *testing.T) {
@@ -109,6 +112,16 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 		if _, err := golang.TestTasks(scope.Repo, scope.Dir); err != nil {
 			t.Fatalf("TestTasks failed for %s: %v", scope.Dir, err)
 		}
+		if _, err := format.FormatTasks(scope.Repo, scope.Dir); err != nil {
+			t.Fatalf("FormatTasks failed for %s: %v", scope.Dir, err)
+		}
+		if _, err := tasks.FindTaskScripts(scope.Repo, scope.Dir); err != nil {
+			t.Fatalf("FindTaskScripts failed for %s: %v", scope.Dir, err)
+		}
+	}
+
+	if _, err := generate.GenerateTasks(rootOpt.RepoRoot, scopes); err != nil {
+		t.Fatalf("GenerateTasks failed: %v", err)
 	}
 
 	// Verify that still only exactly ONE walk occurred throughout the entire lifecycle
@@ -122,18 +135,21 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 	tempDir := t.TempDir()
 
 	files := map[string]string{
-		".git/config":               "",
-		".ap/go.yaml":               "skip:\n  - ignored/**\n",
-		"go.mod":                    "module example.com/root\n\ngo 1.26\n",
-		"main.go":                   "package main\n\nfunc main() {}\n",
-		"images/root/Dockerfile":    "FROM alpine\n",
-		"k8s/root.yaml":             "apiVersion: v1\nkind: ConfigMap\n",
-		"ignored/.ap/ap.yaml":       "",
-		"ignored/go.mod":            "module example.com/root/ignored\n\ngo 1.26\n",
-		"ignored/foo.go":            "package ignored\n",
-		"ignored/foo_test.go":       "package ignored\n\nimport \"testing\"\nfunc TestFoo(t *testing.T) {}\n",
-		"ignored/images/Dockerfile": "FROM alpine\n",
-		"ignored/k8s/ignored.yaml":  "apiVersion: v1\nkind: Pod\n",
+		".git/config":                     "",
+		".ap/go.yaml":                     "skip:\n  - ignored/**\n  - dev/tasks/skipped-*\n",
+		"go.mod":                          "module example.com/root\n\ngo 1.26\n",
+		"main.go":                         "package main\n\nfunc main() {}\n",
+		"images/root/Dockerfile":          "FROM alpine\n",
+		"k8s/root.yaml":                   "apiVersion: v1\nkind: ConfigMap\n",
+		"dev/tasks/build-valid":           "#!/bin/bash\n",
+		"dev/tasks/skipped-build":         "#!/bin/bash\n",
+		"ignored/.ap/ap.yaml":             "",
+		"ignored/go.mod":                  "module example.com/root/ignored\n\ngo 1.26\n",
+		"ignored/foo.go":                  "package ignored\n",
+		"ignored/foo_test.go":             "package ignored\n\nimport \"testing\"\nfunc TestFoo(t *testing.T) {}\n",
+		"ignored/images/Dockerfile":       "FROM alpine\n",
+		"ignored/k8s/ignored.yaml":        "apiVersion: v1\nkind: Pod\n",
+		"ignored/dev/tasks/build-ignored": "#!/bin/bash\n",
 	}
 
 	for rel, content := range files {
@@ -231,6 +247,33 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 		rel, _ := filepath.Rel(tempDir, f)
 		if filepath.ToSlash(rel) == "ignored" || len(rel) > 7 && rel[:8] == "ignored/" {
 			t.Fatalf("walker.ExpandPaths returned skipped file %s", f)
+		}
+	}
+
+	// 9. FindTaskScripts must not see dev/tasks/skipped-build or ignored/dev/tasks/build-ignored
+	discoveredTasks, err := tasks.FindTaskScripts(r, tempDir)
+	if err != nil {
+		t.Fatalf("FindTaskScripts failed: %v", err)
+	}
+	foundValid := false
+	for _, dt := range discoveredTasks {
+		if dt.GetName() == "skipped-build" || dt.GetName() == "build-ignored" {
+			t.Fatalf("FindTaskScripts discovered skipped script %s", dt.GetName())
+		}
+		if dt.GetName() == "build-valid" {
+			foundValid = true
+		}
+	}
+	if !foundValid {
+		t.Fatalf("expected FindTaskScripts to discover build-valid")
+	}
+
+	// 10. DiscoverScopes should not include skipped-build in BuildTasks
+	for _, s := range scopes {
+		for _, bt := range s.BuildTasks {
+			if bt.GetName() == "skipped-build" || bt.GetName() == "build-ignored" {
+				t.Fatalf("scope BuildTasks included skipped task %s", bt.GetName())
+			}
 		}
 	}
 }

@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
@@ -262,7 +263,11 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 		}
 	}
 
-	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root}}
+	r, err := repo.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root, Repo: r}}
 	if err := runGithubActionsGenerator(t.Context(), root, scopes); err != nil {
 		t.Fatalf("runGithubActionsGenerator: %v", err)
 	}
@@ -326,7 +331,11 @@ func TestPresubmitScriptsWithLicenseNone(t *testing.T) {
 
 func TestGenerateTasks_DevTasks(t *testing.T) {
 	root := t.TempDir()
-	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root}}
+	r, err := repo.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root, Repo: r}}
 
 	// 1. dev/tasks does not exist -> should succeed
 	task, err := GenerateTasks(root, scopes)
@@ -346,11 +355,130 @@ func TestGenerateTasks_DevTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	repo.ResetCache()
+	r, err = repo.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes = []*tasks.APScope{{Dir: root, RepoRoot: root, Repo: r}}
+
 	task, err = GenerateTasks(root, scopes)
 	if err != nil {
 		t.Fatalf("unexpected error with dev/tasks script: %v", err)
 	}
 	if task == nil {
 		t.Fatal("expected non-nil task")
+	}
+}
+
+func TestGenerateIdempotence(t *testing.T) {
+	root := t.TempDir()
+
+	// Set up a repo with a Go module and no generated presubmit scripts
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/test\n\ngo 1.26\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestHeadersConfig(t, root)
+
+	// Add one hand-written presubmit script
+	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
+	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(presubmitsDir, "check-foo"), []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot := func() map[string]string {
+		files := make(map[string]string)
+		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				rel, err := filepath.Rel(root, path)
+				if err != nil {
+					return err
+				}
+				data, err := os.ReadFile(path)
+				if err != nil {
+					return err
+				}
+				files[rel] = string(data)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return files
+	}
+
+	// Run 1: initial generate
+	repo.ResetCache()
+	r1, err := repo.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope1 := &tasks.APScope{Dir: root, RepoRoot: root, Repo: r1}
+	task1, err := GenerateTasks(root, []*tasks.APScope{scope1})
+	if err != nil {
+		t.Fatalf("GenerateTasks run 1 failed: %v", err)
+	}
+	if err := task1.Run(t.Context(), scope1); err != nil {
+		t.Fatalf("task1.Run failed: %v", err)
+	}
+
+	snap1 := snapshot()
+
+	// Verify that run 1 produced ci-presubmits.yaml containing the generated presubmits
+	workflow, ok := snap1[filepath.Join(".github", "workflows", "ci-presubmits.yaml")]
+	if !ok {
+		t.Fatal("expected .github/workflows/ci-presubmits.yaml to be generated in run 1")
+	}
+	for _, expectedJob := range []string{"check-foo", "ap-verify-generate", "ap-test", "ap-lint"} {
+		if !strings.Contains(workflow, expectedJob) {
+			t.Errorf("run 1 workflow missing job %q", expectedJob)
+		}
+	}
+
+	// Run 2: generate again
+	repo.ResetCache()
+	r2, err := repo.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope2 := &tasks.APScope{Dir: root, RepoRoot: root, Repo: r2}
+	task2, err := GenerateTasks(root, []*tasks.APScope{scope2})
+	if err != nil {
+		t.Fatalf("GenerateTasks run 2 failed: %v", err)
+	}
+	if err := task2.Run(t.Context(), scope2); err != nil {
+		t.Fatalf("task2.Run failed: %v", err)
+	}
+
+	snap2 := snapshot()
+
+	// Assert nothing changed between run 1 and run 2
+	if len(snap1) != len(snap2) {
+		t.Fatalf("file count mismatch: run 1 had %d files, run 2 had %d files", len(snap1), len(snap2))
+	}
+	for file, content1 := range snap1 {
+		content2, ok := snap2[file]
+		if !ok {
+			t.Errorf("file %s was removed in run 2", file)
+			continue
+		}
+		if content1 != content2 {
+			t.Errorf("file %s changed between run 1 and run 2:\n--- run 1 ---\n%s\n--- run 2 ---\n%s", file, content1, content2)
+		}
+	}
+	for file := range snap2 {
+		if _, ok := snap1[file]; !ok {
+			t.Errorf("file %s was added in run 2", file)
+		}
 	}
 }
