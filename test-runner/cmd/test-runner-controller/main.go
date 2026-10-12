@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -339,10 +340,15 @@ func loadRESTConfig(kubeconfig string) (*rest.Config, error) {
 		}
 		return cfg, nil
 	}
-	if cfg, err := rest.InClusterConfig(); err == nil {
+	cfg, err := rest.InClusterConfig()
+	if err == nil {
 		return cfg, nil
 	}
-	cfg, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+	if !errors.Is(err, rest.ErrNotInCluster) {
+		return nil, fmt.Errorf("loading in-cluster config: %w", err)
+	}
+	klog.V(2).Infof("not running in a cluster (%v); using kubeconfig", err)
+	cfg, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
 		clientcmd.NewDefaultClientConfigLoadingRules(), &clientcmd.ConfigOverrides{}).ClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("loading kubernetes config: %w", err)
