@@ -578,9 +578,17 @@ jobs:
 
 		suffix := getSuffix(repoRoot, apRoot)
 		presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
-		files := r.FilesInDir(presubmitsDir)
-		if len(files) == 0 {
+		// Read directly from the live filesystem here: earlier generators
+		// in this same run (verify-generate, ap-test, ap-lint, ap-build, ap-e2e,
+		// and any legacy generate-* scripts) write presubmit scripts to
+		// dev/ci/presubmits, so the pre-run in-memory repo tree snapshot does
+		// not contain them on a fresh run.
+		entries, err := os.ReadDir(presubmitsDir)
+		if os.IsNotExist(err) {
 			continue
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read presubmits dir %s: %w", presubmitsDir, err)
 		}
 
 		goModExists := r.FileExists(filepath.Join(apRoot, "go.mod"))
@@ -590,8 +598,11 @@ jobs:
 			return err
 		}
 
-		for _, f := range files {
-			scriptName := f.Name
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			scriptName := entry.Name()
 
 			jobName := scriptName
 			if suffix != "" && !strings.HasSuffix(jobName, suffix) {
