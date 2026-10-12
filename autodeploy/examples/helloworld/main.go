@@ -21,15 +21,13 @@ import (
 	"os"
 )
 
-func helloHandler(w http.ResponseWriter, r *http.Request) {
-	if _, err := fmt.Fprintf(w, "Hello world"); err != nil {
-		log.Printf("writing response: %v", err)
-		return
-	}
-}
-
 func main() {
-	http.HandleFunc("/", helloHandler)
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if _, err := fmt.Fprintf(w, "Hello world"); err != nil {
+			log.Printf("writing response: %v", err)
+			return
+		}
+	})
 
 	port := os.Getenv("PORT")
 	if port == "" {
