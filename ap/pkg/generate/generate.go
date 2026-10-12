@@ -362,7 +362,11 @@ func runApBuildGenerator(_ context.Context, repoRoot string, scopes []*tasks.APS
 	hasBuild := false
 	for _, scope := range scopes {
 		apRoot := scope.Dir
-		ok, err := images.HasImages(apRoot)
+		r, err := scope.GetRepo()
+		if err != nil {
+			return err
+		}
+		ok, err := images.HasImages(r, apRoot)
 		if err == nil && ok {
 			hasBuild = true
 			break

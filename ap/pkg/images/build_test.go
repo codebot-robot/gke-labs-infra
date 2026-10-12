@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
@@ -85,7 +86,11 @@ func TestHasImages(t *testing.T) {
 			os.MkdirAll(root, 0755)
 			tt.setup(root)
 
-			got, err := HasImages(root)
+			r, err := repo.Open(root)
+			if err != nil {
+				t.Fatalf("repo.Open failed: %v", err)
+			}
+			got, err := HasImages(r, root)
 			if err != nil {
 				t.Fatalf("HasImages() error = %v", err)
 			}
@@ -106,7 +111,12 @@ func TestBuildTasks(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "images", "foo"), 0755)
 	os.WriteFile(filepath.Join(tmpDir, "images", "foo", "Dockerfile"), []byte("FROM scratch"), 0644)
 
-	task, err := BuildTasks(tmpDir, false, "")
+	r, err := repo.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task, err := BuildTasks(r, tmpDir, false, "")
 	if err != nil {
 		t.Fatalf("BuildTasks() error = %v", err)
 	}

@@ -26,6 +26,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"k8s.io/klog/v2"
 )
 
@@ -56,7 +57,7 @@ func (p *processor) shouldIgnoreFile(relPath string, isDir bool) bool {
 	return p.ignoreList.ShouldIgnore(relPath, isDir)
 }
 
-func Run(ctx context.Context, repoRoot string, files []string) error {
+func Run(ctx context.Context, r *repo.Repo, repoRoot string, files []string) error {
 	var errs []error
 
 	var opt FileHeadersOptions
@@ -92,7 +93,7 @@ func Run(ctx context.Context, repoRoot string, files []string) error {
 		ignoreList: ignoreList,
 	}
 
-	expandedFiles, err := walker.ExpandPaths(repoRoot, files, ignoreList)
+	expandedFiles, err := walker.ExpandPaths(r, repoRoot, files, ignoreList)
 	if err != nil {
 		return err
 	}

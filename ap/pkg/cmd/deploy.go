@@ -61,6 +61,11 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
+	r, err := opt.GetRepo()
+	if err != nil {
+		return err
+	}
+
 	cfg, err := config.Load(opt.RepoRoot)
 	if err != nil {
 		return err
@@ -76,13 +81,13 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		}
 
 		// Deploy typically also builds
-		buildTasks, err := images.BuildTasks(apRoot, !opt.SkipPush, "")
+		buildTasks, err := images.BuildTasks(r.Under(apRoot), apRoot, !opt.SkipPush, "")
 		if err != nil {
 			return fmt.Errorf("build failed during deploy for %s: %w", apRoot, err)
 		}
 		group.Tasks = append(group.Tasks, buildTasks)
 
-		deployTasks, err := k8s.DeployTasks(apRoot)
+		deployTasks, err := k8s.DeployTasks(r.Under(apRoot), apRoot)
 		if err != nil {
 			return fmt.Errorf("deploy failed for %s: %w", apRoot, err)
 		}
@@ -91,5 +96,5 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		allTasks = append(allTasks, group)
 	}
 
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

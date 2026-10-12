@@ -25,9 +25,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"gopkg.in/yaml.v3"
 	"k8s.io/klog/v2"
@@ -342,8 +341,8 @@ func getCRDNames(content []byte) ([]string, error) {
 }
 
 // DeployTasks returns a task group for deploying all k8s manifests found in k8s directories.
-func DeployTasks(root string) (tasks.Task, error) {
-	manifests, err := findManifests(root)
+func DeployTasks(r *repo.Repo, root string) (tasks.Task, error) {
+	manifests, err := findManifests(r, root)
 	if err != nil {
 		return nil, err
 	}
@@ -362,68 +361,14 @@ func DeployTasks(root string) (tasks.Task, error) {
 }
 
 // Deploy deploys k8s manifests found in k8s directories.
-func Deploy(ctx context.Context, root string) error {
-	t, err := DeployTasks(root)
+func Deploy(ctx context.Context, r *repo.Repo, root string) error {
+	t, err := DeployTasks(r, root)
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r})
 }
 
-func findManifests(root string) ([]string, error) {
-	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
-
-	var manifests []string
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relPath, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if relPath == "." {
-			return nil
-		}
-
-		if ignoreList.ShouldIgnore(relPath, info.IsDir()) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if info.IsDir() {
-			// If this directory contains a .ap directory, it's a different root, so skip it.
-			hasAP, err := fileutils.FileExists(filepath.Join(path, ".ap"))
-			if err != nil {
-				return err
-			}
-			if hasAP {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		// Check if it is under a k8s directory
-		parts := strings.Split(relPath, string(os.PathSeparator))
-		inK8s := false
-		for _, part := range parts {
-			if part == "k8s" {
-				inK8s = true
-				break
-			}
-		}
-		if !inK8s {
-			return nil
-		}
-
-		ext := filepath.Ext(path)
-		if ext == ".yaml" || ext == ".yml" {
-			manifests = append(manifests, path)
-		}
-		return nil
-	})
-	return manifests, err
+func findManifests(r *repo.Repo, root string) ([]string, error) {
+	return r.Under(root).FindManifests(), nil
 }

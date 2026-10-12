@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
@@ -109,7 +111,11 @@ func TestHasGoFiles(t *testing.T) {
 				t.Fatalf("Failed to setup test: %v", err)
 			}
 
-			got, err := hasGoFiles(root)
+			r, err := repo.Open(root)
+			if err != nil {
+				t.Fatalf("repo.Open failed: %v", err)
+			}
+			got, err := hasGoFiles(r, root)
 			if err != nil {
 				t.Errorf("hasGoFiles() error = %v", err)
 				return
@@ -122,7 +128,7 @@ func TestHasGoFiles(t *testing.T) {
 }
 
 func TestLintTasks_DroppedErrors(t *testing.T) {
-	setupModule := func(t *testing.T, apYAML string) string {
+	setupModule := func(t *testing.T, apYAML string) (string, *repo.Repo) {
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
 			t.Fatal(err)
@@ -130,6 +136,7 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
+		var skips []string
 		if apYAML != "" {
 			apDir := filepath.Join(dir, ".ap")
 			if err := os.MkdirAll(apDir, 0755); err != nil {
@@ -138,8 +145,17 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(apYAML), 0644); err != nil {
 				t.Fatal(err)
 			}
+			cfg, err := config.Load(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			skips = cfg.Skip
 		}
-		return dir
+		r, err := repo.Open(dir, repo.WithSkip(skips...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dir, r
 	}
 
 	findDroppedTask := func(taskGroup tasks.Task) *DroppedErrorsCheckTask {
@@ -160,8 +176,8 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 	}
 
 	t.Run("default_error", func(t *testing.T) {
-		dir := setupModule(t, "")
-		taskGroup, err := LintTasks(dir)
+		dir, r := setupModule(t, "")
+		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -175,8 +191,8 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 	})
 
 	t.Run("mode_warn", func(t *testing.T) {
-		dir := setupModule(t, "lint:\n  droppedErrors:\n    mode: warn\n")
-		taskGroup, err := LintTasks(dir)
+		dir, r := setupModule(t, "lint:\n  droppedErrors:\n    mode: warn\n")
+		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -190,8 +206,8 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 	})
 
 	t.Run("mode_error", func(t *testing.T) {
-		dir := setupModule(t, "lint:\n  droppedErrors:\n    mode: error\n")
-		taskGroup, err := LintTasks(dir)
+		dir, r := setupModule(t, "lint:\n  droppedErrors:\n    mode: error\n")
+		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -205,8 +221,8 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 	})
 
 	t.Run("mode_ignore", func(t *testing.T) {
-		dir := setupModule(t, "lint:\n  droppedErrors:\n    mode: ignore\n")
-		taskGroup, err := LintTasks(dir)
+		dir, r := setupModule(t, "lint:\n  droppedErrors:\n    mode: ignore\n")
+		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -218,7 +234,7 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 }
 
 func TestLintTasks_SkipGenerated(t *testing.T) {
-	setupModule := func(t *testing.T, apYAML string) string {
+	setupModule := func(t *testing.T, apYAML string) (string, *repo.Repo) {
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
 			t.Fatal(err)
@@ -226,6 +242,7 @@ func TestLintTasks_SkipGenerated(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
+		var skips []string
 		if apYAML != "" {
 			apDir := filepath.Join(dir, ".ap")
 			if err := os.MkdirAll(apDir, 0755); err != nil {
@@ -234,8 +251,17 @@ func TestLintTasks_SkipGenerated(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(apYAML), 0644); err != nil {
 				t.Fatal(err)
 			}
+			cfg, err := config.Load(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			skips = cfg.Skip
 		}
-		return dir
+		r, err := repo.Open(dir, repo.WithSkip(skips...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dir, r
 	}
 
 	findTasks := func(taskGroup tasks.Task) (*DroppedErrorsCheckTask, *TestContextCheckTask) {
@@ -261,8 +287,8 @@ func TestLintTasks_SkipGenerated(t *testing.T) {
 	}
 
 	t.Run("skipGenerated_true", func(t *testing.T) {
-		dir := setupModule(t, "lint:\n  skipGenerated: true\n")
-		taskGroup, err := LintTasks(dir)
+		dir, r := setupModule(t, "lint:\n  skipGenerated: true\n")
+		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -279,8 +305,8 @@ func TestLintTasks_SkipGenerated(t *testing.T) {
 	})
 
 	t.Run("default_skipGenerated", func(t *testing.T) {
-		dir := setupModule(t, "")
-		taskGroup, err := LintTasks(dir)
+		dir, r := setupModule(t, "")
+		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -298,7 +324,7 @@ func TestLintTasks_SkipGenerated(t *testing.T) {
 }
 
 func TestLintTasks_PerCheckOverrides(t *testing.T) {
-	setupModule := func(t *testing.T, apYAML string) string {
+	setupModule := func(t *testing.T, apYAML string) (string, *repo.Repo) {
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
 			t.Fatal(err)
@@ -306,6 +332,7 @@ func TestLintTasks_PerCheckOverrides(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
+		var skips []string
 		if apYAML != "" {
 			apDir := filepath.Join(dir, ".ap")
 			if err := os.MkdirAll(apDir, 0755); err != nil {
@@ -314,8 +341,17 @@ func TestLintTasks_PerCheckOverrides(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(apYAML), 0644); err != nil {
 				t.Fatal(err)
 			}
+			cfg, err := config.Load(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			skips = cfg.Skip
 		}
-		return dir
+		r, err := repo.Open(dir, repo.WithSkip(skips...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dir, r
 	}
 
 	findAllTasks := func(taskGroup tasks.Task) (*UnusedCheckTask, *TestContextCheckTask, *ReplaceEmptyInterfaceWithAnyTask, *DroppedErrorsCheckTask) {
@@ -349,13 +385,13 @@ func TestLintTasks_PerCheckOverrides(t *testing.T) {
 	}
 
 	t.Run("unused_skipGenerated_false_takes_effect", func(t *testing.T) {
-		dir := setupModule(t, `
+		dir, r := setupModule(t, `
 lint:
   unused:
     skipGenerated: false
     skipTests: true
 `)
-		taskGroup, err := LintTasks(dir)
+		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -372,7 +408,7 @@ lint:
 	})
 
 	t.Run("testcontext_and_any_overrides_take_effect", func(t *testing.T) {
-		dir := setupModule(t, `
+		dir, r := setupModule(t, `
 lint:
   testcontext:
     skipGenerated: true
@@ -381,7 +417,7 @@ lint:
     skipGenerated: false
     skipTests: true
 `)
-		taskGroup, err := LintTasks(dir)
+		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
 		}

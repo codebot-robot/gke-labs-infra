@@ -55,9 +55,14 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 		return err
 	}
 
+	r, err := opt.GetRepo()
+	if err != nil {
+		return err
+	}
+
 	var allTasks []tasks.Task
 
-	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots)
+	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.APRoots)
 	if err != nil {
 		return err
 	}
@@ -77,5 +82,5 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 		allTasks = append(allTasks, formatTasks)
 	}
 
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

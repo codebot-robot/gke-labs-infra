@@ -20,20 +20,21 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
 // DiscoverScopes discovers all tasks for all given AP roots.
-func DiscoverScopes(repoRoot string, apRoots []string) ([]*tasks.APScope, error) {
+func DiscoverScopes(r *repo.Repo, repoRoot string, apRoots []string) ([]*tasks.APScope, error) {
 	var scopes []*tasks.APScope
 
 	for _, apRoot := range apRoots {
 		scope := &tasks.APScope{
 			RepoRoot: repoRoot,
 			Dir:      apRoot,
+			Repo:     r.Under(apRoot),
 		}
 
 		// Discover e2e scripts
@@ -74,70 +75,48 @@ func DiscoverScopes(repoRoot string, apRoots []string) ([]*tasks.APScope, error)
 			scope.FormatTasks = append(scope.FormatTasks, formatTasks)
 		}
 
-		// Discover go tasks
-		err = filepath.Walk(apRoot, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
+		// Discover go e2e tasks
+		sub := r.Under(apRoot)
+		for _, d := range sub.Dirs() {
+			if filepath.Base(d) != "tests" {
+				continue
 			}
-			if !info.IsDir() {
-				return nil
+			// If this tests directory belongs to a nested .ap root, skip it
+			if r.APRootFor(d) != apRoot {
+				continue
 			}
 
-			// If this is not the root we're walking, and it has a .ap directory, skip it.
-			if path != apRoot {
-				hasAP, err := fileutils.FileExists(filepath.Join(path, ".ap"))
+			parentDir := filepath.Dir(d)
+			e2eDir := filepath.Join(d, "e2e")
+			if sub.HasGoTests(e2eDir) {
+				buildDir := filepath.Join(repoRoot, ".build", "test-results", "go")
+				if artifactsDir := os.Getenv("ARTIFACTS"); artifactsDir != "" {
+					buildDir = filepath.Join(artifactsDir, "test-results", "go")
+				}
+				if err := os.MkdirAll(buildDir, 0755); err != nil {
+					return nil, fmt.Errorf("failed to create build dir: %w", err)
+				}
+				rel, err := filepath.Rel(repoRoot, parentDir)
 				if err != nil {
-					return err
+					return nil, fmt.Errorf("failed to determine relative path for %s: %w", parentDir, err)
 				}
-				if hasAP {
-					return filepath.SkipDir
+				name := rel
+				if name == "." {
+					name = "root"
 				}
+				filename := filepath.ToSlash(name)
+				filename = strings.ReplaceAll(filename, "/", "-")
+				resultFile := filepath.Join(buildDir, filename+"-e2e.json")
+				scope.E2ETasks = append(scope.E2ETasks, &golang.GoE2eTask{
+					Dir:        parentDir,
+					Name:       name,
+					ResultFile: resultFile,
+				})
 			}
-
-			if info.Name() == "tests" {
-				parentDir := filepath.Dir(path)
-
-				// e2e
-				e2eDir := filepath.Join(path, "e2e")
-				hasE2E, err := golang.HasGoTests(e2eDir)
-				if err != nil {
-					return fmt.Errorf("failed to check for go tests in %s: %w", e2eDir, err)
-				}
-				if hasE2E {
-					buildDir := filepath.Join(repoRoot, ".build", "test-results", "go")
-					if artifactsDir := os.Getenv("ARTIFACTS"); artifactsDir != "" {
-						buildDir = filepath.Join(artifactsDir, "test-results", "go")
-					}
-					if err := os.MkdirAll(buildDir, 0755); err != nil {
-						return fmt.Errorf("failed to create build dir: %w", err)
-					}
-					rel, err := filepath.Rel(repoRoot, parentDir)
-					if err != nil {
-						return fmt.Errorf("failed to determine relative path for %s: %w", parentDir, err)
-					}
-					name := rel
-					if name == "." {
-						name = "root"
-					}
-					filename := filepath.ToSlash(name)
-					filename = strings.ReplaceAll(filename, "/", "-")
-					resultFile := filepath.Join(buildDir, filename+"-e2e.json")
-					scope.E2ETasks = append(scope.E2ETasks, &golang.GoE2eTask{
-						Dir:        parentDir,
-						Name:       name,
-						ResultFile: resultFile,
-					})
-				}
-
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to walk %s: %w", apRoot, err)
 		}
 
 		// Go Test tasks
-		goTestTasks, err := golang.TestTasks(apRoot)
+		goTestTasks, err := golang.TestTasks(scope.Repo, apRoot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover test tasks in %s: %w", apRoot, err)
 		}
@@ -146,7 +125,7 @@ func DiscoverScopes(repoRoot string, apRoots []string) ([]*tasks.APScope, error)
 		}
 
 		// Go lint tasks
-		goLintTasks, err := golang.LintTasks(apRoot)
+		goLintTasks, err := golang.LintTasks(scope.Repo, apRoot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover lint tasks in %s: %w", apRoot, err)
 		}

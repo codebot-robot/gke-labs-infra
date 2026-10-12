@@ -60,7 +60,12 @@ func RunLint(ctx context.Context, opt LintOptions) error {
 		return err
 	}
 
-	scopes, err := DiscoverScopes(opt.RepoRoot, opt.APRoots)
+	r, err := opt.GetRepo()
+	if err != nil {
+		return err
+	}
+
+	scopes, err := DiscoverScopes(r, opt.RepoRoot, opt.APRoots)
 	if err != nil {
 		return err
 	}
@@ -76,5 +81,5 @@ func RunLint(ctx context.Context, opt LintOptions) error {
 		}
 	}
 
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

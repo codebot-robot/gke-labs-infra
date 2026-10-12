@@ -22,10 +22,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
 )
@@ -273,7 +272,7 @@ func (t *DockerBuildTask) GetChildren() []tasks.Task {
 }
 
 // BuildTasks returns a task group for building all docker images found in images/<name>/Dockerfile.
-func BuildTasks(root string, push bool, buildkitHost string) (tasks.Task, error) {
+func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
@@ -283,7 +282,7 @@ func BuildTasks(root string, push bool, buildkitHost string) (tasks.Task, error)
 		buildkitHost = "k8s://autodeploy-system/buildkit"
 	}
 
-	dockerfiles, err := findDockerfiles(root)
+	dockerfiles, err := findDockerfiles(r, root)
 	if err != nil {
 		return nil, err
 	}
@@ -328,17 +327,17 @@ func BuildTasks(root string, push bool, buildkitHost string) (tasks.Task, error)
 }
 
 // Build builds docker images found in images/<name>/Dockerfile.
-func Build(ctx context.Context, root string, push bool, buildkitHost string) error {
-	t, err := BuildTasks(root, push, buildkitHost)
+func Build(ctx context.Context, r *repo.Repo, root string, push bool, buildkitHost string) error {
+	t, err := BuildTasks(r, root, push, buildkitHost)
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r})
 }
 
 // HasImages returns true if there are any images to build under root.
-func HasImages(root string) (bool, error) {
-	dockerfiles, err := findDockerfiles(root)
+func HasImages(r *repo.Repo, root string) (bool, error) {
+	dockerfiles, err := findDockerfiles(r, root)
 	if err != nil {
 		return false, err
 	}
@@ -356,48 +355,8 @@ func HasImages(root string) (bool, error) {
 	return false, nil
 }
 
-func findDockerfiles(root string) ([]string, error) {
-	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
-
-	var dockerfiles []string
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relPath, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if relPath == "." {
-			return nil
-		}
-
-		if ignoreList.ShouldIgnore(relPath, info.IsDir()) {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if info.IsDir() {
-			// If this directory contains a .ap directory, it's a different root, so skip it.
-			hasAP, err := fileutils.FileExists(filepath.Join(path, ".ap"))
-			if err != nil {
-				return err
-			}
-			if hasAP {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if info.Name() == "Dockerfile" {
-			dockerfiles = append(dockerfiles, path)
-		}
-		return nil
-	})
-	return dockerfiles, err
+func findDockerfiles(r *repo.Repo, root string) ([]string, error) {
+	return r.Under(root).FindDockerfiles(), nil
 }
 
 func getImageName(relPath string) string {

@@ -21,9 +21,8 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
 )
@@ -259,26 +258,17 @@ func (t *DroppedErrorsCheckTask) GetChildren() []tasks.Task {
 }
 
 // LintTasks returns a task group for running go linting in discovered modules.
-func LintTasks(root string) (tasks.Task, error) {
+func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
 	}
 
-	// Find all go.mod files
-	ignoreList := walker.NewIgnoreList([]string{".git", "vendor", "node_modules"})
-	goMods, err := walker.Walk(root, ignoreList, func(_ string, info os.FileInfo) bool {
-		return info.Name() == "go.mod"
-	})
-	if err != nil {
-		return nil, err
-	}
+	modules := r.Under(root).Modules()
 
 	var moduleTasks []tasks.Task
-	for _, goMod := range goMods {
-		dir := filepath.Dir(goMod)
-
-		hasGo, err := hasGoFiles(dir)
+	for _, dir := range modules {
+		hasGo, err := hasGoFiles(r, dir)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check for Go files in %s: %w", dir, err)
 		}
@@ -348,44 +338,16 @@ func LintTasks(root string) (tasks.Task, error) {
 }
 
 // Lint runs go vet and govulncheck in discovered modules.
-func Lint(ctx context.Context, root string) error {
-	t, err := LintTasks(root)
+func Lint(ctx context.Context, r *repo.Repo, root string) error {
+	t, err := LintTasks(r, root)
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r})
 }
 
 // hasGoFiles returns true if the directory or any of its subdirectories
 // (excluding those that are themselves Go modules) contain at least one .go file.
-func hasGoFiles(root string) (bool, error) {
-	found := false
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if path != root {
-				// If this directory contains a go.mod file, it's a separate module.
-				// We should not look for Go files inside it.
-				hasGoMod, err := fileutils.FileExists(filepath.Join(path, "go.mod"))
-				if err != nil {
-					return err
-				}
-				if hasGoMod {
-					return filepath.SkipDir
-				}
-			}
-			return nil
-		}
-		if filepath.Ext(path) == ".go" {
-			found = true
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	if err == filepath.SkipAll {
-		err = nil
-	}
-	return found, err
+func hasGoFiles(r *repo.Repo, root string) (bool, error) {
+	return r.Under(root).HasGoFiles(), nil
 }

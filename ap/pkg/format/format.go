@@ -38,10 +38,14 @@ type CodestyleTask struct {
 
 func (t *CodestyleTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running codestyle in %s...", t.Root)
-	if err := fileheaders.Run(ctx, t.Root, t.Files); err != nil {
+	r, err := scope.GetRepo()
+	if err != nil {
+		return err
+	}
+	if err := fileheaders.Run(ctx, r, t.Root, t.Files); err != nil {
 		return fmt.Errorf("fileheaders failed in %s: %w", t.Root, err)
 	}
-	if err := gostyle.Run(ctx, t.Root, t.Files); err != nil {
+	if err := gostyle.Run(ctx, r, t.Root, t.Files); err != nil {
 		return fmt.Errorf("gostyle failed in %s: %w", t.Root, err)
 	}
 	return nil

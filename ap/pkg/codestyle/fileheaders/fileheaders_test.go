@@ -15,13 +15,23 @@
 package fileheaders
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 )
+
+func runTest(ctx context.Context, repoRoot string, files []string) error {
+	r, err := repo.Load(repoRoot)
+	if err != nil {
+		return err
+	}
+	return Run(ctx, r, repoRoot, files)
+}
 
 func TestRun_Skip(t *testing.T) {
 	tmpDir := t.TempDir()
@@ -66,7 +76,7 @@ metadata:
 
 	// Run fileheaders
 	ctx := t.Context()
-	if err := Run(ctx, tmpDir, nil); err != nil {
+	if err := runTest(ctx, tmpDir, nil); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 
@@ -125,7 +135,7 @@ metadata:
 
 	// Run fileheaders with explicit file
 	ctx := t.Context()
-	if err := Run(ctx, tmpDir, []string{targetFile}); err != nil {
+	if err := runTest(ctx, tmpDir, []string{targetFile}); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 
@@ -182,7 +192,7 @@ copyrightHolder: Google LLC
 
 	// Run fileheaders
 	ctx := t.Context()
-	if err := Run(ctx, tmpDir, []string{targetFile}); err != nil {
+	if err := runTest(ctx, tmpDir, []string{targetFile}); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 
@@ -293,7 +303,7 @@ func main() {}
 
 			// Run fileheaders
 			ctx := t.Context()
-			if err := Run(ctx, tmpDir, []string{targetFile}); err != nil {
+			if err := runTest(ctx, tmpDir, []string{targetFile}); err != nil {
 				t.Fatalf("Run failed: %v", err)
 			}
 
@@ -363,7 +373,7 @@ func main() {}
 
 	// Run fileheaders
 	ctx := t.Context()
-	if err := Run(ctx, tmpDir, []string{targetFile}); err != nil {
+	if err := runTest(ctx, tmpDir, []string{targetFile}); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 
@@ -458,7 +468,7 @@ func TestRun_LicenseNone(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	if err := Run(ctx, tmpDir, []string{targetFile}); err != nil {
+	if err := runTest(ctx, tmpDir, []string{targetFile}); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 
@@ -489,7 +499,7 @@ func TestRun_UnsupportedLicense(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	err := Run(ctx, tmpDir, []string{targetFile})
+	err := runTest(ctx, tmpDir, []string{targetFile})
 	if err == nil {
 		t.Fatal("Expected error for unsupported license, got nil")
 	}
