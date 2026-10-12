@@ -17,9 +17,7 @@ package generate
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -104,27 +102,26 @@ func GenerateTasks(repoRoot string, scopes []*tasks.APScope) (tasks.Task, error)
 			Name: fmt.Sprintf("generate-%s", filepath.Base(apRoot)),
 		}
 
+		r, err := scope.GetRepo()
+		if err != nil {
+			return nil, err
+		}
+
 		// 1. Run legacy scripts
 		tasksDir := filepath.Join(apRoot, "dev", "tasks")
-		entries, err := os.ReadDir(tasksDir)
-		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("failed to read tasks dir %s: %w", tasksDir, err)
-		}
-		if err == nil {
-			for _, entry := range entries {
-				name := entry.Name()
-				if strings.HasPrefix(name, "generate-") && !entry.IsDir() {
-					// Skip generate-github-actions as we are replacing it
-					if name == "generate-github-actions" {
-						continue
-					}
-
-					group.Tasks = append(group.Tasks, &LegacyScriptTask{
-						Name: name,
-						Path: filepath.Join(tasksDir, name),
-						Dir:  apRoot,
-					})
+		for _, f := range r.FilesInDir(tasksDir) {
+			name := f.Name
+			if strings.HasPrefix(name, "generate-") {
+				// Skip generate-github-actions as we are replacing it
+				if name == "generate-github-actions" {
+					continue
 				}
+
+				group.Tasks = append(group.Tasks, &LegacyScriptTask{
+					Name: name,
+					Path: f.Path,
+					Dir:  apRoot,
+				})
 			}
 		}
 
@@ -574,31 +571,27 @@ jobs:
 
 	for _, scope := range scopes {
 		apRoot := scope.Dir
-		suffix := getSuffix(repoRoot, apRoot)
-		presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
-		entries, err := os.ReadDir(presubmitsDir)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("failed to read presubmits dir %s: %w", presubmitsDir, err)
-		}
-
-		goModExists, err := fileutils.FileExists(filepath.Join(apRoot, "go.mod"))
+		r, err := scope.GetRepo()
 		if err != nil {
 			return err
 		}
+
+		suffix := getSuffix(repoRoot, apRoot)
+		presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
+		files := r.FilesInDir(presubmitsDir)
+		if len(files) == 0 {
+			continue
+		}
+
+		goModExists := r.FileExists(filepath.Join(apRoot, "go.mod"))
 
 		relPresubmitsDir, err := filepath.Rel(repoRoot, presubmitsDir)
 		if err != nil {
 			return err
 		}
 
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			scriptName := entry.Name()
+		for _, f := range files {
+			scriptName := f.Name
 
 			jobName := scriptName
 			if suffix != "" && !strings.HasSuffix(jobName, suffix) {

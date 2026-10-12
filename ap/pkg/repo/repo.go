@@ -262,6 +262,12 @@ func newRepo(root, repoRoot string, files []*File, dirs, apRoots, modules []stri
 		}
 	}
 
+	for _, list := range filesByDir {
+		sort.Slice(list, func(i, j int) bool {
+			return list[i].Path < list[j].Path
+		})
+	}
+
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].Path < files[j].Path
 	})
@@ -372,6 +378,18 @@ func (r *Repo) File(path string) *File {
 // FileExists reports whether a file at the given path exists in this repo tree.
 func (r *Repo) FileExists(path string) bool {
 	return r.File(path) != nil
+}
+
+// FilesInDir returns all files located directly within dir (non-recursive).
+func (r *Repo) FilesInDir(dir string) []*File {
+	clean := filepath.Clean(dir)
+	if !filepath.IsAbs(clean) {
+		clean = filepath.Join(r.root, clean)
+	}
+	files := r.filesByDir[clean]
+	res := make([]*File, len(files))
+	copy(res, files)
+	return res
 }
 
 // Dirs returns all directory paths matching the given filters.

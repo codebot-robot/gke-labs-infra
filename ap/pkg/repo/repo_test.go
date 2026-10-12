@@ -289,3 +289,40 @@ func TestGlobAndQueries(t *testing.T) {
 		t.Errorf("sub HasGoFiles() expected true")
 	}
 }
+
+func TestFilesInDir(t *testing.T) {
+	ResetCache()
+	dir := setupTestRepo(t)
+
+	r, err := Open(dir, WithSkip("skipped/**"))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+
+	// 1. Files in k8s directory should only include direct files (manifest.yaml), not subdirectories (crds/crd.yml)
+	k8sFiles := r.FilesInDir(filepath.Join(dir, "k8s"))
+	if len(k8sFiles) != 1 {
+		t.Fatalf("expected 1 file in k8s, got %d", len(k8sFiles))
+	}
+	if k8sFiles[0].Name != "manifest.yaml" {
+		t.Errorf("expected manifest.yaml, got %s", k8sFiles[0].Name)
+	}
+
+	// 2. Relative path should work identically
+	relK8sFiles := r.FilesInDir("k8s")
+	if len(relK8sFiles) != 1 || relK8sFiles[0].Name != "manifest.yaml" {
+		t.Errorf("expected 1 file manifest.yaml via relative path, got %v", relK8sFiles)
+	}
+
+	// 3. Subdirectory crds
+	crdFiles := r.FilesInDir(filepath.Join(dir, "k8s", "crds"))
+	if len(crdFiles) != 1 || crdFiles[0].Name != "crd.yml" {
+		t.Errorf("expected 1 file crd.yml in k8s/crds, got %v", crdFiles)
+	}
+
+	// 4. Non-existent directory returns empty
+	emptyFiles := r.FilesInDir(filepath.Join(dir, "nonexistent"))
+	if len(emptyFiles) != 0 {
+		t.Errorf("expected 0 files for nonexistent dir, got %d", len(emptyFiles))
+	}
+}

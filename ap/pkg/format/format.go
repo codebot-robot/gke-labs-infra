@@ -16,9 +16,7 @@ package format
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +24,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileheaders"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/gostyle"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
 )
@@ -86,7 +85,10 @@ func (t *LegacyFormatScriptTask) GetChildren() []tasks.Task {
 }
 
 // FormatTasks returns a task group for all formatting tasks.
-func FormatTasks(root string, files ...string) (tasks.Task, error) {
+func FormatTasks(r *repo.Repo, root string, files ...string) (tasks.Task, error) {
+	if r == nil {
+		return nil, fmt.Errorf("repo is nil")
+	}
 	var allTasks []tasks.Task
 
 	// 1. Run codestyle (headers, gofmt, etc)
@@ -94,19 +96,13 @@ func FormatTasks(root string, files ...string) (tasks.Task, error) {
 
 	// 2. Run legacy format scripts
 	tasksDir := filepath.Join(root, "dev", "tasks")
-	entries, err := os.ReadDir(tasksDir)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("failed to read tasks dir %s: %w", tasksDir, err)
-	}
-	if err == nil {
-		for _, entry := range entries {
-			name := entry.Name()
-			if strings.HasPrefix(name, "format-") && !entry.IsDir() {
-				allTasks = append(allTasks, &LegacyFormatScriptTask{
-					Name: name,
-					Path: filepath.Join(tasksDir, name),
-				})
-			}
+	for _, f := range r.FilesInDir(tasksDir) {
+		name := f.Name
+		if strings.HasPrefix(name, "format-") {
+			allTasks = append(allTasks, &LegacyFormatScriptTask{
+				Name: name,
+				Path: f.Path,
+			})
 		}
 	}
 
@@ -116,10 +112,10 @@ func FormatTasks(root string, files ...string) (tasks.Task, error) {
 	}, nil
 }
 
-func Run(ctx context.Context, root string) error {
-	t, err := FormatTasks(root)
+func Run(ctx context.Context, r *repo.Repo, root string) error {
+	t, err := FormatTasks(r, root)
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root})
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r})
 }

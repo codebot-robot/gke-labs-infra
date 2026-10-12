@@ -38,35 +38,35 @@ func DiscoverScopes(r *repo.Repo, repoRoot string, apRoots []string) ([]*tasks.A
 		}
 
 		// Discover e2e scripts
-		e2eScripts, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("test-e2e"))
+		e2eScripts, err := tasks.FindTaskScripts(scope.Repo, apRoot, tasks.WithPrefix("test-e2e"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover e2e scripts in %s: %w", apRoot, err)
 		}
 		scope.E2ETasks = append(scope.E2ETasks, e2eScripts...)
 
 		// Discover test scripts
-		testScripts, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
+		testScripts, err := tasks.FindTaskScripts(scope.Repo, apRoot, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover test scripts in %s: %w", apRoot, err)
 		}
 		scope.TestTasks = append(scope.TestTasks, testScripts...)
 
 		// Discover build scripts
-		buildScripts, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("build-"))
+		buildScripts, err := tasks.FindTaskScripts(scope.Repo, apRoot, tasks.WithPrefix("build-"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover build scripts in %s: %w", apRoot, err)
 		}
 		scope.BuildTasks = append(scope.BuildTasks, buildScripts...)
 
 		// Discover lint scripts
-		lintScripts, err := tasks.FindTaskScripts(apRoot, tasks.WithPrefix("lint-"))
+		lintScripts, err := tasks.FindTaskScripts(scope.Repo, apRoot, tasks.WithPrefix("lint-"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover lint scripts in %s: %w", apRoot, err)
 		}
 		scope.LintTasks = append(scope.LintTasks, lintScripts...)
 
 		// Discover format tasks
-		formatTasks, err := format.FormatTasks(apRoot)
+		formatTasks, err := format.FormatTasks(scope.Repo, apRoot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover format tasks in %s: %w", apRoot, err)
 		}

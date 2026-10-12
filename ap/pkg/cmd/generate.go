@@ -75,7 +75,7 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 	// Format tasks are also root-sensitive
 	for _, scope := range scopes {
 		apRoot := scope.Dir
-		formatTasks, err := format.FormatTasks(apRoot)
+		formatTasks, err := format.FormatTasks(scope.Repo, apRoot)
 		if err != nil {
 			return err
 		}

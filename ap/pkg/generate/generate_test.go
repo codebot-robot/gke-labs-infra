@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
@@ -262,7 +263,11 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 		}
 	}
 
-	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root}}
+	r, err := repo.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root, Repo: r}}
 	if err := runGithubActionsGenerator(t.Context(), root, scopes); err != nil {
 		t.Fatalf("runGithubActionsGenerator: %v", err)
 	}
@@ -326,7 +331,11 @@ func TestPresubmitScriptsWithLicenseNone(t *testing.T) {
 
 func TestGenerateTasks_DevTasks(t *testing.T) {
 	root := t.TempDir()
-	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root}}
+	r, err := repo.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root, Repo: r}}
 
 	// 1. dev/tasks does not exist -> should succeed
 	task, err := GenerateTasks(root, scopes)
@@ -345,6 +354,13 @@ func TestGenerateTasks_DevTasks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tasksDir, "generate-foo"), []byte("#!/bin/sh\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
+
+	repo.ResetCache()
+	r, err = repo.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes = []*tasks.APScope{{Dir: root, RepoRoot: root, Repo: r}}
 
 	task, err = GenerateTasks(root, scopes)
 	if err != nil {
