@@ -28,6 +28,7 @@ func TestBuildSandboxIsLockedDown(t *testing.T) {
 	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
 	spec := RunnerSpec{
 		Image:               "ghcr.io/actions/actions-runner:test",
+		RuntimeClassName:    "microvm",
 		MaxLifetime:         2 * time.Hour,
 		WorkVolumeSizeLimit: resource.MustParse("10Gi"),
 	}
@@ -43,8 +44,8 @@ func TestBuildSandboxIsLockedDown(t *testing.T) {
 	if pod.RestartPolicy != corev1.RestartPolicyNever {
 		t.Errorf("restartPolicy = %q, want Never", pod.RestartPolicy)
 	}
-	if pod.RuntimeClassName != nil {
-		t.Errorf("runtimeClassName should be unset by default, got %q", *pod.RuntimeClassName)
+	if pod.RuntimeClassName == nil || *pod.RuntimeClassName != "microvm" {
+		t.Errorf("runtimeClassName = %v, want microvm", pod.RuntimeClassName)
 	}
 	if pod.SecurityContext == nil || pod.SecurityContext.RunAsNonRoot == nil || !*pod.SecurityContext.RunAsNonRoot {
 		t.Errorf("pod must run as non-root")
@@ -104,14 +105,24 @@ func TestBuildSandboxIsLockedDown(t *testing.T) {
 }
 
 func TestBuildSandboxRuntimeClass(t *testing.T) {
-	spec := RunnerSpec{Image: "img", RuntimeClassName: "gvisor"}
-	sb := buildSandbox("pool", "pool-abc", spec, time.Now())
-	if got := sb.Spec.PodTemplate.Spec.RuntimeClassName; got == nil || *got != "gvisor" {
-		t.Errorf("runtimeClassName = %v, want gvisor", got)
-	}
-	if sb.Spec.ShutdownTime != nil {
-		t.Errorf("no max lifetime should mean no shutdownTime, got %v", sb.Spec.ShutdownTime)
-	}
+	t.Run("default microvm", func(t *testing.T) {
+		spec := RunnerSpec{Image: "img", RuntimeClassName: "microvm"}
+		sb := buildSandbox("pool", "pool-abc", spec, time.Now())
+		if got := sb.Spec.PodTemplate.Spec.RuntimeClassName; got == nil || *got != "microvm" {
+			t.Errorf("runtimeClassName = %v, want microvm", got)
+		}
+		if sb.Spec.ShutdownTime != nil {
+			t.Errorf("no max lifetime should mean no shutdownTime, got %v", sb.Spec.ShutdownTime)
+		}
+	})
+
+	t.Run("opt-out unset", func(t *testing.T) {
+		spec := RunnerSpec{Image: "img", RuntimeClassName: ""}
+		sb := buildSandbox("pool", "pool-abc", spec, time.Now())
+		if got := sb.Spec.PodTemplate.Spec.RuntimeClassName; got != nil {
+			t.Errorf("runtimeClassName = %v, want unset", *got)
+		}
+	})
 }
 
 func TestIsFinished(t *testing.T) {

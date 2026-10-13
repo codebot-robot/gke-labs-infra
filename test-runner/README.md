@@ -59,9 +59,25 @@ The runner pods are untrusted workloads, so:
 - A `NetworkPolicy` denies all ingress and limits egress to DNS plus the public
   internet; private ranges and the cloud metadata server are blocked. This
   needs a CNI that enforces NetworkPolicy (GKE Dataplane V2, Calico, ...).
-- Isolation is plain containers (cgroups/namespaces) for now. `--runtime-class`
-  passes a `runtimeClassName` through to the pod when a stronger runtime
-  (gVisor, Kata) is available; see "Next steps".
+- Runner pods default to the `microvm` RuntimeClass (Kata Containers /
+  microVM isolation). To opt out and use the cluster default (e.g. plain
+  containers), pass an empty `--runtime-class=`.
+
+### microVM notes
+
+- **vCPU sizing:** Kata sizes the VM's vCPUs from the container CPU *limit*
+  (`--runner-cpu-limit`), not the CPU request. With no limit set, the runner VM
+  gets only 1 vCPU regardless of `--runner-cpu-request`. The controller defaults
+  both request and limit to 4.
+- **Nested virtualization:** The node pool running microVMs must support
+  nested virtualization. On GKE, create the node pool with
+  `--sandbox type=microvm --enable-nested-virtualization` on an Intel machine
+  family (e.g. `c3`). AMD machine families other than N4D lack nested
+  virtualization, so `c3d` and `c4d` pools fail to start microVM pods with
+  `"failed to add any hypervisor device to devices cgroup"`.
+- **Node scheduling:** The `microvm` RuntimeClass on GKE carries its own
+  `nodeSelector` and tolerations for microVM nodes, so the controller does not
+  need to set them on runner pods.
 
 ## Deploying
 
@@ -122,9 +138,10 @@ Useful flags (see `--help` for all):
 | `--pool` | `test-runner` | pool name; prefixes Sandbox and runner names |
 | `--runner-labels` | pool name | GitHub labels for `runs-on`, plus `self-hosted` |
 | `--runner-image` | `ghcr.io/actions/actions-runner:<version>` | runner image |
-| `--runtime-class` | unset | `runtimeClassName` for runner pods |
+| `--runtime-class` | `microvm` | `runtimeClassName` for runner pods (empty string `--runtime-class=` for cluster default) |
 | `--max-runner-lifetime` | `6h` | Sandbox `shutdownTime` |
-| `--runner-cpu-request`, `--runner-memory-request`, `--runner-memory-limit` | `1`, `2Gi`, `4Gi` | runner resources |
+| `--runner-cpu-request`, `--runner-cpu-limit` | `4`, `4` | runner CPU request and limit (Kata sizes VM vCPUs from limit) |
+| `--runner-memory-request`, `--runner-memory-limit` | `2Gi`, `4Gi` | runner memory request and limit |
 | `--runner-work-size-limit` | `20Gi` | emptyDir limit for `_work` |
 
 ## Layout
@@ -137,11 +154,9 @@ Useful flags (see `--help` for all):
 
 ## Next steps
 
-- **Stronger isolation.** Evaluate `runtimeClassName` options (gVisor on GKE
-  Sandbox, Kata) and, if the ergonomics are better, running a microVM inside the
-  Sandbox. The latter would also let us boot GitHub's own `ubuntu-latest`
-  runner images instead of the bare `actions-runner` container, which has no
-  Docker and few preinstalled tools.
+- **Runner image.** Boot GitHub's own `ubuntu-latest` runner images inside the
+  microVM instead of the bare `actions-runner` container, which has no Docker
+  and few preinstalled tools.
 - **Scale on demand.** Today the pool is a fixed number of idle runners. A
   `workflow_job` webhook, or polling queued jobs, could scale to zero.
 - **GitHub App auth** instead of a long-lived token, with automatic rotation.
