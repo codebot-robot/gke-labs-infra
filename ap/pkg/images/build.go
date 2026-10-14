@@ -58,6 +58,13 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 		tag = "latest"
 	}
 
+	if t.BuildkitHost == "" {
+		t.BuildkitHost = os.Getenv("BUILDKIT_HOST")
+	}
+	if t.BuildkitHost == "k8s" {
+		t.BuildkitHost = "k8s://autodeploy-system/buildkit"
+	}
+
 	actualImagePrefix := imagePrefix
 	if imagePrefix == "images.local" && t.Push {
 		if k8s.IsInCluster() || strings.HasPrefix(t.BuildkitHost, "k8s://") {
@@ -72,10 +79,6 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 		fullImageName = fmt.Sprintf("%s/%s:%s", actualImagePrefix, t.ImageName, tag)
 	} else {
 		fullImageName = fmt.Sprintf("%s:%s", t.ImageName, tag)
-	}
-
-	if t.BuildkitHost == "" {
-		t.BuildkitHost = os.Getenv("BUILDKIT_HOST")
 	}
 
 	if t.BuildkitHost != "" {
@@ -278,6 +281,10 @@ func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string) (task
 		return nil, err
 	}
 
+	if buildkitHost == "" {
+		buildkitHost = os.Getenv("BUILDKIT_HOST")
+	}
+
 	if buildkitHost == "k8s" {
 		buildkitHost = "k8s://autodeploy-system/buildkit"
 	}
@@ -313,7 +320,7 @@ func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string) (task
 		Tasks: buildTasks,
 	}
 
-	if push && cfg.ImageRepo() == "images.local" {
+	if push && cfg.ImageRepo() == "images.local" && !strings.HasPrefix(buildkitHost, "k8s://") {
 		rootTask = &k8s.PortForwardTask{
 			Child:      rootTask,
 			Service:    "in-cluster-image-registry",

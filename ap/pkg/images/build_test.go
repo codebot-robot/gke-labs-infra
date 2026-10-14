@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
@@ -143,6 +144,99 @@ func TestBuildTasks(t *testing.T) {
 
 	if !found {
 		t.Errorf("did not find DockerBuildTask for foo")
+	}
+}
+
+func TestBuildTasks_PortForward(t *testing.T) {
+	tmpDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmpDir, "images", "foo"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "images", "foo", "Dockerfile"), []byte("FROM scratch"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := repo.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name              string
+		push              bool
+		buildkitHost      string
+		envBuildkitHost   string
+		imagePrefix       string
+		expectPortForward bool
+	}{
+		{
+			name:              "no push",
+			push:              false,
+			buildkitHost:      "",
+			expectPortForward: false,
+		},
+		{
+			name:              "push to images.local without buildkit host",
+			push:              true,
+			buildkitHost:      "",
+			expectPortForward: true,
+		},
+		{
+			name:              "push to images.local with remote tcp buildkit host",
+			push:              true,
+			buildkitHost:      "tcp://localhost:2375",
+			expectPortForward: true,
+		},
+		{
+			name:              "push to images.local with in-cluster k8s:// buildkit host",
+			push:              true,
+			buildkitHost:      "k8s://autodeploy-system/buildkit",
+			expectPortForward: false,
+		},
+		{
+			name:              "push to images.local with shorthand k8s buildkit host",
+			push:              true,
+			buildkitHost:      "k8s",
+			expectPortForward: false,
+		},
+		{
+			name:              "push to images.local with BUILDKIT_HOST env var set to k8s://",
+			push:              true,
+			buildkitHost:      "",
+			envBuildkitHost:   "k8s://autodeploy-system/buildkit",
+			expectPortForward: false,
+		},
+		{
+			name:              "push to images.local with BUILDKIT_HOST env var set to k8s",
+			push:              true,
+			buildkitHost:      "",
+			envBuildkitHost:   "k8s",
+			expectPortForward: false,
+		},
+		{
+			name:              "push to external registry with no buildkit host",
+			push:              true,
+			buildkitHost:      "",
+			imagePrefix:       "gcr.io/my-project",
+			expectPortForward: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("BUILDKIT_HOST", tc.envBuildkitHost)
+			t.Setenv("IMAGE_PREFIX", tc.imagePrefix)
+
+			task, err := BuildTasks(r, tmpDir, tc.push, tc.buildkitHost)
+			if err != nil {
+				t.Fatalf("BuildTasks() error = %v", err)
+			}
+
+			_, isPortForward := task.(*k8s.PortForwardTask)
+			if isPortForward != tc.expectPortForward {
+				t.Errorf("expected isPortForward=%v, got %v (%T)", tc.expectPortForward, isPortForward, task)
+			}
+		})
 	}
 }
 
