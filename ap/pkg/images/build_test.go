@@ -227,7 +227,12 @@ func TestBuildTasks_PortForward(t *testing.T) {
 			t.Setenv("BUILDKIT_HOST", tc.envBuildkitHost)
 			t.Setenv("IMAGE_PREFIX", tc.imagePrefix)
 
-			task, err := BuildTasks(r, tmpDir, tc.push, tc.buildkitHost)
+			resolvedHost, err := ResolveBuildkitHost(tc.buildkitHost)
+			if err != nil {
+				t.Fatalf("ResolveBuildkitHost() error = %v", err)
+			}
+
+			task, err := BuildTasks(r, tmpDir, tc.push, resolvedHost)
 			if err != nil {
 				t.Fatalf("BuildTasks() error = %v", err)
 			}
@@ -445,5 +450,133 @@ platforms:
 		t.Fatalf("expected error when builder creation fails, got nil")
 	} else if !strings.Contains(err.Error(), "failed to ensure multi-platform builder") {
 		t.Errorf("expected wrapped error 'failed to ensure multi-platform builder', got: %v", err)
+	}
+}
+
+func TestResolveBuildkitHost(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		envHost     string
+		setEnv      bool
+		expected    string
+		expectError bool
+	}{
+		{
+			name:        "empty without env",
+			input:       "",
+			setEnv:      false,
+			expected:    "",
+			expectError: false,
+		},
+		{
+			name:        "empty with tcp env",
+			input:       "",
+			envHost:     "tcp://localhost:2375",
+			setEnv:      true,
+			expected:    "tcp://localhost:2375",
+			expectError: false,
+		},
+		{
+			name:        "empty with k8s shorthand env",
+			input:       "",
+			envHost:     "k8s",
+			setEnv:      true,
+			expected:    DefaultK8sBuildkitHost,
+			expectError: false,
+		},
+		{
+			name:        "k8s shorthand input",
+			input:       "k8s",
+			setEnv:      false,
+			expected:    DefaultK8sBuildkitHost,
+			expectError: false,
+		},
+		{
+			name:        "explicit valid k8s url",
+			input:       "k8s://custom-ns/custom-buildkit",
+			setEnv:      false,
+			expected:    "k8s://custom-ns/custom-buildkit",
+			expectError: false,
+		},
+		{
+			name:        "explicit non-k8s url",
+			input:       "unix:///run/buildkit/buildkitd.sock",
+			setEnv:      false,
+			expected:    "unix:///run/buildkit/buildkitd.sock",
+			expectError: false,
+		},
+		{
+			name:        "explicit arg overrides env",
+			input:       "tcp://1.2.3.4:2375",
+			envHost:     "k8s",
+			setEnv:      true,
+			expected:    "tcp://1.2.3.4:2375",
+			expectError: false,
+		},
+		{
+			name:        "invalid k8s url missing service",
+			input:       "k8s://onlynamespace",
+			setEnv:      false,
+			expectError: true,
+		},
+		{
+			name:        "invalid k8s url trailing slash",
+			input:       "k8s://namespace/",
+			setEnv:      false,
+			expectError: true,
+		},
+		{
+			name:        "invalid k8s url leading slash",
+			input:       "k8s:///service",
+			setEnv:      false,
+			expectError: true,
+		},
+		{
+			name:        "invalid k8s url extra parts",
+			input:       "k8s://namespace/service/extra",
+			setEnv:      false,
+			expectError: true,
+		},
+		{
+			name:        "invalid k8s url just scheme",
+			input:       "k8s://",
+			setEnv:      false,
+			expectError: true,
+		},
+		{
+			name:        "invalid k8s url in env",
+			input:       "",
+			envHost:     "k8s://invalid",
+			setEnv:      true,
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setEnv {
+				t.Setenv("BUILDKIT_HOST", tt.envHost)
+			} else {
+				t.Setenv("BUILDKIT_HOST", "")
+			}
+
+			got, err := ResolveBuildkitHost(tt.input)
+			if tt.expectError {
+				if err == nil {
+					t.Fatalf("expected error for input %q, got nil (result: %q)", tt.input, got)
+				}
+				if !strings.Contains(err.Error(), "invalid buildkit host") {
+					t.Errorf("expected error message to mention invalid buildkit host, got: %v", err)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error for input %q: %v", tt.input, err)
+				}
+				if got != tt.expected {
+					t.Errorf("ResolveBuildkitHost(%q) = %q, want %q", tt.input, got, tt.expected)
+				}
+			}
+		})
 	}
 }

@@ -60,8 +60,9 @@ func TestBuildDeployCommand_BuildkitHostEnv(t *testing.T) {
 	if flag == nil {
 		t.Fatal("expected --buildkit-host flag")
 	}
-	if flag.DefValue != "k8s://autodeploy-system/buildkit" {
-		t.Errorf("expected default %q, got %q", "k8s://autodeploy-system/buildkit", flag.DefValue)
+	// Flag default is empty; environment fallback is handled by ResolveBuildkitHost during execution.
+	if flag.DefValue != "" {
+		t.Errorf("expected default %q, got %q", "", flag.DefValue)
 	}
 }
 
