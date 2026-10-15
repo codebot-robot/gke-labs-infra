@@ -31,6 +31,26 @@ import (
 
 var execCommandContext = exec.CommandContext
 
+// DefaultK8sBuildkitHost is the default buildkit host used for the k8s shorthand.
+const DefaultK8sBuildkitHost = "k8s://autodeploy-system/buildkit"
+
+// ResolveBuildkitHost applies the env fallback, expands "k8s", and validates the k8s://namespace/service shape.
+func ResolveBuildkitHost(value string) (string, error) {
+	if value == "" {
+		value = os.Getenv("BUILDKIT_HOST")
+	}
+	if value == "k8s" {
+		value = DefaultK8sBuildkitHost
+	}
+	if host, ok := strings.CutPrefix(value, "k8s://"); ok {
+		parts := strings.Split(host, "/")
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return "", fmt.Errorf("invalid buildkit host: %s, expected k8s://namespace/service", value)
+		}
+	}
+	return value, nil
+}
+
 // DockerBuildTask represents a task to build a single docker image.
 type DockerBuildTask struct {
 	ImageName    string
@@ -56,13 +76,6 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	tag := os.Getenv("IMAGE_TAG")
 	if tag == "" {
 		tag = "latest"
-	}
-
-	if t.BuildkitHost == "" {
-		t.BuildkitHost = os.Getenv("BUILDKIT_HOST")
-	}
-	if t.BuildkitHost == "k8s" {
-		t.BuildkitHost = "k8s://autodeploy-system/buildkit"
 	}
 
 	actualImagePrefix := imagePrefix
@@ -187,6 +200,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 	if host, ok := strings.CutPrefix(t.BuildkitHost, "k8s://"); ok {
 		// handle port forward
 		parts := strings.Split(host, "/")
+		// Defensive check; host is already validated by ResolveBuildkitHost.
 		if len(parts) != 2 {
 			return fmt.Errorf("invalid buildkit host: %s, expected k8s://namespace/service", t.BuildkitHost)
 		}
@@ -279,14 +293,6 @@ func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string) (task
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
-	}
-
-	if buildkitHost == "" {
-		buildkitHost = os.Getenv("BUILDKIT_HOST")
-	}
-
-	if buildkitHost == "k8s" {
-		buildkitHost = "k8s://autodeploy-system/buildkit"
 	}
 
 	dockerfiles, err := findDockerfiles(r, root)

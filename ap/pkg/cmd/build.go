@@ -17,7 +17,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
@@ -51,7 +50,7 @@ func BuildBuildCommand(rootOpt *RootOptions) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&opt.Push, "push", false, "Push images to registry")
-	cmd.Flags().StringVar(&opt.BuildkitHost, "buildkit-host", os.Getenv("BUILDKIT_HOST"), "Buildkit host to use (e.g. k8s://namespace/service)")
+	cmd.Flags().StringVar(&opt.BuildkitHost, "buildkit-host", "", "Buildkit host to use (e.g. k8s://namespace/service)")
 
 	return cmd
 }
@@ -59,6 +58,11 @@ func BuildBuildCommand(rootOpt *RootOptions) *cobra.Command {
 // RunBuild executes the business logic for the "build" command.
 func RunBuild(ctx context.Context, opt BuildOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
+		return err
+	}
+
+	buildkitHost, err := images.ResolveBuildkitHost(opt.BuildkitHost)
+	if err != nil {
 		return err
 	}
 
@@ -76,11 +80,6 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 	for _, scope := range scopes {
 		group := &tasks.Group{
 			Name: fmt.Sprintf("build-%s", filepath.Base(scope.Dir)),
-		}
-
-		buildkitHost := opt.BuildkitHost
-		if buildkitHost == "k8s" {
-			buildkitHost = "k8s://autodeploy-system/buildkit"
 		}
 
 		imageTasks, err := images.BuildTasks(scope.Repo, scope.Dir, opt.Push, buildkitHost)
