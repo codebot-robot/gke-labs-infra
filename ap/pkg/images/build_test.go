@@ -161,18 +161,32 @@ func TestBuildTasks_PortForward(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	emptyDir := t.TempDir()
+	emptyRepo, err := repo.Open(emptyDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	tests := []struct {
 		name              string
 		push              bool
 		buildkitHost      string
 		envBuildkitHost   string
 		imagePrefix       string
+		noDockerfiles     bool
 		expectPortForward bool
 	}{
 		{
 			name:              "no push",
 			push:              false,
 			buildkitHost:      "",
+			expectPortForward: false,
+		},
+		{
+			name:              "no dockerfiles",
+			push:              true,
+			buildkitHost:      "",
+			noDockerfiles:     true,
 			expectPortForward: false,
 		},
 		{
@@ -232,7 +246,14 @@ func TestBuildTasks_PortForward(t *testing.T) {
 				t.Fatalf("ResolveBuildkitHost() error = %v", err)
 			}
 
-			task, err := BuildTasks(r, tmpDir, tc.push, resolvedHost)
+			testDir := tmpDir
+			testRepo := r
+			if tc.noDockerfiles {
+				testDir = emptyDir
+				testRepo = emptyRepo
+			}
+
+			task, err := BuildTasks(testRepo, testDir, tc.push, resolvedHost)
 			if err != nil {
 				t.Fatalf("BuildTasks() error = %v", err)
 			}
