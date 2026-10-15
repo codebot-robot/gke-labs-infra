@@ -8,7 +8,7 @@ require (
 	github.com/google/go-github/v81 v81.0.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/oauth2 v0.37.0
-	golang.org/x/tools v0.50.0
+	golang.org/x/tools v0.51.0
 	google.golang.org/grpc v1.84.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
