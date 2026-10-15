@@ -17,6 +17,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
@@ -29,7 +30,8 @@ import (
 // DeployOptions holds the configuration for the "deploy" command.
 type DeployOptions struct {
 	*RootOptions
-	SkipPush bool
+	SkipPush     bool
+	BuildkitHost string
 }
 
 // BuildDeployCommand constructs the cobra command for "deploy".
@@ -51,6 +53,7 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&opt.SkipPush, "skip-push", false, "Skip pushing images to registry")
+	cmd.Flags().StringVar(&opt.BuildkitHost, "buildkit-host", os.Getenv("BUILDKIT_HOST"), "Buildkit host to use (e.g. k8s://namespace/service)")
 
 	return cmd
 }
@@ -80,8 +83,13 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 			Name: fmt.Sprintf("deploy-%s", filepath.Base(apRoot)),
 		}
 
+		buildkitHost := opt.BuildkitHost
+		if buildkitHost == "k8s" {
+			buildkitHost = "k8s://autodeploy-system/buildkit"
+		}
+
 		// Deploy typically also builds
-		buildTasks, err := images.BuildTasks(r.Under(apRoot), apRoot, !opt.SkipPush, "")
+		buildTasks, err := images.BuildTasks(r.Under(apRoot), apRoot, !opt.SkipPush, buildkitHost)
 		if err != nil {
 			return fmt.Errorf("build failed during deploy for %s: %w", apRoot, err)
 		}
