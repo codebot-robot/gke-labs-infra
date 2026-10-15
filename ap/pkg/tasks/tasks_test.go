@@ -15,6 +15,8 @@
 package tasks
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -93,5 +95,156 @@ func TestAPScopeGetRepo(t *testing.T) {
 	}
 	if got != r {
 		t.Fatalf("GetRepo() = %v, want %v", got, r)
+	}
+}
+
+func TestGroupRun_ContinueOnError(t *testing.T) {
+	errA := errors.New("error A")
+	errC := errors.New("error C")
+
+	var ranA, ranB, ranC bool
+
+	group := &Group{
+		Name:            "go-lint-testmodule",
+		ContinueOnError: true,
+		Tasks: []Task{
+			&DummyTask{
+				Name: "check-a",
+				RunFn: func(ctx context.Context, scope *APScope) error {
+					ranA = true
+					return errA
+				},
+			},
+			&DummyTask{
+				Name: "check-b",
+				RunFn: func(ctx context.Context, scope *APScope) error {
+					ranB = true
+					return nil
+				},
+			},
+			&DummyTask{
+				Name: "check-c",
+				RunFn: func(ctx context.Context, scope *APScope) error {
+					ranC = true
+					return errC
+				},
+			},
+		},
+	}
+
+	ctx := context.Background()
+	scope := &APScope{}
+	err := group.Run(ctx, scope)
+	if err == nil {
+		t.Fatalf("expected error from Group.Run(), got nil")
+	}
+
+	// Assert all children ran
+	if !ranA {
+		t.Errorf("expected child A to run")
+	}
+	if !ranB {
+		t.Errorf("expected child B to run")
+	}
+	if !ranC {
+		t.Errorf("expected child C to run")
+	}
+
+	// Assert joined error contains each child's error
+	if !errors.Is(err, errA) {
+		t.Errorf("expected joined error to contain errA, got %v", err)
+	}
+	if !errors.Is(err, errC) {
+		t.Errorf("expected joined error to contain errC, got %v", err)
+	}
+}
+
+func TestGroupRun_FailFast(t *testing.T) {
+	errA := errors.New("error A")
+	errB := errors.New("error B")
+
+	var ranA, ranB bool
+
+	group := &Group{
+		Name:            "build-images",
+		ContinueOnError: false,
+		Tasks: []Task{
+			&DummyTask{
+				Name: "task-a",
+				RunFn: func(ctx context.Context, scope *APScope) error {
+					ranA = true
+					return errA
+				},
+			},
+			&DummyTask{
+				Name: "task-b",
+				RunFn: func(ctx context.Context, scope *APScope) error {
+					ranB = true
+					return errB
+				},
+			},
+		},
+	}
+
+	ctx := context.Background()
+	scope := &APScope{}
+	err := group.Run(ctx, scope)
+	if err == nil {
+		t.Fatalf("expected error from Group.Run(), got nil")
+	}
+
+	if !ranA {
+		t.Errorf("expected task A to run")
+	}
+	if ranB {
+		t.Errorf("expected task B not to run when ContinueOnError is false")
+	}
+	if !errors.Is(err, errA) {
+		t.Errorf("expected errA, got %v", err)
+	}
+}
+
+func TestTasksRun_ContinueOnError(t *testing.T) {
+	err1 := errors.New("err 1")
+	err2 := errors.New("err 2")
+
+	var ran1, ran2 bool
+	ts := []Task{
+		&DummyTask{
+			Name: "t1",
+			RunFn: func(ctx context.Context, scope *APScope) error {
+				ran1 = true
+				return err1
+			},
+		},
+		&DummyTask{
+			Name: "t2",
+			RunFn: func(ctx context.Context, scope *APScope) error {
+				ran2 = true
+				return err2
+			},
+		},
+	}
+
+	ctx := context.Background()
+	scope := &APScope{}
+
+	// Test fail-fast
+	err := Run(ctx, scope, ts, RunOptions{ContinueOnError: false})
+	if !ran1 || ran2 {
+		t.Errorf("fail-fast: expected ran1=true, ran2=false, got ran1=%v, ran2=%v", ran1, ran2)
+	}
+	if !errors.Is(err, err1) {
+		t.Errorf("expected err1, got %v", err)
+	}
+
+	// Test continue on error
+	ran1, ran2 = false, false
+	err = Run(ctx, scope, ts, RunOptions{ContinueOnError: true})
+	if !ran1 || !ran2 {
+		t.Errorf("continue-on-error: expected ran1=true, ran2=true, got ran1=%v, ran2=%v", ran1, ran2)
+	}
+	if !errors.Is(err, err1) || !errors.Is(err, err2) {
+		t.Errorf("expected joined error with err1 and err2, got %v", err)
 	}
 }

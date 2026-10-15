@@ -132,8 +132,9 @@ func TestTasks(r *repo.Repo, root string) (tasks.Task, error) {
 	}
 
 	return &tasks.Group{
-		Name:  "go-tests",
-		Tasks: testTasks,
+		Name:            "go-tests",
+		Tasks:           testTasks,
+		ContinueOnError: true,
 	}, nil
 }
 

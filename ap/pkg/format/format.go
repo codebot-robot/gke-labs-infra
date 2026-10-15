@@ -107,8 +107,9 @@ func FormatTasks(r *repo.Repo, root string, files ...string) (tasks.Task, error)
 	}
 
 	return &tasks.Group{
-		Name:  "format",
-		Tasks: allTasks,
+		Name:            "format",
+		Tasks:           allTasks,
+		ContinueOnError: true,
 	}, nil
 }
 
