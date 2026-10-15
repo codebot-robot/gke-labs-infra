@@ -16,6 +16,7 @@ package tasks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -107,15 +108,44 @@ func (t *TaskScript) GetChildren() []Task {
 
 // Group represents a collection of tasks.
 type Group struct {
-	Name  string
-	Tasks []Task
+	Name            string
+	Tasks           []Task
+	ContinueOnError bool
 }
 
 func (g *Group) Run(ctx context.Context, scope *APScope) error {
+	var errs []error
+	var failedNames []string
 	for _, t := range g.Tasks {
 		if err := t.Run(ctx, scope); err != nil {
-			return err
+			if !g.ContinueOnError {
+				return err
+			}
+			errs = append(errs, err)
+			failedNames = append(failedNames, strings.TrimSuffix(t.GetName(), "-check"))
 		}
+	}
+	if len(errs) > 0 {
+		hasGroupChild := false
+		for _, t := range g.Tasks {
+			if _, ok := t.(*Group); ok {
+				hasGroupChild = true
+				break
+			}
+		}
+
+		if !hasGroupChild || len(g.Tasks) > 1 {
+			noun := "tasks"
+			if !hasGroupChild {
+				if strings.Contains(g.Name, "lint") {
+					noun = "checks"
+				} else if strings.Contains(g.Name, "test") {
+					noun = "tests"
+				}
+			}
+			klog.Errorf("%s: %d of %d %s failed: %s", g.Name, len(failedNames), len(g.Tasks), noun, strings.Join(failedNames, ", "))
+		}
+		return errors.Join(errs...)
 	}
 	return nil
 }
@@ -184,7 +214,8 @@ func FindTaskScripts(r *repo.Repo, root string, opts ...FindOption) ([]Task, err
 
 // RunOptions holds options for running tasks.
 type RunOptions struct {
-	DryRun bool
+	DryRun          bool
+	ContinueOnError bool
 }
 
 // Run executes a list of tasks.
@@ -195,12 +226,16 @@ func Run(ctx context.Context, scope *APScope, ts []Task, opts RunOptions) error 
 		}
 		return nil
 	}
+	var errs []error
 	for _, task := range ts {
 		if err := task.Run(ctx, scope); err != nil {
-			return err
+			if !opts.ContinueOnError {
+				return err
+			}
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // PrintTree prints the task tree to stdout.

@@ -69,12 +69,13 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 	for _, scope := range scopes {
 		if len(scope.TestTasks) > 0 {
 			group := &tasks.Group{
-				Name:  fmt.Sprintf("test-%s", filepath.Base(scope.Dir)), // Just to compile, I'll fix formatting next
-				Tasks: scope.TestTasks,
+				Name:            fmt.Sprintf("test-%s", filepath.Base(scope.Dir)),
+				Tasks:           scope.TestTasks,
+				ContinueOnError: true,
 			}
 			allTasks = append(allTasks, group)
 		}
 	}
 
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
 }

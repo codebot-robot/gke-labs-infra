@@ -15,6 +15,8 @@
 package golang
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -438,4 +440,131 @@ lint:
 			t.Errorf("expected ReplaceEmptyInterfaceWithAnyTask.SkipTests to be true")
 		}
 	})
+}
+
+func TestLintTasks_ContinueOnError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := repo.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	taskGroup, err := LintTasks(r, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outerGroup, ok := taskGroup.(*tasks.Group)
+	if !ok {
+		t.Fatalf("expected outer group to be *tasks.Group, got %T", taskGroup)
+	}
+	if !outerGroup.ContinueOnError {
+		t.Errorf("expected outer go-lints group to have ContinueOnError: true")
+	}
+
+	if len(outerGroup.Tasks) != 1 {
+		t.Fatalf("expected 1 module group, got %d", len(outerGroup.Tasks))
+	}
+
+	modGroup, ok := outerGroup.Tasks[0].(*tasks.Group)
+	if !ok {
+		t.Fatalf("expected module task to be *tasks.Group, got %T", outerGroup.Tasks[0])
+	}
+	if !modGroup.ContinueOnError {
+		t.Errorf("expected module group %s to have ContinueOnError: true", modGroup.Name)
+	}
+}
+
+func TestLintTasks_GovulncheckAndDroppedErrorsBothReport(t *testing.T) {
+	errVuln := errors.New("govulncheck failed in /workspace/test: exit status 1")
+	errDropped := errors.New("droppederrors check failed in /workspace/test: exit status 1")
+
+	var ranVet, ranVuln, ranUnused, ranTC, ranAny, ranDropped bool
+
+	modGroup := &tasks.Group{
+		Name:            "go-lint-test",
+		ContinueOnError: true,
+		Tasks: []tasks.Task{
+			&tasks.DummyTask{
+				Name: "go-vet",
+				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
+					ranVet = true
+					return nil
+				},
+			},
+			&tasks.DummyTask{
+				Name: "govulncheck",
+				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
+					ranVuln = true
+					return errVuln
+				},
+			},
+			&tasks.DummyTask{
+				Name: "unused-check",
+				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
+					ranUnused = true
+					return nil
+				},
+			},
+			&tasks.DummyTask{
+				Name: "testcontext-check",
+				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
+					ranTC = true
+					return nil
+				},
+			},
+			&tasks.DummyTask{
+				Name: "replace-empty-interface-with-any-check",
+				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
+					ranAny = true
+					return nil
+				},
+			},
+			&tasks.DummyTask{
+				Name: "droppederrors-check",
+				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
+					ranDropped = true
+					return errDropped
+				},
+			},
+		},
+	}
+
+	outerGroup := &tasks.Group{
+		Name:            "go-lints",
+		ContinueOnError: true,
+		Tasks:           []tasks.Task{modGroup},
+	}
+
+	ctx := context.Background()
+	scope := &tasks.APScope{}
+	err := outerGroup.Run(ctx, scope)
+	if err == nil {
+		t.Fatalf("expected error from outerGroup.Run(), got nil")
+	}
+
+	// Verify both failing checks ran and didn't hide each other
+	if !ranVuln {
+		t.Errorf("expected govulncheck to run")
+	}
+	if !ranDropped {
+		t.Errorf("expected droppederrors to run despite govulncheck failing")
+	}
+	if !ranVet || !ranUnused || !ranTC || !ranAny {
+		t.Errorf("expected all checks to run")
+	}
+
+	// Verify both errors are in the returned joined error
+	if !errors.Is(err, errVuln) {
+		t.Errorf("expected joined error to contain govulncheck error")
+	}
+	if !errors.Is(err, errDropped) {
+		t.Errorf("expected joined error to contain droppederrors error")
+	}
 }

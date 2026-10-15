@@ -277,7 +277,8 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 		}
 
 		modGroup := &tasks.Group{
-			Name: fmt.Sprintf("go-lint-%s", filepath.Base(dir)),
+			Name:            fmt.Sprintf("go-lint-%s", filepath.Base(dir)),
+			ContinueOnError: true,
 		}
 
 		if cfg.IsGovetEnabled() {
@@ -332,8 +333,9 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 	}
 
 	return &tasks.Group{
-		Name:  "go-lints",
-		Tasks: moduleTasks,
+		Name:            "go-lints",
+		Tasks:           moduleTasks,
+		ContinueOnError: true,
 	}, nil
 }
 
