@@ -326,6 +326,10 @@ func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string) (task
 		Tasks: buildTasks,
 	}
 
+	if len(buildTasks) == 0 {
+		return rootTask, nil
+	}
+
 	if push && cfg.ImageRepo() == "images.local" && !strings.HasPrefix(buildkitHost, "k8s://") {
 		rootTask = &k8s.PortForwardTask{
 			Child:      rootTask,
