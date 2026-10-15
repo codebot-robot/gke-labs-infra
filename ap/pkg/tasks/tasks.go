@@ -126,24 +126,8 @@ func (g *Group) Run(ctx context.Context, scope *APScope) error {
 		}
 	}
 	if len(errs) > 0 {
-		hasGroupChild := false
-		for _, t := range g.Tasks {
-			if _, ok := t.(*Group); ok {
-				hasGroupChild = true
-				break
-			}
-		}
-
-		if !hasGroupChild || len(g.Tasks) > 1 {
-			noun := "tasks"
-			if !hasGroupChild {
-				if strings.Contains(g.Name, "lint") {
-					noun = "checks"
-				} else if strings.Contains(g.Name, "test") {
-					noun = "tests"
-				}
-			}
-			klog.Errorf("%s: %d of %d %s failed: %s", g.Name, len(failedNames), len(g.Tasks), noun, strings.Join(failedNames, ", "))
+		if len(g.Tasks) > 1 {
+			klog.Errorf("%s: %d of %d failed: %s", g.Name, len(failedNames), len(g.Tasks), strings.Join(failedNames, ", "))
 		}
 		return errors.Join(errs...)
 	}
