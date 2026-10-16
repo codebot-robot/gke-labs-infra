@@ -15,8 +15,10 @@
 package linediff
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 )
@@ -114,11 +116,65 @@ const expectedDiffA = `@@ -23,6 +23,6 @@
    config_path = "/etc/containerd/certs.d"`
 
 func TestDiff(t *testing.T) {
+	var sb100kA, sb100kB strings.Builder
+	for i := 1; i <= 100000; i++ {
+		if i == 50000 {
+			sb100kA.WriteString("line 50000 original\n")
+			sb100kB.WriteString("line 50000 modified\n")
+			continue
+		}
+		sb100kA.WriteString("line ")
+		sb100kA.WriteString(strconv.Itoa(i))
+		sb100kA.WriteByte('\n')
+		sb100kB.WriteString("line ")
+		sb100kB.WriteString(strconv.Itoa(i))
+		sb100kB.WriteByte('\n')
+	}
+	a100k := sb100kA.String()
+	b100k := sb100kB.String()
+
+	const expectedDiff100k = `@@ -49998,5 +49998,5 @@
+ line 49998
+ line 49999
+-line 50000 original
++line 50000 modified
+ line 50001
+ line 50002`
+
+	var sb20kA, sb20kB strings.Builder
+	for i := 1; i <= 20000; i++ {
+		sb20kA.WriteString("a-")
+		sb20kA.WriteString(strconv.Itoa(i))
+		sb20kA.WriteByte('\n')
+		sb20kB.WriteString("b-")
+		sb20kB.WriteString(strconv.Itoa(i))
+		sb20kB.WriteByte('\n')
+	}
+	a20k := sb20kA.String()
+	b20k := sb20kB.String()
+
+	const expectedDiff20k = `@@ -1,20000 +1,20000 @@ (diff too large: 20000 lines removed, 20000 lines added)
+-a-1
+-a-2
+-a-3
+...
+-a-19998
+-a-19999
+-a-20000
++b-1
++b-2
++b-3
+...
++b-19998
++b-19999
++b-20000`
+
 	tests := []struct {
-		name       string
-		a, b       string
-		want       string
-		checkHunks []string
+		name               string
+		a, b               string
+		want               string
+		checkHunks         []string
+		assertNoTableAlloc bool
 	}{
 		{
 			name: "identical input",
@@ -137,17 +193,54 @@ func TestDiff(t *testing.T) {
 				"+[plugins.\"io.containerd.grpc.v1.cri\".registry]",
 			},
 		},
+		{
+			name: "100k-line pair differing by one line in the middle",
+			a:    a100k,
+			b:    b100k,
+			want: expectedDiff100k,
+			checkHunks: []string{
+				"-line 50000 original",
+				"+line 50000 modified",
+			},
+		},
+		{
+			name: "two unrelated 20k-line inputs degraded summary",
+			a:    a20k,
+			b:    b20k,
+			want: expectedDiff20k,
+			checkHunks: []string{
+				"(diff too large: 20000 lines removed, 20000 lines added)",
+				"-a-1",
+				"-a-20000",
+				"+b-1",
+				"+b-20000",
+			},
+			assertNoTableAlloc: true,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			start := time.Now()
 			got := Diff(tc.a, tc.b)
+			if elapsed := time.Since(start); elapsed > time.Second {
+				t.Errorf("Diff() took %v, want under 1 second", elapsed)
+			}
 			if diff := cmp.Diff(tc.want, got); diff != "" {
 				t.Errorf("Diff() mismatch (-want +got):\n%s", diff)
 			}
 			for _, hunk := range tc.checkHunks {
 				if !strings.Contains(got, hunk) {
 					t.Errorf("Diff() missing expected hunk line %q in output:\n%s", hunk, got)
+				}
+			}
+			if tc.assertNoTableAlloc {
+				allocs := testing.AllocsPerRun(5, func() {
+					Diff(tc.a, tc.b)
+				})
+				// If the 20k x 20k LCS table were allocated, it would require 20,001+ slice allocations.
+				if allocs > 100 {
+					t.Errorf("Diff() allocated %v times, expected no table allocation (<100)", allocs)
 				}
 			}
 		})
