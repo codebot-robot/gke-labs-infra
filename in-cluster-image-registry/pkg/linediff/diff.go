@@ -12,6 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package linediff provides lightweight, dependency-free unified line diffing.
+// It trims common prefix and suffix lines before running LCS to handle large
+// inputs with localized changes efficiently. If the remaining changed region
+// exceeds MaxTableCells, DiffWithContext falls back to a degraded summary
+// instead of allocating an excessive LCS table.
 package linediff
 
 import (
@@ -21,6 +26,10 @@ import (
 
 // DefaultContext is the default number of context lines to display around changes.
 const DefaultContext = 2
+
+// MaxTableCells is the maximum number of cells in the LCS table before DiffWithContext
+// falls back to a degraded summary to avoid excessive memory allocation.
+const MaxTableCells = 4_000_000
 
 // Diff returns a unified-style line diff between strings a and b.
 // If a and b are identical, it returns an empty string.
@@ -38,17 +47,40 @@ func DiffWithContext(a, b string, context int) string {
 	aLines := splitLines(a)
 	bLines := splitLines(b)
 
-	n, m := len(aLines), len(bLines)
-	lcs := make([][]int, n+1)
-	for i := range lcs {
-		lcs[i] = make([]int, m+1)
+	prefix := 0
+	for prefix < len(aLines) && prefix < len(bLines) && aLines[prefix] == bLines[prefix] {
+		prefix++
 	}
-	for i := n - 1; i >= 0; i-- {
-		for j := m - 1; j >= 0; j-- {
-			if aLines[i] == bLines[j] {
-				lcs[i][j] = lcs[i+1][j+1] + 1
-			} else {
-				lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])
+	suffix := 0
+	for suffix < len(aLines)-prefix && suffix < len(bLines)-prefix && aLines[len(aLines)-1-suffix] == bLines[len(bLines)-1-suffix] {
+		suffix++
+	}
+
+	if prefix == len(aLines) && prefix == len(bLines) {
+		return ""
+	}
+
+	midA := aLines[prefix : len(aLines)-suffix]
+	midB := bLines[prefix : len(bLines)-suffix]
+	n, m := len(midA), len(midB)
+
+	if int64(n)*int64(m) > MaxTableCells {
+		return degradedDiff(midA, midB, prefix, n, m)
+	}
+
+	var lcs [][]int
+	if n > 0 && m > 0 {
+		lcs = make([][]int, n+1)
+		for i := range lcs {
+			lcs[i] = make([]int, m+1)
+		}
+		for i := n - 1; i >= 0; i-- {
+			for j := m - 1; j >= 0; j-- {
+				if midA[i] == midB[j] {
+					lcs[i][j] = lcs[i+1][j+1] + 1
+				} else {
+					lcs[i][j] = max(lcs[i+1][j], lcs[i][j+1])
+				}
 			}
 		}
 	}
@@ -62,28 +94,50 @@ func DiffWithContext(a, b string, context int) string {
 		prevB int // line number in b before this op
 	}
 
+	pContext := max(0, min(prefix, context))
+	sContext := max(0, min(suffix, context))
+
 	var ops []op
+	for k := prefix - pContext; k < prefix; k++ {
+		ops = append(ops, op{kind: ' ', text: aLines[k], aIdx: k + 1, bIdx: k + 1, prevA: k, prevB: k})
+	}
+
 	i, j := 0, 0
 	for i < n && j < m {
-		prevA, prevB := i, j
+		prevA, prevB := prefix+i, prefix+j
 		switch {
-		case aLines[i] == bLines[j]:
-			ops = append(ops, op{kind: ' ', text: aLines[i], aIdx: i + 1, bIdx: j + 1, prevA: prevA, prevB: prevB})
+		case midA[i] == midB[j]:
+			ops = append(ops, op{kind: ' ', text: midA[i], aIdx: prevA + 1, bIdx: prevB + 1, prevA: prevA, prevB: prevB})
 			i++
 			j++
 		case lcs[i+1][j] >= lcs[i][j+1]:
-			ops = append(ops, op{kind: '-', text: aLines[i], aIdx: i + 1, prevA: prevA, prevB: prevB})
+			ops = append(ops, op{kind: '-', text: midA[i], aIdx: prevA + 1, prevA: prevA, prevB: prevB})
 			i++
 		default:
-			ops = append(ops, op{kind: '+', text: bLines[j], bIdx: j + 1, prevA: prevA, prevB: prevB})
+			ops = append(ops, op{kind: '+', text: midB[j], bIdx: prevB + 1, prevA: prevA, prevB: prevB})
 			j++
 		}
 	}
 	for ; i < n; i++ {
-		ops = append(ops, op{kind: '-', text: aLines[i], aIdx: i + 1, prevA: i, prevB: j})
+		ops = append(ops, op{kind: '-', text: midA[i], aIdx: prefix + i + 1, prevA: prefix + i, prevB: prefix + j})
 	}
 	for ; j < m; j++ {
-		ops = append(ops, op{kind: '+', text: bLines[j], bIdx: j + 1, prevA: i, prevB: j})
+		ops = append(ops, op{kind: '+', text: midB[j], bIdx: prefix + j + 1, prevA: prefix + i, prevB: prefix + j})
+	}
+
+	suffixStartA := len(aLines) - suffix
+	suffixStartB := len(bLines) - suffix
+	for k := 0; k < sContext; k++ {
+		idxA := suffixStartA + k
+		idxB := suffixStartB + k
+		ops = append(ops, op{
+			kind:  ' ',
+			text:  aLines[idxA],
+			aIdx:  idxA + 1,
+			bIdx:  idxB + 1,
+			prevA: idxA,
+			prevB: idxB,
+		})
 	}
 
 	include := make([]bool, len(ops))
@@ -145,6 +199,43 @@ func DiffWithContext(a, b string, context int) string {
 	}
 
 	return strings.Join(out, "\n")
+}
+
+func degradedDiff(midA, midB []string, prefix, n, m int) string {
+	startA := prefix + 1
+	if n == 0 {
+		startA = prefix
+	}
+	startB := prefix + 1
+	if m == 0 {
+		startB = prefix
+	}
+	header := fmt.Sprintf("@@ -%s +%s @@ (diff too large: %d lines removed, %d lines added)",
+		formatRange(startA, n), formatRange(startB, m), n, m)
+	out := []string{header}
+	out = append(out, sampleLines(midA, '-')...)
+	out = append(out, sampleLines(midB, '+')...)
+	return strings.Join(out, "\n")
+}
+
+func sampleLines(lines []string, prefix byte) []string {
+	const sampleSize = 3
+	if len(lines) <= sampleSize*2 {
+		out := make([]string, len(lines))
+		for i, l := range lines {
+			out[i] = fmt.Sprintf("%c%s", prefix, l)
+		}
+		return out
+	}
+	out := make([]string, 0, sampleSize*2+1)
+	for i := 0; i < sampleSize; i++ {
+		out = append(out, fmt.Sprintf("%c%s", prefix, lines[i]))
+	}
+	out = append(out, "...")
+	for i := len(lines) - sampleSize; i < len(lines); i++ {
+		out = append(out, fmt.Sprintf("%c%s", prefix, lines[i]))
+	}
+	return out
 }
 
 func formatRange(start, count int) string {
