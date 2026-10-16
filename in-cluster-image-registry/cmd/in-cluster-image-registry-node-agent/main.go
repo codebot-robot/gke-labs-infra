@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gke-labs/gke-labs-infra/in-cluster-image-registry/pkg/linediff"
 	"github.com/gke-labs/gke-labs-infra/in-cluster-image-registry/pkg/toml"
-	"github.com/google/go-cmp/cmp"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -336,7 +336,7 @@ func updateContainerdConfig(path string) (bool, error) {
 		return false, nil
 	}
 
-	klog.Infof("Containerd config diff:\n%s", cmp.Diff(strContent, newContent))
+	klog.Infof("Containerd config diff:\n%s", linediff.Diff(strContent, newContent))
 
 	// Translate mirrors into certs.d/<host>/hosts.toml before writing config.toml.
 	// If translation fails, abort before modifying config.toml so the node does not
