@@ -188,6 +188,11 @@ func TestIsIfErrCheck(t *testing.T) {
 			expected: true,
 		},
 		{
+			name:     "unspaced tokens not matched",
+			input:    "if err!=nil{",
+			expected: false,
+		},
+		{
 			name:     "if err != nil with inline comment",
 			input:    "if err != nil { // handle error",
 			expected: true,

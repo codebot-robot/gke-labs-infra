@@ -15,6 +15,7 @@
 package fileheaders
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -29,30 +30,9 @@ import (
 	"k8s.io/klog/v2"
 )
 
-func isGeneratedCode(buf []byte) bool {
-	s := string(buf)
-	for len(s) > 0 {
-		var line string
-		if idx := strings.IndexByte(s, '\n'); idx != -1 {
-			line = s[:idx]
-			s = s[idx+1:]
-		} else {
-			line = s
-			s = ""
-		}
-		line = strings.TrimRight(line, "\r")
-		idx := strings.Index(line, "Code generated ")
-		if idx != -1 && strings.Contains(line[idx+len("Code generated "):], "DO NOT EDIT") {
-			return true
-		}
-	}
-	return false
-}
-
 func hasK8sStyleBlockHeader(buf []byte) bool {
-	s := string(buf)
-	idx := strings.Index(s, "/*")
-	return idx != -1 && strings.Contains(s[idx:], "Copyright")
+	idx := bytes.Index(buf, []byte("/*"))
+	return idx != -1 && bytes.Contains(buf[idx:], []byte("Copyright"))
 }
 
 func isYearOrRange(s string) bool {
@@ -100,28 +80,10 @@ func matchCopyrightLine(line string, copyrightHolder string) bool {
 	return isYearOrRange(yearPart)
 }
 
-func matchExpectedHeader(header string, style string, copyrightHolder string) bool {
-	rawLines := strings.Split(header, "\n")
-	for len(rawLines) > 0 && strings.TrimSpace(rawLines[0]) == "" {
-		rawLines = rawLines[1:]
-	}
-	for len(rawLines) > 0 && strings.TrimSpace(rawLines[len(rawLines)-1]) == "" {
-		rawLines = rawLines[:len(rawLines)-1]
-	}
-
-	if len(rawLines) != 13 {
+func match13Lines(lines []string, copyrightHolder string) bool {
+	if len(lines) != 13 {
 		return false
 	}
-
-	lines := make([]string, 13)
-	for i, raw := range rawLines {
-		trimmed := strings.TrimSpace(raw)
-		if !strings.HasPrefix(trimmed, style) {
-			return false
-		}
-		lines[i] = strings.TrimSpace(trimmed[len(style):])
-	}
-
 	if !matchCopyrightLine(lines[0], copyrightHolder) {
 		return false
 	}
@@ -164,6 +126,39 @@ func matchExpectedHeader(header string, style string, copyrightHolder string) bo
 		return false
 	}
 	return true
+}
+
+func matchExpectedHeader(header string, style string, copyrightHolder string) bool {
+	rawLines := strings.Split(header, "\n")
+	if len(rawLines) < 13 {
+		return false
+	}
+
+	lines := make([]string, len(rawLines))
+	hasStyle := make([]bool, len(rawLines))
+	for i, raw := range rawLines {
+		trimmed := strings.TrimSpace(raw)
+		if strings.HasPrefix(trimmed, style) {
+			hasStyle[i] = true
+			lines[i] = strings.TrimSpace(trimmed[len(style):])
+		} else {
+			lines[i] = trimmed
+		}
+	}
+
+	for start := 0; start <= len(lines)-13; start++ {
+		allHaveStyle := true
+		for j := 0; j < 13; j++ {
+			if !hasStyle[start+j] {
+				allHaveStyle = false
+				break
+			}
+		}
+		if allHaveStyle && match13Lines(lines[start:start+13], copyrightHolder) {
+			return true
+		}
+	}
+	return false
 }
 
 type FileHeadersOptions struct {
@@ -274,7 +269,7 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 	}
 
 	if p.config.SkipGenerated != nil && *p.config.SkipGenerated {
-		if isGeneratedCode(checkBuf) {
+		if repo.CheckIsGenerated(absPath) {
 			return nil
 		}
 	}

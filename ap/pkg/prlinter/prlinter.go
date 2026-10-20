@@ -219,6 +219,10 @@ func isErrAssign(line string) bool {
 	return false
 }
 
+// isIfErrCheck reports whether the line contains an `if err != nil {` check.
+// It matches tokens produced by strings.Fields (e.g. ["if", "err", "!=", "nil", "{"]).
+// Note: Unspaced forms like "if err!=nil{" are intentionally not matched because Go diffs
+// are formatted with gofmt, where tokens are always space-separated.
 func isIfErrCheck(line string) bool {
 	fields := strings.Fields(line)
 	for i := 0; i < len(fields); i++ {

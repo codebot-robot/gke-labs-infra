@@ -192,56 +192,75 @@ func bumpGoMod(content string, version string) (string, bool) {
 }
 
 func bumpDockerfile(content string, version string) (string, bool) {
-	var sb strings.Builder
-	offset := 0
+	lines := strings.Split(content, "\n")
+	changed := false
 
-	for {
-		idx := strings.Index(content[offset:], "golang:")
-		if idx == -1 {
-			sb.WriteString(content[offset:])
-			break
+	for lineIdx, rawLine := range lines {
+		line := strings.TrimSuffix(rawLine, "\r")
+		fields := strings.Fields(line)
+		if len(fields) == 0 || !strings.EqualFold(fields[0], "FROM") {
+			continue
 		}
 
-		start := offset + idx
-		verStart := start + len("golang:")
-		if verStart >= len(content) {
-			sb.WriteString(content[offset:])
-			break
+		imageFieldIdx := 1
+		for imageFieldIdx < len(fields) && strings.HasPrefix(fields[imageFieldIdx], "--") {
+			imageFieldIdx++
+		}
+		if imageFieldIdx >= len(fields) {
+			continue
 		}
 
-		i := verStart
-		for i < len(content) && ((content[i] >= '0' && content[i] <= '9') || content[i] == '.') {
+		imageField := fields[imageFieldIdx]
+		if !strings.HasPrefix(imageField, "golang:") {
+			continue
+		}
+
+		verAndSuffix := strings.TrimPrefix(imageField, "golang:")
+		i := 0
+		for i < len(verAndSuffix) && ((verAndSuffix[i] >= '0' && verAndSuffix[i] <= '9') || verAndSuffix[i] == '.') {
 			i++
 		}
-		verStr := content[verStart:i]
+		verStr := verAndSuffix[:i]
 		if !isValidVersion(verStr) {
-			sb.WriteString(content[offset : start+len("golang:")])
-			offset = start + len("golang:")
 			continue
 		}
 
 		suffixStart := i
-		if i < len(content) && content[i] == '-' {
+		if i < len(verAndSuffix) && verAndSuffix[i] == '-' {
 			j := i + 1
-			for j < len(content) && ((content[j] >= 'a' && content[j] <= 'z') || (content[j] >= '0' && content[j] <= '9')) {
+			for j < len(verAndSuffix) && ((verAndSuffix[j] >= 'a' && verAndSuffix[j] <= 'z') || (verAndSuffix[j] >= '0' && verAndSuffix[j] <= '9')) {
 				j++
 			}
 			if j > i+1 {
 				i = j
 			}
 		}
-		suffix := content[suffixStart:i]
+		suffix := verAndSuffix[suffixStart:i]
 
-		sb.WriteString(content[offset:start])
-		sb.WriteString("golang:")
-		sb.WriteString(version)
-		sb.WriteString(suffix)
+		newImage := "golang:" + version + suffix + verAndSuffix[i:]
+		if newImage == imageField {
+			continue
+		}
 
-		offset = i
+		fromIdx := strings.Index(rawLine, fields[0])
+		searchStart := fromIdx + len(fields[0])
+		for k := 1; k < imageFieldIdx; k++ {
+			flagIdx := strings.Index(rawLine[searchStart:], fields[k])
+			if flagIdx != -1 {
+				searchStart += flagIdx + len(fields[k])
+			}
+		}
+		fieldIdx := strings.Index(rawLine[searchStart:], imageField)
+		if fieldIdx == -1 {
+			continue
+		}
+		idx := searchStart + fieldIdx
+		lines[lineIdx] = rawLine[:idx] + newImage + rawLine[idx+len(imageField):]
+		changed = true
 	}
 
-	newContent := sb.String()
-	return newContent, newContent != content
+	newContent := strings.Join(lines, "\n")
+	return newContent, changed
 }
 
 func bumpFile(path string, version string) error {
