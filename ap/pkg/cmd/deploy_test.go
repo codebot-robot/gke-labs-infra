@@ -777,3 +777,149 @@ func TestBuildDeployPlans_Direct(t *testing.T) {
 		t.Errorf("expected imageNames [a], got %v", plans[0].imageNames)
 	}
 }
+
+func TestDeploy_ImageReferencedOnlyThroughImagePrefix(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// .git and .ap
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, ".ap", "ap.yaml"), []byte("imagePrefix: images.local\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// images/worker, images/sidecar, images/unreferenced
+	for _, img := range []string{"worker", "sidecar", "unreferenced"} {
+		dir := filepath.Join(tempDir, "images", img)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Manifest referencing worker only via ${IMAGE_PREFIX}/worker (in args) and sidecar via ${IMAGE_PREFIX}/sidecar:${IMAGE_TAG} (in ConfigMap)
+	k8sDir := filepath.Join(tempDir, "k8s")
+	if err := os.MkdirAll(k8sDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  template:
+    spec:
+      containers:
+      - name: main
+        image: gcr.io/fixed/base:v1
+        args:
+        - --worker-image=${IMAGE_PREFIX}/worker
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  sidecar.image: "${IMAGE_PREFIX}/sidecar:${IMAGE_TAG}"
+`
+	if err := os.WriteFile(filepath.Join(k8sDir, "manifest.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: "k8s://autodeploy-system/buildkit",
+	}
+
+	if err := opt.Resolve([]string{"."}); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := RunDeploy(t.Context(), opt); err != nil {
+			t.Fatalf("RunDeploy failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "docker-build-worker") {
+		t.Errorf("expected dry-run output to contain docker-build-worker, got:\n%s", out)
+	}
+	if !strings.Contains(out, "docker-build-sidecar") {
+		t.Errorf("expected dry-run output to contain docker-build-sidecar, got:\n%s", out)
+	}
+	if strings.Contains(out, "docker-build-unreferenced") {
+		t.Errorf("expected dry-run output to NOT contain docker-build-unreferenced, got:\n%s", out)
+	}
+	if !strings.Contains(out, "kubectl-apply-manifest.yaml") {
+		t.Errorf("expected dry-run output to contain kubectl-apply-manifest.yaml, got:\n%s", out)
+	}
+}
+
+func TestDeploy_MissingDockerfile_ImagePrefix(t *testing.T) {
+	tempDir := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, ".ap", "ap.yaml"), []byte("imagePrefix: images.local\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Manifest references missing-image only via ${IMAGE_PREFIX}/missing-image
+	k8sDir := filepath.Join(tempDir, "k8s")
+	if err := os.MkdirAll(k8sDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  template:
+    spec:
+      containers:
+      - name: main
+        image: gcr.io/fixed/base:v1
+        env:
+        - name: SUB_IMAGE
+          value: ${IMAGE_PREFIX}/missing-image
+`
+	if err := os.WriteFile(filepath.Join(k8sDir, "manifest.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+	}
+
+	err := opt.Resolve([]string{"."})
+	if err == nil {
+		t.Fatalf("expected error for missing Dockerfile, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing-image") {
+		t.Errorf("expected error to mention image name 'missing-image', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "images/missing-image/Dockerfile") {
+		t.Errorf("expected error to mention 'images/missing-image/Dockerfile', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), filepath.Join("k8s", "manifest.yaml")) {
+		t.Errorf("expected error to mention manifest path 'k8s/manifest.yaml', got: %v", err)
+	}
+}
