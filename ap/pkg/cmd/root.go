@@ -63,6 +63,46 @@ func (opt *RootOptions) GetRepo() (*repo.Repo, error) {
 	return r, nil
 }
 
+// ResolveRoot handles validating and resolving opt.RootFlag if specified.
+func (opt *RootOptions) ResolveRoot() error {
+	if opt.RootFlag == "" {
+		return nil
+	}
+	absRoot := opt.RootFlag
+	if !filepath.IsAbs(absRoot) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("failed to get current working directory: %w", err)
+		}
+		absRoot = filepath.Join(wd, opt.RootFlag)
+	}
+	fi, err := os.Stat(absRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("specified root %q does not exist", opt.RootFlag)
+		}
+		return fmt.Errorf("failed to stat specified root %q: %w", opt.RootFlag, err)
+	}
+	if !fi.IsDir() {
+		return fmt.Errorf("specified root %q is not a directory", opt.RootFlag)
+	}
+	if _, err := os.Stat(filepath.Join(absRoot, ".ap")); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("specified root %q is not an AP root (missing .ap directory)", opt.RootFlag)
+		}
+		return fmt.Errorf("failed to check for .ap directory in %q: %w", opt.RootFlag, err)
+	}
+	opt.APRoots = []string{absRoot}
+	opt.APRoot = absRoot
+
+	// If absRoot is outside RepoRoot, anchor RepoRoot to absRoot
+	if opt.RepoRoot == "" || (!strings.HasPrefix(absRoot, opt.RepoRoot+string(filepath.Separator)) && absRoot != opt.RepoRoot) {
+		opt.RepoRoot = absRoot
+		opt.Repo = nil
+	}
+	return nil
+}
+
 // Resolve resolves the target paths based on args.
 func (opt *RootOptions) Resolve(args []string) error {
 	if opt.RepoRoot == "" {
@@ -70,38 +110,7 @@ func (opt *RootOptions) Resolve(args []string) error {
 	}
 
 	if opt.RootFlag != "" {
-		absRoot := opt.RootFlag
-		if !filepath.IsAbs(absRoot) {
-			wd, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("failed to get current working directory: %w", err)
-			}
-			absRoot = filepath.Join(wd, opt.RootFlag)
-		}
-		fi, err := os.Stat(absRoot)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("specified root %q does not exist", opt.RootFlag)
-			}
-			return fmt.Errorf("failed to stat specified root %q: %w", opt.RootFlag, err)
-		}
-		if !fi.IsDir() {
-			return fmt.Errorf("specified root %q is not a directory", opt.RootFlag)
-		}
-		if _, err := os.Stat(filepath.Join(absRoot, ".ap")); err != nil {
-			if os.IsNotExist(err) {
-				return fmt.Errorf("specified root %q is not an AP root (missing .ap directory)", opt.RootFlag)
-			}
-			return fmt.Errorf("failed to check for .ap directory in %q: %w", opt.RootFlag, err)
-		}
-		opt.APRoots = []string{absRoot}
-
-		// If absRoot is outside RepoRoot, anchor RepoRoot to absRoot
-		if opt.RepoRoot == "" || (!strings.HasPrefix(absRoot, opt.RepoRoot+string(filepath.Separator)) && absRoot != opt.RepoRoot) {
-			opt.RepoRoot = absRoot
-			opt.Repo = nil
-		}
-		return nil
+		return opt.ResolveRoot()
 	}
 
 	r, err := opt.GetRepo()

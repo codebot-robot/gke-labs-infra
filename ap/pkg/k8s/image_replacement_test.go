@@ -15,6 +15,7 @@
 package k8s
 
 import (
+	"reflect"
 	"testing"
 )
 
@@ -197,6 +198,103 @@ metadata:
 			}
 			if got != tt.expected {
 				t.Errorf("replacePlaceholderImages() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFindPlaceholderImages(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "empty",
+			input:    "",
+			expected: nil,
+		},
+		{
+			name:     "simple placeholder",
+			input:    "image: my-app",
+			expected: []string{"my-app"},
+		},
+		{
+			name:     "placeholder with latest tag",
+			input:    "image: my-app:latest",
+			expected: []string{"my-app"},
+		},
+		{
+			name:     "placeholder with path",
+			input:    "image: sub/app",
+			expected: []string{"sub/app"},
+		},
+		{
+			name:     "external image with domain",
+			input:    "image: gcr.io/my-project/my-app:latest",
+			expected: nil,
+		},
+		{
+			name:     "pinned version tag",
+			input:    "image: redis:7.0",
+			expected: nil,
+		},
+		{
+			name: "multi-document deployment and service",
+			input: `
+apiVersion: v1
+kind: Service
+metadata:
+  name: svc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dep
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: app-server
+      - name: sidecar
+        image: sidecar-proxy
+      - name: external
+        image: registry.k8s.io/pause:3.9
+`,
+			expected: []string{"app-server", "sidecar-proxy"},
+		},
+		{
+			name: "duplicate references deduplicated and sorted",
+			input: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dep
+spec:
+  template:
+    spec:
+      initContainers:
+      - name: init
+        image: app-server
+      containers:
+      - name: app
+        image: app-server
+      - name: sidecar
+        image: a-sidecar
+`,
+			expected: []string{"a-sidecar", "app-server"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := FindPlaceholderImages(tt.input)
+			if err != nil {
+				t.Fatalf("FindPlaceholderImages() error = %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.expected) {
+				t.Errorf("FindPlaceholderImages() = %v, want %v", got, tt.expected)
 			}
 		})
 	}

@@ -15,9 +15,17 @@
 package cmd
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
 func TestBuildDeployCommand(t *testing.T) {
@@ -113,7 +121,659 @@ func TestRunDeploy_DryRun(t *testing.T) {
 		BuildkitHost: "k8s://autodeploy-system/buildkit",
 	}
 
+	if err := opt.Resolve(nil); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+
 	if err := RunDeploy(t.Context(), opt); err != nil {
 		t.Fatalf("RunDeploy dry-run failed: %v", err)
+	}
+}
+
+func setupFixtureRepo(t *testing.T) string {
+	t.Helper()
+	tempDir := t.TempDir()
+
+	// .git and .ap
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, ".ap", "ap.yaml"), []byte("imagePrefix: images.local\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// images/a, images/b, images/c (unreferenced)
+	for _, img := range []string{"a", "b", "c"} {
+		dir := filepath.Join(tempDir, "images", img)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// k8s/a.yaml (references image: a)
+	k8sADir := filepath.Join(tempDir, "k8s")
+	if err := os.MkdirAll(k8sADir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifestA := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-a
+spec:
+  template:
+    spec:
+      containers:
+      - name: a
+        image: a
+`
+	if err := os.WriteFile(filepath.Join(k8sADir, "a.yaml"), []byte(manifestA), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// k8s/cm.yaml (references no images)
+	manifestCM := `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-cm
+data:
+  key: value
+`
+	if err := os.WriteFile(filepath.Join(k8sADir, "cm.yaml"), []byte(manifestCM), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// sub/k8s/b.yaml (references image: b)
+	k8sBDir := filepath.Join(tempDir, "sub", "k8s")
+	if err := os.MkdirAll(k8sBDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifestB := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-b
+spec:
+  template:
+    spec:
+      containers:
+      - name: b
+        image: b:latest
+`
+	if err := os.WriteFile(filepath.Join(k8sBDir, "b.yaml"), []byte(manifestB), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	return tempDir
+}
+
+func extractDeployTasks(planTasks []tasks.Task) (builtImages []string, appliedManifests []string) {
+	for _, t := range planTasks {
+		group, ok := t.(*tasks.Group)
+		if !ok {
+			continue
+		}
+		for _, child := range group.Tasks {
+			if pf, ok := child.(*k8s.PortForwardTask); ok {
+				child = pf.Child
+			}
+			if bg, ok := child.(*tasks.Group); ok && bg.Name == "build-images" {
+				for _, bt := range bg.Tasks {
+					if dbt, ok := bt.(*images.DockerBuildTask); ok {
+						builtImages = append(builtImages, dbt.ImageName)
+					}
+				}
+			}
+			if dg, ok := child.(*tasks.Group); ok && dg.Name == "deploy-k8s" {
+				for _, dt := range dg.Tasks {
+					if kat, ok := dt.(*k8s.KubectlApplyTask); ok {
+						appliedManifests = append(appliedManifests, kat.ManifestPath)
+					}
+				}
+			}
+		}
+	}
+	return
+}
+
+func TestDeploy_FixtureRepo_SelectK8s(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: "k8s://autodeploy-system/buildkit",
+	}
+
+	if err := opt.Resolve([]string{"./k8s"}); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+
+	r, err := opt.GetRepo()
+	if err != nil {
+		t.Fatalf("GetRepo failed: %v", err)
+	}
+
+	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost)
+	if err != nil {
+		t.Fatalf("BuildDeployPlan failed: %v", err)
+	}
+
+	builtImages, appliedManifests := extractDeployTasks(planTasks)
+
+	expectedImages := []string{"a"}
+	expectedManifests := []string{
+		filepath.Join(tempDir, "k8s", "a.yaml"),
+		filepath.Join(tempDir, "k8s", "cm.yaml"),
+	}
+
+	if !reflect.DeepEqual(builtImages, expectedImages) {
+		t.Errorf("builtImages = %v, want %v", builtImages, expectedImages)
+	}
+	if !reflect.DeepEqual(appliedManifests, expectedManifests) {
+		t.Errorf("appliedManifests = %v, want %v", appliedManifests, expectedManifests)
+	}
+
+	// Also verify RunDeploy dry-run succeeds
+	if err := RunDeploy(t.Context(), opt); err != nil {
+		t.Fatalf("RunDeploy failed: %v", err)
+	}
+}
+
+func TestDeploy_FixtureRepo_SelectWholeRoot(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: "k8s://autodeploy-system/buildkit",
+	}
+
+	if err := opt.Resolve([]string{"."}); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+
+	r, err := opt.GetRepo()
+	if err != nil {
+		t.Fatalf("GetRepo failed: %v", err)
+	}
+
+	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost)
+	if err != nil {
+		t.Fatalf("BuildDeployPlan failed: %v", err)
+	}
+
+	builtImages, appliedManifests := extractDeployTasks(planTasks)
+
+	// Both images a and b should be built. Unreferenced image c must NOT be built!
+	expectedImages := []string{"a", "b"}
+	expectedManifests := []string{
+		filepath.Join(tempDir, "k8s", "a.yaml"),
+		filepath.Join(tempDir, "k8s", "cm.yaml"),
+		filepath.Join(tempDir, "sub", "k8s", "b.yaml"),
+	}
+
+	if !reflect.DeepEqual(builtImages, expectedImages) {
+		t.Errorf("builtImages = %v, want %v", builtImages, expectedImages)
+	}
+	if !reflect.DeepEqual(appliedManifests, expectedManifests) {
+		t.Errorf("appliedManifests = %v, want %v", appliedManifests, expectedManifests)
+	}
+
+	// Also verify RunDeploy dry-run succeeds
+	if err := RunDeploy(t.Context(), opt); err != nil {
+		t.Fatalf("RunDeploy failed: %v", err)
+	}
+}
+
+func TestDeploy_FixtureRepo_SelectSubK8s(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: "k8s://autodeploy-system/buildkit",
+	}
+
+	if err := opt.Resolve([]string{"sub/k8s"}); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+
+	r, err := opt.GetRepo()
+	if err != nil {
+		t.Fatalf("GetRepo failed: %v", err)
+	}
+
+	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost)
+	if err != nil {
+		t.Fatalf("BuildDeployPlan failed: %v", err)
+	}
+
+	builtImages, appliedManifests := extractDeployTasks(planTasks)
+
+	expectedImages := []string{"b"}
+	expectedManifests := []string{filepath.Join(tempDir, "sub", "k8s", "b.yaml")}
+
+	if !reflect.DeepEqual(builtImages, expectedImages) {
+		t.Errorf("builtImages = %v, want %v", builtImages, expectedImages)
+	}
+	if !reflect.DeepEqual(appliedManifests, expectedManifests) {
+		t.Errorf("appliedManifests = %v, want %v", appliedManifests, expectedManifests)
+	}
+}
+
+func TestDeploy_FixtureRepo_SelectFile(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: "k8s://autodeploy-system/buildkit",
+	}
+
+	if err := opt.Resolve([]string{"./k8s/a.yaml"}); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+
+	r, err := opt.GetRepo()
+	if err != nil {
+		t.Fatalf("GetRepo failed: %v", err)
+	}
+
+	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost)
+	if err != nil {
+		t.Fatalf("BuildDeployPlan failed: %v", err)
+	}
+
+	builtImages, appliedManifests := extractDeployTasks(planTasks)
+
+	expectedImages := []string{"a"}
+	expectedManifests := []string{filepath.Join(tempDir, "k8s", "a.yaml")}
+
+	if !reflect.DeepEqual(builtImages, expectedImages) {
+		t.Errorf("builtImages = %v, want %v", builtImages, expectedImages)
+	}
+	if !reflect.DeepEqual(appliedManifests, expectedManifests) {
+		t.Errorf("appliedManifests = %v, want %v", appliedManifests, expectedManifests)
+	}
+}
+
+func TestDeploy_FixtureRepo_SelectNoImages(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: "k8s://autodeploy-system/buildkit",
+	}
+
+	if err := opt.Resolve([]string{"./k8s/cm.yaml"}); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+
+	r, err := opt.GetRepo()
+	if err != nil {
+		t.Fatalf("GetRepo failed: %v", err)
+	}
+
+	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost)
+	if err != nil {
+		t.Fatalf("BuildDeployPlan failed: %v", err)
+	}
+
+	builtImages, appliedManifests := extractDeployTasks(planTasks)
+
+	if len(builtImages) != 0 {
+		t.Errorf("expected 0 built images for ConfigMap, got %v", builtImages)
+	}
+	expectedManifests := []string{filepath.Join(tempDir, "k8s", "cm.yaml")}
+	if !reflect.DeepEqual(appliedManifests, expectedManifests) {
+		t.Errorf("appliedManifests = %v, want %v", appliedManifests, expectedManifests)
+	}
+
+	// Verify dry-run output does not build any images
+	out := captureStdout(t, func() {
+		if err := RunDeploy(t.Context(), opt); err != nil {
+			t.Fatalf("RunDeploy failed: %v", err)
+		}
+	})
+
+	if strings.Contains(out, "docker-build-") {
+		t.Errorf("expected no docker-build tasks in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "kubectl-apply-cm.yaml") {
+		t.Errorf("expected output to contain kubectl-apply-cm.yaml, got:\n%s", out)
+	}
+}
+
+func TestDeploy_ZeroManifestsMatchError(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	// Create an empty directory in the repo
+	emptyDir := filepath.Join(tempDir, "empty-dir")
+	if err := os.MkdirAll(emptyDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+	}
+
+	// 1. Target is a file with no manifests (e.g. images/a/Dockerfile)
+	err := opt.Resolve([]string{"images/a/Dockerfile"})
+	if err == nil {
+		t.Fatalf("expected error for target matching 0 manifests, got nil")
+	}
+	if !strings.Contains(err.Error(), "no manifests found under") {
+		t.Errorf("expected error to contain 'no manifests found under', got: %v", err)
+	}
+
+	// 2. Target is an existing directory with no manifests
+	err = opt.Resolve([]string{"./empty-dir"})
+	if err == nil {
+		t.Fatalf("expected error for directory matching 0 manifests, got nil")
+	}
+	if !strings.Contains(err.Error(), "no manifests found under") {
+		t.Errorf("expected error to contain 'no manifests found under', got: %v", err)
+	}
+}
+
+func TestDeploy_MissingDockerfile(t *testing.T) {
+	tempDir := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(tempDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tempDir, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tempDir, ".ap", "ap.yaml"), []byte("imagePrefix: images.local\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Manifest references missing-image which has no Dockerfile
+	k8sDir := filepath.Join(tempDir, "k8s")
+	if err := os.MkdirAll(k8sDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app
+spec:
+  template:
+    spec:
+      containers:
+      - name: main
+        image: missing-image
+`
+	if err := os.WriteFile(filepath.Join(k8sDir, "manifest.yaml"), []byte(manifest), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+	}
+
+	err := opt.Resolve([]string{"."})
+	if err == nil {
+		t.Fatalf("expected error for missing Dockerfile, got nil")
+	}
+	if !strings.Contains(err.Error(), "missing-image") {
+		t.Errorf("expected error to mention image name 'missing-image', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "images/missing-image/Dockerfile") {
+		t.Errorf("expected error to mention 'images/missing-image/Dockerfile', got: %v", err)
+	}
+}
+
+func TestDeploy_NonexistentPath(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+	}
+
+	err := opt.Resolve([]string{"./nonexistent"})
+	if err == nil {
+		t.Fatalf("expected error for nonexistent path, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not exist") {
+		t.Errorf("expected error to mention 'does not exist', got: %v", err)
+	}
+}
+
+func TestDeploy_BuildkitAndBuildx(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	r, err := (&RootOptions{RepoRoot: tempDir, APRoot: tempDir}).GetRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Docker buildx path (BuildkitHost empty)
+	optBuildx := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: "",
+	}
+	if err := optBuildx.Resolve([]string{"./k8s"}); err != nil {
+		t.Fatalf("optBuildx.Resolve failed: %v", err)
+	}
+	tasksBuildx, err := BuildDeployPlan(optBuildx, r, "")
+	if err != nil {
+		t.Fatalf("BuildDeployPlan buildx failed: %v", err)
+	}
+	for _, tsk := range tasksBuildx {
+		group := tsk.(*tasks.Group)
+		for _, c := range group.Tasks {
+			if pf, ok := c.(*k8s.PortForwardTask); ok {
+				c = pf.Child
+			}
+			if bg, ok := c.(*tasks.Group); ok && bg.Name == "build-images" {
+				for _, bt := range bg.Tasks {
+					dbt := bt.(*images.DockerBuildTask)
+					if dbt.BuildkitHost != "" {
+						t.Errorf("expected empty BuildkitHost for buildx, got %q", dbt.BuildkitHost)
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Buildctl path (BuildkitHost set)
+	customHost := "k8s://custom-ns/custom-buildkit"
+	optBuildctl := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: customHost,
+	}
+	if err := optBuildctl.Resolve([]string{"./k8s"}); err != nil {
+		t.Fatalf("optBuildctl.Resolve failed: %v", err)
+	}
+	tasksBuildctl, err := BuildDeployPlan(optBuildctl, r, customHost)
+	if err != nil {
+		t.Fatalf("BuildDeployPlan buildctl failed: %v", err)
+	}
+	for _, tsk := range tasksBuildctl {
+		group := tsk.(*tasks.Group)
+		for _, c := range group.Tasks {
+			if pf, ok := c.(*k8s.PortForwardTask); ok {
+				c = pf.Child
+			}
+			if bg, ok := c.(*tasks.Group); ok && bg.Name == "build-images" {
+				for _, bt := range bg.Tasks {
+					dbt := bt.(*images.DockerBuildTask)
+					if dbt.BuildkitHost != customHost {
+						t.Errorf("expected BuildkitHost %q, got %q", customHost, dbt.BuildkitHost)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestDeploy_CobraCommand_DryRun(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	rootCmd := BuildRootCommand()
+	rootCmd.SetArgs([]string{"--root=" + tempDir, "deploy", "--dry-run", "--buildkit-host=k8s://autodeploy-system/buildkit", "./k8s"})
+
+	if err := rootCmd.Execute(); err != nil {
+		t.Fatalf("rootCmd.Execute() failed: %v", err)
+	}
+}
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origStdout := os.Stdout
+	os.Stdout = w
+	defer func() {
+		os.Stdout = origStdout
+	}()
+
+	fn()
+
+	w.Close()
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
+}
+
+func TestDeploy_DryRun_StdoutOutput(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	// 1. ap deploy --dry-run ./k8s
+	optK8s := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: "k8s://autodeploy-system/buildkit",
+	}
+	if err := optK8s.Resolve([]string{"./k8s"}); err != nil {
+		t.Fatalf("optK8s.Resolve failed: %v", err)
+	}
+
+	outK8s := captureStdout(t, func() {
+		if err := RunDeploy(t.Context(), optK8s); err != nil {
+			t.Fatalf("RunDeploy failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(outK8s, "docker-build-a") {
+		t.Errorf("expected outK8s to contain docker-build-a, got:\n%s", outK8s)
+	}
+	if !strings.Contains(outK8s, "kubectl-apply-a.yaml") {
+		t.Errorf("expected outK8s to contain kubectl-apply-a.yaml, got:\n%s", outK8s)
+	}
+	if strings.Contains(outK8s, "docker-build-b") {
+		t.Errorf("expected outK8s to NOT contain docker-build-b, got:\n%s", outK8s)
+	}
+	if strings.Contains(outK8s, "docker-build-c") {
+		t.Errorf("expected outK8s to NOT contain docker-build-c, got:\n%s", outK8s)
+	}
+	if strings.Contains(outK8s, "b.yaml") {
+		t.Errorf("expected outK8s to NOT contain b.yaml, got:\n%s", outK8s)
+	}
+
+	// 2. ap deploy --dry-run .
+	optDot := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: "k8s://autodeploy-system/buildkit",
+	}
+	if err := optDot.Resolve([]string{"."}); err != nil {
+		t.Fatalf("optDot.Resolve failed: %v", err)
+	}
+
+	outDot := captureStdout(t, func() {
+		if err := RunDeploy(t.Context(), optDot); err != nil {
+			t.Fatalf("RunDeploy failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(outDot, "docker-build-a") {
+		t.Errorf("expected outDot to contain docker-build-a, got:\n%s", outDot)
+	}
+	if !strings.Contains(outDot, "docker-build-b") {
+		t.Errorf("expected outDot to contain docker-build-b, got:\n%s", outDot)
+	}
+	if !strings.Contains(outDot, "kubectl-apply-a.yaml") {
+		t.Errorf("expected outDot to contain kubectl-apply-a.yaml, got:\n%s", outDot)
+	}
+	if !strings.Contains(outDot, "kubectl-apply-b.yaml") {
+		t.Errorf("expected outDot to contain kubectl-apply-b.yaml, got:\n%s", outDot)
+	}
+	if strings.Contains(outDot, "docker-build-c") {
+		t.Errorf("expected outDot to NOT contain docker-build-c (unreferenced image), got:\n%s", outDot)
+	}
+}
+
+func TestBuildDeployPlans_Direct(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	r, err := (&RootOptions{RepoRoot: tempDir, APRoot: tempDir}).GetRepo()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plans, err := buildDeployPlans(r, tempDir, tempDir, []string{"./k8s"})
+	if err != nil {
+		t.Fatalf("buildDeployPlans failed: %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("expected 1 plan, got %d", len(plans))
+	}
+	if len(plans[0].manifests) != 2 {
+		t.Errorf("expected 2 manifests (a.yaml, cm.yaml), got %d", len(plans[0].manifests))
+	}
+	if !reflect.DeepEqual(plans[0].imageNames, []string{"a"}) {
+		t.Errorf("expected imageNames [a], got %v", plans[0].imageNames)
 	}
 }
