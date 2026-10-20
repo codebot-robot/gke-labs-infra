@@ -18,10 +18,13 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -31,6 +34,9 @@ type DeployOptions struct {
 	*RootOptions
 	SkipPush     bool
 	BuildkitHost string
+	Targets      []string
+
+	plans []deployPlan
 }
 
 // BuildDeployCommand constructs the cobra command for "deploy".
@@ -57,6 +63,248 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 	return cmd
 }
 
+// Resolve resolves the target paths based on args for deploy.
+func (opt *DeployOptions) Resolve(args []string) error {
+	opt.Targets = args
+	if opt.RepoRoot == "" {
+		return fmt.Errorf("repo root is not set")
+	}
+
+	if opt.RootFlag != "" {
+		if err := opt.ResolveRoot(); err != nil {
+			return err
+		}
+	}
+
+	r, err := opt.GetRepo()
+	if err != nil {
+		return err
+	}
+
+	currentAPRoot := opt.APRoot
+	if currentAPRoot == "" && len(opt.APRoots) == 1 {
+		currentAPRoot = opt.APRoots[0]
+	}
+
+	plans, err := buildDeployPlans(r, opt.RepoRoot, currentAPRoot, args)
+	if err != nil {
+		return err
+	}
+	opt.plans = plans
+
+	var roots []string
+	for _, p := range plans {
+		roots = append(roots, p.apRoot)
+	}
+	opt.APRoots = roots
+	return nil
+}
+
+type deployPlan struct {
+	apRoot     string
+	manifests  []string
+	imageNames []string
+}
+
+type targetFilter struct {
+	arg  string
+	path string
+}
+
+func resolveDeployTargets(r *repo.Repo, repoRoot, currentAPRoot string, targets []string) ([]string, map[string]bool, map[string][]targetFilter, error) {
+	if len(targets) == 0 {
+		targets = []string{"."}
+	}
+
+	wholeRoot := make(map[string]bool)
+	filtersByRoot := make(map[string][]targetFilter)
+	var roots []string
+	seenRoot := make(map[string]bool)
+
+	addRoot := func(root string) {
+		if !seenRoot[root] {
+			seenRoot[root] = true
+			roots = append(roots, root)
+		}
+	}
+
+	for _, arg := range targets {
+		switch arg {
+		case ".":
+			root := currentAPRoot
+			if root == "" {
+				root = repoRoot
+			}
+			wholeRoot[root] = true
+			addRoot(root)
+		case "./...":
+			base := currentAPRoot
+			if base == "" {
+				base = repoRoot
+			}
+			all, err := config.FindAllAPRoots(r, base)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			if len(all) == 0 {
+				all = []string{base}
+			}
+			for _, root := range all {
+				wholeRoot[root] = true
+				addRoot(root)
+			}
+		case "//...":
+			all, err := config.FindAllAPRoots(r, repoRoot)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			if len(all) == 0 {
+				all = []string{repoRoot}
+			}
+			for _, root := range all {
+				wholeRoot[root] = true
+				addRoot(root)
+			}
+		default:
+			absPath := config.ResolveTargetPath(repoRoot, currentAPRoot, arg)
+			if !r.FileExists(absPath) && !r.DirExists(absPath) && absPath != repoRoot {
+				return nil, nil, nil, fmt.Errorf("target path %q does not exist", arg)
+			}
+			apRoot := r.APRootFor(absPath)
+			if apRoot == "" {
+				return nil, nil, nil, fmt.Errorf("target path %q is not inside an AP root", arg)
+			}
+			addRoot(apRoot)
+			if absPath == apRoot {
+				wholeRoot[apRoot] = true
+			} else {
+				filtersByRoot[apRoot] = append(filtersByRoot[apRoot], targetFilter{arg: arg, path: absPath})
+			}
+		}
+	}
+
+	sort.Strings(roots)
+	return roots, wholeRoot, filtersByRoot, nil
+}
+
+func selectManifests(r *repo.Repo, apRoot string, whole bool, filters []targetFilter) ([]string, error) {
+	allManifests := r.Under(apRoot).FindManifests()
+	if whole || len(filters) == 0 {
+		return allManifests, nil
+	}
+
+	seenManifest := make(map[string]bool)
+	var selectedManifests []string
+	for _, f := range filters {
+		matched := false
+		for _, m := range allManifests {
+			cleanM := filepath.Clean(m)
+			if cleanM == f.path || strings.HasPrefix(cleanM, f.path+string(filepath.Separator)) {
+				matched = true
+				if !seenManifest[cleanM] {
+					seenManifest[cleanM] = true
+					selectedManifests = append(selectedManifests, cleanM)
+				}
+			}
+		}
+		if !matched {
+			return nil, fmt.Errorf("no manifests found under %q", f.arg)
+		}
+	}
+	sort.Strings(selectedManifests)
+	return selectedManifests, nil
+}
+
+func referencedImages(r *repo.Repo, apRoot, repoRoot string, manifests []string) ([]string, error) {
+	availableImages, err := images.FindImageNames(r, apRoot)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find available images in %s: %w", apRoot, err)
+	}
+	availableSet := make(map[string]bool, len(availableImages))
+	for _, img := range availableImages {
+		availableSet[img] = true
+	}
+
+	referencedSet := make(map[string]bool)
+	for _, manifest := range manifests {
+		imgs, err := k8s.FindReferencedImagesInFile(manifest)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse manifest %s: %w", manifest, err)
+		}
+		for _, img := range imgs {
+			if !availableSet[img] {
+				relManifest, err := filepath.Rel(repoRoot, manifest)
+				if err != nil {
+					relManifest = manifest
+				}
+				return nil, fmt.Errorf("manifest %s references placeholder image %q, but no images/%s/Dockerfile was found in %s", relManifest, img, img, apRoot)
+			}
+			referencedSet[img] = true
+		}
+	}
+
+	var imageNames []string
+	for img := range referencedSet {
+		imageNames = append(imageNames, img)
+	}
+	sort.Strings(imageNames)
+	return imageNames, nil
+}
+
+func buildDeployPlans(r *repo.Repo, repoRoot, currentAPRoot string, targets []string) ([]deployPlan, error) {
+	roots, wholeRoot, filtersByRoot, err := resolveDeployTargets(r, repoRoot, currentAPRoot, targets)
+	if err != nil {
+		return nil, err
+	}
+
+	var plans []deployPlan
+	for _, apRoot := range roots {
+		manifests, err := selectManifests(r, apRoot, wholeRoot[apRoot], filtersByRoot[apRoot])
+		if err != nil {
+			return nil, err
+		}
+
+		imageNames, err := referencedImages(r, apRoot, repoRoot, manifests)
+		if err != nil {
+			return nil, err
+		}
+
+		plans = append(plans, deployPlan{
+			apRoot:     apRoot,
+			manifests:  manifests,
+			imageNames: imageNames,
+		})
+	}
+	return plans, nil
+}
+
+// BuildDeployPlan constructs the task tree for deploying artifacts according to DeployOptions.
+func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string) ([]tasks.Task, error) {
+	return buildDeployTasks(r, opt.plans, !opt.SkipPush, buildkitHost)
+}
+
+func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string) ([]tasks.Task, error) {
+	var allTasks []tasks.Task
+	for _, plan := range plans {
+		group := &tasks.Group{
+			Name: fmt.Sprintf("deploy-%s", filepath.Base(plan.apRoot)),
+		}
+
+		buildTasks, err := images.BuildTasksForImages(r.Under(plan.apRoot), plan.apRoot, push, buildkitHost, plan.imageNames)
+		if err != nil {
+			return nil, fmt.Errorf("build failed during deploy for %s: %w", plan.apRoot, err)
+		}
+		group.Tasks = append(group.Tasks, buildTasks)
+
+		deployTasks := k8s.DeployTasksForManifests(plan.manifests)
+		group.Tasks = append(group.Tasks, deployTasks)
+
+		allTasks = append(allTasks, group)
+	}
+
+	return allTasks, nil
+}
+
 // RunDeploy executes the business logic for the "deploy" command.
 func RunDeploy(ctx context.Context, opt DeployOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
@@ -81,26 +329,9 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for deploy")
 	}
 
-	var allTasks []tasks.Task
-	for _, apRoot := range opt.APRoots {
-		group := &tasks.Group{
-			Name: fmt.Sprintf("deploy-%s", filepath.Base(apRoot)),
-		}
-
-		// Deploy typically also builds
-		buildTasks, err := images.BuildTasks(r.Under(apRoot), apRoot, !opt.SkipPush, buildkitHost)
-		if err != nil {
-			return fmt.Errorf("build failed during deploy for %s: %w", apRoot, err)
-		}
-		group.Tasks = append(group.Tasks, buildTasks)
-
-		deployTasks, err := k8s.DeployTasks(r.Under(apRoot), apRoot)
-		if err != nil {
-			return fmt.Errorf("deploy failed for %s: %w", apRoot, err)
-		}
-		group.Tasks = append(group.Tasks, deployTasks)
-
-		allTasks = append(allTasks, group)
+	allTasks, err := BuildDeployPlan(opt, r, buildkitHost)
+	if err != nil {
+		return err
 	}
 
 	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})

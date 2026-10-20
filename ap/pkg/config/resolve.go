@@ -68,58 +68,8 @@ func ResolveTargets(r *repo.Repo, repoRoot, currentAPRoot string, args []string)
 					resolved = []string{repoRoot}
 				}
 			}
-		case strings.HasPrefix(arg, "//"):
-			// Bazel style absolute path
-			pathPart := strings.TrimPrefix(arg, "//")
-			// Strip any target suffix for now (e.g. :foo) since we are focusing on directory specifier
-			if idx := strings.Index(pathPart, ":"); idx != -1 {
-				pathPart = pathPart[:idx]
-			}
-			if pathPart == "" {
-				pathPart = "." // // is the root
-			}
-
-			path := filepath.Join(repoRoot, pathPart)
-			if strings.HasSuffix(path, "/...") {
-				basePath := strings.TrimSuffix(path, "/...")
-				resolved, err = FindAllAPRoots(r, basePath)
-				if err != nil {
-					return nil, fmt.Errorf("failed to find AP roots in %s: %w", basePath, err)
-				}
-				if len(resolved) == 0 {
-					resolved = []string{basePath}
-				}
-			} else {
-				// Should we check if it's an AP root?
-				// Just add it and let the caller or discovery handle if it's invalid
-				resolved = []string{path}
-			}
-		case strings.HasPrefix(arg, "./"):
-			// Go style relative path
-			pathPart := arg
-			if idx := strings.Index(pathPart, ":"); idx != -1 {
-				pathPart = pathPart[:idx]
-			}
-			path := filepath.Join(currentAPRoot, pathPart)
-			if strings.HasSuffix(path, "/...") {
-				basePath := strings.TrimSuffix(path, "/...")
-				resolved, err = FindAllAPRoots(r, basePath)
-				if err != nil {
-					return nil, fmt.Errorf("failed to find AP roots in %s: %w", basePath, err)
-				}
-				if len(resolved) == 0 {
-					resolved = []string{basePath}
-				}
-			} else {
-				resolved = []string{path}
-			}
 		default:
-			// Could be a relative path like foo/bar
-			pathPart := arg
-			if idx := strings.Index(pathPart, ":"); idx != -1 {
-				pathPart = pathPart[:idx]
-			}
-			path := filepath.Join(currentAPRoot, pathPart)
+			path := ResolveTargetPath(repoRoot, currentAPRoot, arg)
 			if strings.HasSuffix(path, "/...") {
 				basePath := strings.TrimSuffix(path, "/...")
 				resolved, err = FindAllAPRoots(r, basePath)
@@ -145,4 +95,31 @@ func ResolveTargets(r *repo.Repo, repoRoot, currentAPRoot string, args []string)
 	}
 
 	return roots, nil
+}
+
+// ResolveTargetPath converts a target argument (such as "//foo", "./bar", "baz", or absolute path)
+// into an absolute filesystem path, stripping any ":label" suffix.
+func ResolveTargetPath(repoRoot, currentAPRoot, arg string) string {
+	if strings.HasPrefix(arg, "//") {
+		pathPart := strings.TrimPrefix(arg, "//")
+		if idx := strings.Index(pathPart, ":"); idx != -1 {
+			pathPart = pathPart[:idx]
+		}
+		if pathPart == "" {
+			pathPart = "."
+		}
+		return filepath.Clean(filepath.Join(repoRoot, pathPart))
+	}
+	if filepath.IsAbs(arg) {
+		return filepath.Clean(arg)
+	}
+	pathPart := arg
+	if idx := strings.Index(pathPart, ":"); idx != -1 {
+		pathPart = pathPart[:idx]
+	}
+	base := currentAPRoot
+	if base == "" {
+		base = repoRoot
+	}
+	return filepath.Clean(filepath.Join(base, pathPart))
 }

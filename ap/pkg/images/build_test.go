@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -144,6 +145,133 @@ func TestBuildTasks(t *testing.T) {
 
 	if !found {
 		t.Errorf("did not find DockerBuildTask for foo")
+	}
+}
+
+func TestFindImageNames(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(tmpDir, ".ap"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "images", "img-b"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "images", "img-b", "Dockerfile"), []byte("FROM scratch"), 0644)
+	os.MkdirAll(filepath.Join(tmpDir, "images", "img-a"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "images", "img-a", "Dockerfile"), []byte("FROM scratch"), 0644)
+
+	// Child AP root image should be excluded
+	os.MkdirAll(filepath.Join(tmpDir, "sub", ".ap"), 0755)
+	os.MkdirAll(filepath.Join(tmpDir, "sub", "images", "img-c"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "sub", "images", "img-c", "Dockerfile"), []byte("FROM scratch"), 0644)
+
+	r, err := repo.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	names, err := FindImageNames(r, tmpDir)
+	if err != nil {
+		t.Fatalf("FindImageNames failed: %v", err)
+	}
+
+	expected := []string{"img-a", "img-b"}
+	if !reflect.DeepEqual(names, expected) {
+		t.Errorf("FindImageNames() = %v, want %v", names, expected)
+	}
+}
+
+func TestBuildTasksForImages(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	os.MkdirAll(filepath.Join(tmpDir, "images", "a"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "images", "a", "Dockerfile"), []byte("FROM scratch"), 0644)
+	os.MkdirAll(filepath.Join(tmpDir, "images", "b"), 0755)
+	os.WriteFile(filepath.Join(tmpDir, "images", "b", "Dockerfile"), []byte("FROM scratch"), 0644)
+
+	r, err := repo.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Filter for image "a" only
+	taskA, err := BuildTasksForImages(r, tmpDir, false, "", []string{"a"})
+	if err != nil {
+		t.Fatalf("BuildTasksForImages failed: %v", err)
+	}
+	groupA, ok := taskA.(*tasks.Group)
+	if !ok {
+		t.Fatalf("expected *tasks.Group, got %T", taskA)
+	}
+	if len(groupA.Tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(groupA.Tasks))
+	}
+	btA, ok := groupA.Tasks[0].(*DockerBuildTask)
+	if !ok || btA.ImageName != "a" {
+		t.Errorf("expected DockerBuildTask for image a, got %+v", groupA.Tasks[0])
+	}
+	if btA.BuildkitHost != "" {
+		t.Errorf("expected empty BuildkitHost for buildx path, got %q", btA.BuildkitHost)
+	}
+
+	// 2. Buildctl path with image "b" only
+	buildkitHost := "k8s://autodeploy-system/buildkit"
+	taskB, err := BuildTasksForImages(r, tmpDir, true, buildkitHost, []string{"b"})
+	if err != nil {
+		t.Fatalf("BuildTasksForImages with buildkit failed: %v", err)
+	}
+	groupB, ok := taskB.(*tasks.Group)
+	if !ok {
+		t.Fatalf("expected *tasks.Group, got %T", taskB)
+	}
+	if len(groupB.Tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(groupB.Tasks))
+	}
+	btB, ok := groupB.Tasks[0].(*DockerBuildTask)
+	if !ok || btB.ImageName != "b" {
+		t.Errorf("expected DockerBuildTask for image b, got %+v", groupB.Tasks[0])
+	}
+	if btB.BuildkitHost != buildkitHost {
+		t.Errorf("expected BuildkitHost %q, got %q", buildkitHost, btB.BuildkitHost)
+	}
+	if !btB.Push {
+		t.Errorf("expected Push=true, got %v", btB.Push)
+	}
+
+	// 3. Filter with empty slice -> 0 tasks
+	taskEmpty, err := BuildTasksForImages(r, tmpDir, false, "", []string{})
+	if err != nil {
+		t.Fatalf("BuildTasksForImages with empty filter failed: %v", err)
+	}
+	groupEmpty, ok := taskEmpty.(*tasks.Group)
+	if !ok {
+		t.Fatalf("expected *tasks.Group, got %T", taskEmpty)
+	}
+	if len(groupEmpty.Tasks) != 0 {
+		t.Errorf("expected 0 tasks for empty filter, got %d", len(groupEmpty.Tasks))
+	}
+
+	// 4. Filter with nil slice -> 0 tasks (always filters)
+	taskNil, err := BuildTasksForImages(r, tmpDir, false, "", nil)
+	if err != nil {
+		t.Fatalf("BuildTasksForImages with nil filter failed: %v", err)
+	}
+	groupNil, ok := taskNil.(*tasks.Group)
+	if !ok {
+		t.Fatalf("expected *tasks.Group, got %T", taskNil)
+	}
+	if len(groupNil.Tasks) != 0 {
+		t.Errorf("expected 0 tasks for nil filter, got %d", len(groupNil.Tasks))
+	}
+
+	// 5. BuildTasks (without filter) builds all images (a and b)
+	taskAll, err := BuildTasks(r, tmpDir, false, "")
+	if err != nil {
+		t.Fatalf("BuildTasks failed: %v", err)
+	}
+	groupAll, ok := taskAll.(*tasks.Group)
+	if !ok {
+		t.Fatalf("expected *tasks.Group, got %T", taskAll)
+	}
+	if len(groupAll.Tasks) != 2 {
+		t.Fatalf("expected 2 tasks for BuildTasks, got %d", len(groupAll.Tasks))
 	}
 }
 

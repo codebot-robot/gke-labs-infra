@@ -32,6 +32,52 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// FindPlaceholderImages parses YAML content and returns a deduplicated, sorted slice
+// of placeholder image names referenced in the content.
+func FindPlaceholderImages(content string) ([]string, error) {
+	decoder := yaml.NewDecoder(strings.NewReader(content))
+	var placeholders []*yaml.Node
+	for {
+		var node yaml.Node
+		err := decoder.Decode(&node)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode YAML: %w", err)
+		}
+		placeholders = collectPlaceholders(&node, placeholders, nil)
+	}
+
+	if len(placeholders) == 0 {
+		return nil, nil
+	}
+
+	seen := make(map[string]bool)
+	var names []string
+	for _, p := range placeholders {
+		base, ok := isPlaceholderImage(p.Value)
+		if !ok {
+			continue
+		}
+		if !seen[base] {
+			seen[base] = true
+			names = append(names, base)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// FindReferencedImagesInFile reads a YAML manifest file and returns referenced placeholder image names.
+func FindReferencedImagesInFile(path string) ([]string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s: %w", path, err)
+	}
+	return FindPlaceholderImages(string(content))
+}
+
 func replacePlaceholderImages(content string, imageRepository string, imageTag string) (string, error) {
 	decoder := yaml.NewDecoder(strings.NewReader(content))
 	var placeholders []*yaml.Node
@@ -340,13 +386,8 @@ func getCRDNames(content []byte) ([]string, error) {
 	return names, nil
 }
 
-// DeployTasks returns a task group for deploying all k8s manifests found in k8s directories.
-func DeployTasks(r *repo.Repo, root string) (tasks.Task, error) {
-	manifests, err := findManifests(r, root)
-	if err != nil {
-		return nil, err
-	}
-
+// DeployTasksForManifests returns a task group for deploying the specified k8s manifests.
+func DeployTasksForManifests(manifests []string) tasks.Task {
 	var deployTasks []tasks.Task
 	for _, manifest := range manifests {
 		deployTasks = append(deployTasks, &KubectlApplyTask{
@@ -357,7 +398,16 @@ func DeployTasks(r *repo.Repo, root string) (tasks.Task, error) {
 	return &tasks.Group{
 		Name:  "deploy-k8s",
 		Tasks: deployTasks,
-	}, nil
+	}
+}
+
+// DeployTasks returns a task group for deploying all k8s manifests found in k8s directories.
+func DeployTasks(r *repo.Repo, root string) (tasks.Task, error) {
+	manifests, err := findManifests(r, root)
+	if err != nil {
+		return nil, err
+	}
+	return DeployTasksForManifests(manifests), nil
 }
 
 // Deploy deploys k8s manifests found in k8s directories.

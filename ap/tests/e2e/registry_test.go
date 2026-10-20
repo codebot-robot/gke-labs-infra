@@ -39,11 +39,19 @@ func TestInClusterRegistry(t *testing.T) {
 	os.Setenv("IMAGE_PREFIX", "images.local")
 	os.Setenv("IMAGE_TAG", "e2e")
 
-	// 1. Build and push image
-	// We'll build the examples-helloworld image
-	h.RunCmd("go", "run", "./ap", "build", "--root=autodeploy/examples/helloworld", "--push")
+	// Create a temporary directory for the self-contained test root
+	tmpDir, err := os.MkdirTemp("", "ap-e2e-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
 
-	// 2. Deploy using the image
+	// Copy autodeploy/examples/helloworld into tmpDir so it has .ap/, go.mod, and images/
+	if err := os.CopyFS(tmpDir, os.DirFS(filepath.Join(repoRoot, "autodeploy", "examples", "helloworld"))); err != nil {
+		t.Fatalf("failed to copy examples/helloworld to temp dir: %v", err)
+	}
+
+	// Deploy using the image
 	// We'll create a simple manifest that uses the image
 	// examples-helloworld:latest is a placeholder that ap deploy will replace.
 	manifest := `
@@ -59,34 +67,14 @@ spec:
     command: ["/bin/sh", "-c", "echo hello"]
 `
 
-	// Create a temporary directory for the test manifests
-	tmpDir, err := os.MkdirTemp("", "ap-e2e-test")
-	if err != nil {
-		t.Fatalf("failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	k8sDir := filepath.Join(tmpDir, "k8s")
-	if err := os.MkdirAll(k8sDir, 0755); err != nil {
-		t.Fatalf("failed to create k8s dir: %v", err)
-	}
-
-	if err := os.WriteFile(filepath.Join(k8sDir, "pod.yaml"), []byte(manifest), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "k8s", "pod.yaml"), []byte(manifest), 0644); err != nil {
 		t.Fatalf("failed to write pod manifest: %v", err)
 	}
 
-	// Create a dummy .ap/ap.yaml so ap recognizes it as a root
-	if err := os.MkdirAll(filepath.Join(tmpDir, ".ap"), 0755); err != nil {
-		t.Fatalf("failed to create .ap dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(tmpDir, ".ap", "ap.yaml"), []byte("name: test-app"), 0644); err != nil {
-		t.Fatalf("failed to write ap.yaml: %v", err)
-	}
-
-	// Run ap deploy
+	// Run ap deploy (which builds, pushes, and applies in one root)
 	h.RunCmd("go", "run", "./ap", "deploy", "--root="+tmpDir)
 
-	// 3. Verify the pod was created and has the correct image
+	// Verify the pod was created and has the correct image
 	image := h.RunCmd("kubectl", "get", "pod", "test-pod", "-n", "default", "-o", "jsonpath={.spec.containers[0].image}")
 	expectedImage := "images.local/examples-helloworld:e2e"
 	if image != expectedImage {

@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
@@ -288,8 +289,31 @@ func (t *DockerBuildTask) GetChildren() []tasks.Task {
 	return nil
 }
 
-// BuildTasks returns a task group for building all docker images found in images/<name>/Dockerfile.
-func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string) (tasks.Task, error) {
+// FindImageNames returns the sorted names of all Docker images defined in the given root.
+func FindImageNames(r *repo.Repo, root string) ([]string, error) {
+	dockerfiles, err := findDockerfiles(r, root)
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for _, dockerfile := range dockerfiles {
+		relPath, err := filepath.Rel(root, dockerfile)
+		if err != nil {
+			continue
+		}
+
+		name := getImageName(relPath)
+		if name != "" {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// BuildTasksForImages returns a task group for building only the specified docker images.
+func BuildTasksForImages(r *repo.Repo, root string, push bool, buildkitHost string, imageNames []string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
@@ -298,6 +322,11 @@ func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string) (task
 	dockerfiles, err := findDockerfiles(r, root)
 	if err != nil {
 		return nil, err
+	}
+
+	filter := make(map[string]bool, len(imageNames))
+	for _, name := range imageNames {
+		filter[name] = true
 	}
 
 	var buildTasks []tasks.Task
@@ -309,6 +338,10 @@ func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string) (task
 
 		name := getImageName(relPath)
 		if name == "" {
+			continue
+		}
+
+		if !filter[name] {
 			continue
 		}
 
@@ -341,6 +374,15 @@ func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string) (task
 	}
 
 	return rootTask, nil
+}
+
+// BuildTasks returns a task group for building all docker images found in images/<name>/Dockerfile.
+func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string) (tasks.Task, error) {
+	allImages, err := FindImageNames(r, root)
+	if err != nil {
+		return nil, err
+	}
+	return BuildTasksForImages(r, root, push, buildkitHost, allImages)
 }
 
 // Build builds docker images found in images/<name>/Dockerfile.
