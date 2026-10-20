@@ -17,6 +17,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -103,6 +104,158 @@ func TestLoadDefault(t *testing.T) {
 	}
 	if cfg.DroppedErrorsUseDefaultExcludes() != true {
 		t.Errorf("expected default droppederrors useDefaultExcludes to be true")
+	}
+	toi := cfg.TestOnlyImports()
+	if !toi.IsEnabled() {
+		t.Errorf("expected default testOnlyImports enabled to be true")
+	}
+	if !toi.IsError() {
+		t.Errorf("expected default testOnlyImports error to be true (error mode)")
+	}
+	if len(toi.PackagesOrDefault()) != 4 {
+		t.Errorf("expected 4 default testOnlyImports packages, got %d", len(toi.PackagesOrDefault()))
+	}
+}
+
+func TestTestOnlyImportsConfig(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "ap-testonlyimports-config-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  testOnlyImports:
+    mode: warn
+    packages:
+      - github.com/google/go-cmp
+      - example.com/custom
+    skipGenerated: true
+    skipTests: true
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	toi := cfg.TestOnlyImports()
+	if toi == nil {
+		t.Fatalf("expected TestOnlyImports to not be nil")
+	}
+	if !toi.IsEnabled() {
+		t.Errorf("expected testOnlyImports to be enabled")
+	}
+	if toi.IsError() {
+		t.Errorf("expected testOnlyImports not to be error mode (warn)")
+	}
+	if toi.Mode != "warn" {
+		t.Errorf("expected mode warn, got %q", toi.Mode)
+	}
+	pkgs := toi.PackagesOrDefault()
+	if len(pkgs) != 2 || pkgs[0] != "github.com/google/go-cmp" || pkgs[1] != "example.com/custom" {
+		t.Errorf("unexpected packages list: %v", pkgs)
+	}
+	if toi.SkipGenerated == nil || *toi.SkipGenerated != true {
+		t.Errorf("expected skipGenerated to be true")
+	}
+	if toi.SkipTests == nil || *toi.SkipTests != true {
+		t.Errorf("expected skipTests to be true")
+	}
+}
+
+func TestConfig_InvalidTestOnlyImportsMode(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "ap-invalid-mode-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  testOnlyImports:
+    mode: invalid
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Load(tempDir)
+	if err == nil {
+		t.Fatalf("expected Load to fail on invalid testOnlyImports mode")
+	}
+	if !strings.Contains(err.Error(), "invalid testOnlyImports mode") {
+		t.Errorf("expected error to mention 'invalid testOnlyImports mode', got: %v", err)
+	}
+}
+
+func TestCommonLinterConfig_ModeIgnore(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  unused:
+    mode: ignore
+  replaceEmptyInterfaceWithAny:
+    mode: ignore
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.IsUnusedEnabled() {
+		t.Errorf("expected unused to be disabled when mode is ignore")
+	}
+	if cfg.IsReplaceEmptyInterfaceWithAnyEnabled() {
+		t.Errorf("expected replaceEmptyInterfaceWithAny to be disabled when mode is ignore")
+	}
+}
+
+func TestConfig_InvalidUnusedMode(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  unused:
+    mode: badmode
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(tempDir)
+	if err == nil {
+		t.Fatalf("expected Load to fail on invalid unused mode")
+	}
+	if !strings.Contains(err.Error(), "invalid unused mode") {
+		t.Errorf("expected error to mention 'invalid unused mode', got: %v", err)
 	}
 }
 

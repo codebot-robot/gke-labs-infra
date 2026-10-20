@@ -121,6 +121,27 @@ lint:
 			wantKey:    `"lint.droppedErrors.basline"`,
 			wantDidYou: `"baseline"`,
 		},
+		{
+			name: "typo in lint.testOnlyImports key",
+			yaml: `
+lint:
+  testOnlyImprts:
+    mode: error
+`,
+			wantKey:    `"lint.testOnlyImprts"`,
+			wantDidYou: `"testOnlyImports"`,
+		},
+		{
+			name: "typo in lint.testOnlyImports packages",
+			yaml: `
+lint:
+  testOnlyImports:
+    pakcages:
+      - github.com/google/go-cmp
+`,
+			wantKey:    `"lint.testOnlyImports.pakcages"`,
+			wantDidYou: `"packages"`,
+		},
 	}
 
 	for _, tc := range tests {
@@ -168,7 +189,7 @@ lint:
   skipGenerated: false
   skipTests: false
   unused:
-    enabled: true
+    mode: error
     skipGenerated: false
     skipTests: true
   testcontext:
@@ -178,7 +199,7 @@ lint:
   unusedparameters:
     mode: warn
   replaceEmptyInterfaceWithAny:
-    enabled: true
+    mode: error
     skipGenerated: true
     skipTests: false
   droppedErrors:
@@ -191,6 +212,12 @@ lint:
     useDefaultExcludes: true
     goos:
       - linux
+  testOnlyImports:
+    mode: error
+    packages:
+      - github.com/google/go-cmp
+    skipGenerated: true
+    skipTests: true
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -247,6 +274,25 @@ lint:
 	}
 	if cfg.DroppedErrorsBaseline() != ".ap/droppederrors-baseline.txt" {
 		t.Errorf("expected baseline .ap/droppederrors-baseline.txt, got %q", cfg.DroppedErrorsBaseline())
+	}
+	toi := cfg.TestOnlyImports()
+	if toi == nil {
+		t.Fatalf("expected TestOnlyImports to not be nil")
+	}
+	if !toi.IsEnabled() {
+		t.Errorf("expected IsEnabled to be true")
+	}
+	if !toi.IsError() {
+		t.Errorf("expected IsError to be true")
+	}
+	if len(toi.PackagesOrDefault()) != 1 || toi.PackagesOrDefault()[0] != "github.com/google/go-cmp" {
+		t.Errorf("expected TestOnlyImports packages [github.com/google/go-cmp], got %v", toi.PackagesOrDefault())
+	}
+	if toi.SkipGenerated == nil || *toi.SkipGenerated != true {
+		t.Errorf("expected TestOnlyImports.SkipGenerated to be true")
+	}
+	if toi.SkipTests == nil || *toi.SkipTests != true {
+		t.Errorf("expected TestOnlyImports.SkipTests to be true")
 	}
 }
 
