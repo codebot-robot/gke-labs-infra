@@ -37,6 +37,15 @@ spec:
         - containerPort: 2375
         securityContext:
           privileged: true
+        resources:
+          requests:
+            ephemeral-storage: 10Gi
+        volumeMounts:
+        - name: buildkit-cache
+          mountPath: /var/lib/buildkit
+      volumes:
+      - name: buildkit-cache
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

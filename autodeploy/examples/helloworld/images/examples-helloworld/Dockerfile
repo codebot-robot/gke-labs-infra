@@ -21,7 +21,9 @@ WORKDIR /workspace
 COPY . .
 
 # Build helloworld
-RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/helloworld .
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/helloworld .
 
 FROM golang:1.27.2-trixie
 COPY --from=builder /usr/local/bin/helloworld /usr/local/bin/helloworld

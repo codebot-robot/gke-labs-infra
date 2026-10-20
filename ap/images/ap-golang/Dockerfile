@@ -19,7 +19,9 @@ ARG TARGETARCH
 
 WORKDIR /workspace
 COPY . .
-RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/ap ./ap
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/ap ./ap
 
 FROM golang:1.27.2-trixie
 COPY --from=builder /usr/local/bin/ap /usr/local/bin/ap
