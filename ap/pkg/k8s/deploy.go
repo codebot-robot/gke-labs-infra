@@ -32,11 +32,126 @@ import (
 	"k8s.io/klog/v2"
 )
 
+type imageReferenceMatch struct {
+	start     int
+	end       int
+	imageName string
+}
+
+const (
+	imagePrefixPlaceholder = "${IMAGE_PREFIX}/"
+	imageTagPlaceholder    = ":${IMAGE_TAG}"
+)
+
+func isAlphaNumeric(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+func isImageNameChar(b byte) bool {
+	return isAlphaNumeric(b) || b == '.' || b == '_' || b == '-' || b == '/'
+}
+
+func findImageReferenceMatches(s string) []imageReferenceMatch {
+	var matches []imageReferenceMatch
+	offset := 0
+	for {
+		idx := strings.Index(s[offset:], imagePrefixPlaceholder)
+		if idx == -1 {
+			break
+		}
+		start := offset + idx
+		nameStart := start + len(imagePrefixPlaceholder)
+
+		if nameStart >= len(s) || !isAlphaNumeric(s[nameStart]) {
+			offset = nameStart
+			continue
+		}
+
+		nameEnd := nameStart + 1
+		for nameEnd < len(s) && isImageNameChar(s[nameEnd]) {
+			nameEnd++
+		}
+
+		if !isAlphaNumeric(s[nameEnd-1]) {
+			offset = nameEnd
+			continue
+		}
+
+		imageName := s[nameStart:nameEnd]
+		if strings.Contains(imageName, "//") {
+			offset = nameEnd
+			continue
+		}
+
+		fullEnd := nameEnd
+		if nameEnd < len(s) && s[nameEnd] == ':' {
+			if strings.HasPrefix(s[nameEnd:], imageTagPlaceholder) {
+				tagEnd := nameEnd + len(imageTagPlaceholder)
+				if tagEnd < len(s) && (isAlphaNumeric(s[tagEnd]) || s[tagEnd] == '-' || s[tagEnd] == '_' || s[tagEnd] == '.') {
+					offset = nameEnd
+					continue
+				}
+				fullEnd = tagEnd
+			} else {
+				// Non-matching tag (e.g. :latest or :v1)
+				offset = nameEnd
+				continue
+			}
+		}
+
+		matches = append(matches, imageReferenceMatch{
+			start:     start,
+			end:       fullEnd,
+			imageName: imageName,
+		})
+
+		offset = fullEnd
+	}
+	return matches
+}
+
+func collectStringImageReferences(node *yaml.Node, seen map[string]bool, names *[]string) {
+	switch node.Kind {
+	case yaml.DocumentNode:
+		for _, child := range node.Content {
+			collectStringImageReferences(child, seen, names)
+		}
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			valueNode := node.Content[i+1]
+			if valueNode.Kind == yaml.ScalarNode {
+				for _, match := range findImageReferenceMatches(valueNode.Value) {
+					if !seen[match.imageName] {
+						seen[match.imageName] = true
+						*names = append(*names, match.imageName)
+					}
+				}
+			}
+			collectStringImageReferences(valueNode, seen, names)
+		}
+	case yaml.SequenceNode:
+		for _, child := range node.Content {
+			if child.Kind == yaml.ScalarNode {
+				for _, match := range findImageReferenceMatches(child.Value) {
+					if !seen[match.imageName] {
+						seen[match.imageName] = true
+						*names = append(*names, match.imageName)
+					}
+				}
+			}
+			collectStringImageReferences(child, seen, names)
+		}
+	}
+}
+
 // FindPlaceholderImages parses YAML content and returns a deduplicated, sorted slice
 // of placeholder image names referenced in the content.
 func FindPlaceholderImages(content string) ([]string, error) {
 	decoder := yaml.NewDecoder(strings.NewReader(content))
 	var placeholders []*yaml.Node
+	seen := make(map[string]bool)
+	var names []string
+
 	for {
 		var node yaml.Node
 		err := decoder.Decode(&node)
@@ -47,14 +162,9 @@ func FindPlaceholderImages(content string) ([]string, error) {
 			return nil, fmt.Errorf("failed to decode YAML: %w", err)
 		}
 		placeholders = collectPlaceholders(&node, placeholders, nil)
+		collectStringImageReferences(&node, seen, &names)
 	}
 
-	if len(placeholders) == 0 {
-		return nil, nil
-	}
-
-	seen := make(map[string]bool)
-	var names []string
 	for _, p := range placeholders {
 		base, ok := isPlaceholderImage(p.Value)
 		if !ok {
@@ -65,6 +175,11 @@ func FindPlaceholderImages(content string) ([]string, error) {
 			names = append(names, base)
 		}
 	}
+
+	if len(names) == 0 {
+		return nil, nil
+	}
+
 	sort.Strings(names)
 	return names, nil
 }
@@ -91,10 +206,6 @@ func replacePlaceholderImages(content string, imageRepository string, imageTag s
 			return "", fmt.Errorf("failed to decode YAML: %w", err)
 		}
 		placeholders = collectPlaceholders(&node, placeholders, nil)
-	}
-
-	if len(placeholders) == 0 {
-		return content, nil
 	}
 
 	lineOffsets := getLineOffsets(content)
@@ -128,6 +239,19 @@ func replacePlaceholderImages(content string, imageRepository string, imageTag s
 			length: end - start,
 			newVal: newVal,
 		})
+	}
+
+	for _, match := range findImageReferenceMatches(content) {
+		newVal := fmt.Sprintf("%s/%s:%s", imageRepository, match.imageName, imageTag)
+		replacements = append(replacements, replacement{
+			offset: match.start,
+			length: match.end - match.start,
+			newVal: newVal,
+		})
+	}
+
+	if len(replacements) == 0 {
+		return content, nil
 	}
 
 	// Sort replacements in reverse order to apply them without affecting offsets
@@ -172,6 +296,10 @@ func collectPlaceholders(node *yaml.Node, placeholders []*yaml.Node, path []stri
 
 func isPlaceholderImage(image string) (string, bool) {
 	if image == "" {
+		return "", false
+	}
+
+	if strings.HasPrefix(image, "${") {
 		return "", false
 	}
 

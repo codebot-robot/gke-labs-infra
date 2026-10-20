@@ -188,6 +188,296 @@ metadata:
 			input:    "image: bar/foo",
 			expected: "image: my-repo/bar/foo:v1",
 		},
+		{
+			name: "env value with implied tag",
+			input: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: gcr.io/fixed/image:v1
+        env:
+        - name: HELPER_IMAGE
+          value: ${IMAGE_PREFIX}/helper
+`,
+			expected: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: gcr.io/fixed/image:v1
+        env:
+        - name: HELPER_IMAGE
+          value: my-repo/helper:v1
+`,
+		},
+		{
+			name: "env value with spelled-out tag",
+			input: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: gcr.io/fixed/image:v1
+        env:
+        - name: HELPER_IMAGE
+          value: ${IMAGE_PREFIX}/helper:${IMAGE_TAG}
+`,
+			expected: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: gcr.io/fixed/image:v1
+        env:
+        - name: HELPER_IMAGE
+          value: my-repo/helper:v1
+`,
+		},
+		{
+			name: "quoted env value",
+			input: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: gcr.io/fixed/image:v1
+        env:
+        - name: HELPER_IMAGE
+          value: "${IMAGE_PREFIX}/helper"
+        - name: SPELLED_IMAGE
+          value: "${IMAGE_PREFIX}/spelled:${IMAGE_TAG}"
+`,
+			expected: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: gcr.io/fixed/image:v1
+        env:
+        - name: HELPER_IMAGE
+          value: "my-repo/helper:v1"
+        - name: SPELLED_IMAGE
+          value: "my-repo/spelled:v1"
+`,
+		},
+		{
+			name: "container args whole-value both forms",
+			input: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: gcr.io/fixed/image:v1
+        args:
+        - ${IMAGE_PREFIX}/worker
+        - ${IMAGE_PREFIX}/worker-spelled:${IMAGE_TAG}
+`,
+			expected: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: gcr.io/fixed/image:v1
+        args:
+        - my-repo/worker:v1
+        - my-repo/worker-spelled:v1
+`,
+		},
+		{
+			name: "container args embedded in --flag= form both forms",
+			input: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: gcr.io/fixed/image:v1
+        args:
+        - --worker-image=${IMAGE_PREFIX}/worker
+        - --spelled-image=${IMAGE_PREFIX}/worker-spelled:${IMAGE_TAG}
+        - "--quoted-flag=${IMAGE_PREFIX}/quoted"
+        - '--single-quoted=${IMAGE_PREFIX}/single:${IMAGE_TAG}'
+`,
+			expected: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: gcr.io/fixed/image:v1
+        args:
+        - --worker-image=my-repo/worker:v1
+        - --spelled-image=my-repo/worker-spelled:v1
+        - "--quoted-flag=my-repo/quoted:v1"
+        - '--single-quoted=my-repo/single:v1'
+`,
+		},
+		{
+			name: "ConfigMap data single values and multiline block",
+			input: `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-config
+data:
+  image: ${IMAGE_PREFIX}/cm-image
+  image_spelled: ${IMAGE_PREFIX}/cm-spelled:${IMAGE_TAG}
+  app.conf: |
+    server.image = "${IMAGE_PREFIX}/server"
+    worker.image = "${IMAGE_PREFIX}/worker:${IMAGE_TAG}"
+    other = "$FOO and ${OTHER}"
+`,
+			expected: `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-config
+data:
+  image: my-repo/cm-image:v1
+  image_spelled: my-repo/cm-spelled:v1
+  app.conf: |
+    server.image = "my-repo/server:v1"
+    worker.image = "my-repo/worker:v1"
+    other = "$FOO and ${OTHER}"
+`,
+		},
+		{
+			name: "strings that merely contain $ or ${OTHER} are left unchanged",
+			input: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: gcr.io/fixed/image:v1
+        env:
+        - name: PRICE
+          value: "$100"
+        - name: OTHER_VAR
+          value: "${OTHER}"
+        - name: ESCAPED
+          value: "$$NOT_A_VAR"
+        - name: PREFIX_ALONE
+          value: "${IMAGE_PREFIX}"
+        - name: TAG_ALONE
+          value: "${IMAGE_TAG}"
+        - name: INVALID_TAG
+          value: "${IMAGE_PREFIX}/foo:latest"
+        - name: UNKNOWN_VAR_TAG
+          value: "${IMAGE_PREFIX}/foo:${OTHER}"
+`,
+			expected: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: gcr.io/fixed/image:v1
+        env:
+        - name: PRICE
+          value: "$100"
+        - name: OTHER_VAR
+          value: "${OTHER}"
+        - name: ESCAPED
+          value: "$$NOT_A_VAR"
+        - name: PREFIX_ALONE
+          value: "${IMAGE_PREFIX}"
+        - name: TAG_ALONE
+          value: "${IMAGE_TAG}"
+        - name: INVALID_TAG
+          value: "${IMAGE_PREFIX}/foo:latest"
+        - name: UNKNOWN_VAR_TAG
+          value: "${IMAGE_PREFIX}/foo:${OTHER}"
+`,
+		},
+		{
+			name: "image field with ${IMAGE_PREFIX}/<name>",
+			input: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: ${IMAGE_PREFIX}/example-server
+      - name: sidecar
+        image: "${IMAGE_PREFIX}/sidecar:${IMAGE_TAG}"
+`,
+			expected: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: example
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        image: my-repo/example-server:v1
+      - name: sidecar
+        image: "my-repo/sidecar:v1"
+`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -284,6 +574,77 @@ spec:
         image: a-sidecar
 `,
 			expected: []string{"a-sidecar", "app-server"},
+		},
+		{
+			name: "references in env and container args",
+			input: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dep
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: gcr.io/fixed/base:v1
+        args:
+        - --worker-image=${IMAGE_PREFIX}/worker-app:${IMAGE_TAG}
+        env:
+        - name: HELPER
+          value: ${IMAGE_PREFIX}/helper-app
+`,
+			expected: []string{"helper-app", "worker-app"},
+		},
+		{
+			name: "references in ConfigMap data",
+			input: `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cfg
+data:
+  image: ${IMAGE_PREFIX}/cm-service
+  app.conf: |
+    proxy = "${IMAGE_PREFIX}/proxy-service:${IMAGE_TAG}"
+`,
+			expected: []string{"cm-service", "proxy-service"},
+		},
+		{
+			name: "strings with $ or ${OTHER} not treated as placeholder images",
+			input: `
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cfg
+data:
+  price: "$100"
+  var1: "${OTHER}"
+  var2: "${IMAGE_PREFIX}"
+  var3: "${IMAGE_TAG}"
+  invalid_tag: "${IMAGE_PREFIX}/foo:latest"
+  unknown_tag: "${IMAGE_PREFIX}/foo:${OTHER}"
+`,
+			expected: nil,
+		},
+		{
+			name: "image field and string references combined and deduplicated",
+			input: `
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dep
+spec:
+  template:
+    spec:
+      containers:
+      - name: app
+        image: my-service
+        args:
+        - --self=${IMAGE_PREFIX}/my-service
+        - --sidecar=${IMAGE_PREFIX}/my-sidecar:${IMAGE_TAG}
+`,
+			expected: []string{"my-service", "my-sidecar"},
 		},
 	}
 
