@@ -18,7 +18,6 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"regexp"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -195,8 +194,47 @@ func checkAlternatingAt(lines []string, start int, filename string) error {
 	return nil
 }
 
-var errAssignRegex = regexp.MustCompile(`\berr\s*:=\s*`)
-var ifErrCheckRegex = regexp.MustCompile(`if\s+err\s*!=\s*nil\s*\{`)
+func isErrAssign(line string) bool {
+	fields := strings.Fields(line)
+	for i, f := range fields {
+		if f == ":=" {
+			if i > 0 {
+				prev := fields[i-1]
+				if prev == "err" || strings.HasSuffix(prev, ",err") {
+					return true
+				}
+			}
+		} else if strings.HasSuffix(f, ":=") {
+			base := strings.TrimSuffix(f, ":=")
+			if base == "err" || strings.HasSuffix(base, ",err") {
+				return true
+			}
+		} else if idx := strings.Index(f, ":="); idx != -1 {
+			base := f[:idx]
+			if base == "err" || strings.HasSuffix(base, ",err") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isIfErrCheck(line string) bool {
+	fields := strings.Fields(line)
+	for i := 0; i < len(fields); i++ {
+		if fields[i] == "if" {
+			if i+3 < len(fields) && fields[i+1] == "err" && fields[i+2] == "!=" {
+				if fields[i+3] == "nil{" {
+					return true
+				}
+				if fields[i+3] == "nil" && i+4 < len(fields) && (fields[i+4] == "{" || strings.HasPrefix(fields[i+4], "{")) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
 
 func checkErrorDoubleSpacingAt(lines []string, i int, filename string) error {
 	if i+2 >= len(lines) {
@@ -207,9 +245,9 @@ func checkErrorDoubleSpacingAt(lines []string, i int, filename string) error {
 	l3 := lines[i+2]
 
 	if strings.HasPrefix(l1, "+") && strings.HasPrefix(l2, "+") && strings.HasPrefix(l3, "+") {
-		if !strings.HasPrefix(l1, "+++") && errAssignRegex.MatchString(l1[1:]) &&
+		if !strings.HasPrefix(l1, "+++") && isErrAssign(l1[1:]) &&
 			strings.TrimSpace(l2[1:]) == "" &&
-			ifErrCheckRegex.MatchString(l3[1:]) {
+			isIfErrCheck(l3[1:]) {
 			return fmt.Errorf("detected double-spaced code in %s: blank line between error assignment and if err != nil check", filename)
 		}
 	}

@@ -23,7 +23,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -114,12 +113,136 @@ func fetchLatestGoVersion(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("no stable go version found at %s", url)
 }
 
-var (
-	goModRegex     = regexp.MustCompile(`(?m)^go\s+(\d+\.\d+(?:\.\d+)?)$`)
-	toolchainRegex = regexp.MustCompile(`(?m)^toolchain\s+go\d+\.\d+(?:\.\d+)?$`)
-	// In Dockerfiles, look for images like golang:1.26.1-trixie, golang:1.26-trixie, golang:1.26.1-bookworm, golang:1.26-bookworm
-	dockerfileRegex = regexp.MustCompile(`golang:(\d+\.\d+(?:\.\d+)?)(-[a-z0-9]+)?`)
-)
+func isValidVersion(s string) bool {
+	if s == "" {
+		return false
+	}
+	parts := strings.Split(s, ".")
+	if len(parts) != 2 && len(parts) != 3 {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		for i := 0; i < len(part); i++ {
+			if part[i] < '0' || part[i] > '9' {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func bumpGoMod(content string, version string) (string, bool) {
+	lines := strings.Split(content, "\n")
+	goLineIdx := -1
+	toolchainLineIdx := -1
+
+	for i, rawLine := range lines {
+		line := strings.TrimSuffix(rawLine, "\r")
+		if strings.HasPrefix(line, "go ") || strings.HasPrefix(line, "go\t") {
+			fields := strings.Fields(line)
+			if len(fields) == 2 && fields[0] == "go" && isValidVersion(fields[1]) {
+				goLineIdx = i
+			}
+		} else if strings.HasPrefix(line, "toolchain ") || strings.HasPrefix(line, "toolchain\t") {
+			fields := strings.Fields(line)
+			if len(fields) == 2 && fields[0] == "toolchain" && strings.HasPrefix(fields[1], "go") && isValidVersion(strings.TrimPrefix(fields[1], "go")) {
+				toolchainLineIdx = i
+			}
+		}
+	}
+
+	if goLineIdx == -1 {
+		return content, false
+	}
+
+	goVersion := getGoDirectiveVersion(version)
+	isCRLF := strings.Contains(content, "\r\n")
+
+	lines[goLineIdx] = "go " + goVersion
+	if isCRLF {
+		lines[goLineIdx] += "\r"
+	}
+
+	if toolchainLineIdx != -1 {
+		lines[toolchainLineIdx] = "toolchain go" + version
+		if isCRLF {
+			lines[toolchainLineIdx] += "\r"
+		}
+	} else {
+		toolchainLine := "toolchain go" + version
+		if isCRLF {
+			toolchainLine += "\r"
+		}
+		emptyLine := ""
+		if isCRLF {
+			emptyLine = "\r"
+		}
+		newLines := make([]string, 0, len(lines)+2)
+		newLines = append(newLines, lines[:goLineIdx+1]...)
+		newLines = append(newLines, emptyLine, toolchainLine)
+		newLines = append(newLines, lines[goLineIdx+1:]...)
+		lines = newLines
+	}
+
+	newContent := strings.Join(lines, "\n")
+	return newContent, newContent != content
+}
+
+func bumpDockerfile(content string, version string) (string, bool) {
+	var sb strings.Builder
+	offset := 0
+
+	for {
+		idx := strings.Index(content[offset:], "golang:")
+		if idx == -1 {
+			sb.WriteString(content[offset:])
+			break
+		}
+
+		start := offset + idx
+		verStart := start + len("golang:")
+		if verStart >= len(content) {
+			sb.WriteString(content[offset:])
+			break
+		}
+
+		i := verStart
+		for i < len(content) && ((content[i] >= '0' && content[i] <= '9') || content[i] == '.') {
+			i++
+		}
+		verStr := content[verStart:i]
+		if !isValidVersion(verStr) {
+			sb.WriteString(content[offset : start+len("golang:")])
+			offset = start + len("golang:")
+			continue
+		}
+
+		suffixStart := i
+		if i < len(content) && content[i] == '-' {
+			j := i + 1
+			for j < len(content) && ((content[j] >= 'a' && content[j] <= 'z') || (content[j] >= '0' && content[j] <= '9')) {
+				j++
+			}
+			if j > i+1 {
+				i = j
+			}
+		}
+		suffix := content[suffixStart:i]
+
+		sb.WriteString(content[offset:start])
+		sb.WriteString("golang:")
+		sb.WriteString(version)
+		sb.WriteString(suffix)
+
+		offset = i
+	}
+
+	newContent := sb.String()
+	return newContent, newContent != content
+}
 
 func bumpFile(path string, version string) error {
 	content, err := os.ReadFile(path)
@@ -138,33 +261,15 @@ func bumpFile(path string, version string) error {
 }
 
 func bumpContent(filename string, content []byte, version string) ([]byte, bool) {
-	newContent := string(content)
-
-	changed := false
 	if filename == "go.mod" {
-		if goModRegex.Match(content) {
-			goVersion := getGoDirectiveVersion(version)
-			newContent = goModRegex.ReplaceAllString(newContent, "go "+goVersion)
-			if toolchainRegex.MatchString(newContent) {
-				newContent = toolchainRegex.ReplaceAllString(newContent, "toolchain go"+version)
-			} else {
-				targetGoLine := "go " + goVersion
-				newContent = strings.Replace(newContent, targetGoLine, targetGoLine+"\n\ntoolchain go"+version, 1)
-			}
-			changed = newContent != string(content)
-		}
+		newContent, changed := bumpGoMod(string(content), version)
+		return []byte(newContent), changed
 	} else if strings.Contains(filename, "Dockerfile") {
-		newContent = dockerfileRegex.ReplaceAllStringFunc(newContent, func(match string) string {
-			submatches := dockerfileRegex.FindStringSubmatch(match)
-			if len(submatches) > 2 {
-				return "golang:" + version + submatches[2]
-			}
-			return "golang:" + version
-		})
-		changed = newContent != string(content)
+		newContent, changed := bumpDockerfile(string(content), version)
+		return []byte(newContent), changed
 	}
 
-	return []byte(newContent), changed
+	return content, false
 }
 
 func getGoDirectiveVersion(version string) string {
