@@ -203,6 +203,62 @@ lint:
 	}
 }
 
+func TestCommonLinterConfig_ModeIgnore(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  unused:
+    mode: ignore
+  replaceEmptyInterfaceWithAny:
+    mode: ignore
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.IsUnusedEnabled() {
+		t.Errorf("expected unused to be disabled when mode is ignore")
+	}
+	if cfg.IsReplaceEmptyInterfaceWithAnyEnabled() {
+		t.Errorf("expected replaceEmptyInterfaceWithAny to be disabled when mode is ignore")
+	}
+}
+
+func TestConfig_InvalidUnusedMode(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  unused:
+    mode: badmode
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(tempDir)
+	if err == nil {
+		t.Fatalf("expected Load to fail on invalid unused mode")
+	}
+	if !strings.Contains(err.Error(), "invalid unused mode") {
+		t.Errorf("expected error to mention 'invalid unused mode', got: %v", err)
+	}
+}
+
 func TestDroppedErrorsConfig(t *testing.T) {
 	tempDir, err := os.MkdirTemp("", "ap-droppederrors-config-test")
 	if err != nil {

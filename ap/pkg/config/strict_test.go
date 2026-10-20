@@ -189,7 +189,7 @@ lint:
   skipGenerated: false
   skipTests: false
   unused:
-    enabled: true
+    mode: error
     skipGenerated: false
     skipTests: true
   testcontext:
@@ -199,7 +199,7 @@ lint:
   unusedparameters:
     mode: warn
   replaceEmptyInterfaceWithAny:
-    enabled: true
+    mode: error
     skipGenerated: true
     skipTests: false
   droppedErrors:
