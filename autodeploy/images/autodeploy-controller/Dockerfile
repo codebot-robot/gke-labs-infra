@@ -21,7 +21,9 @@ WORKDIR /workspace
 COPY . .
 
 # Build autodeploy
-RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/autodeploy .
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /usr/local/bin/autodeploy .
 
 FROM golang:1.27.2-trixie
 COPY --from=builder /usr/local/bin/autodeploy /usr/local/bin/autodeploy
