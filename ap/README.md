@@ -101,3 +101,8 @@ Commands:
 - `generate`: Run generation tasks
 - `format`: Run formatting tasks
 - `version`: Print version information
+
+## Architecture Decisions
+
+- [Kubernetes Cluster Access](docs/k8s-cluster-access.md): Decision to use `client-go` (dynamic client + discovery + SSA) for cluster operations, with dependency measurements and deploy-path prototype.
+

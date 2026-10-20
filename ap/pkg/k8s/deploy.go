@@ -15,20 +15,29 @@
 package k8s
 
 import (
-	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"gopkg.in/yaml.v3"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
+	apimachineryyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/klog/v2"
 )
 
@@ -399,9 +408,18 @@ func findEnd(content string, start int, style yaml.Style) int {
 	return len(content)
 }
 
-// KubectlApplyTask represents a task to apply a single k8s manifest.
+// KubectlApplyTask represents a task to apply a single k8s manifest using client-go Server-Side Apply.
 type KubectlApplyTask struct {
 	ManifestPath string
+
+	// DynamicClient is an optional client-go dynamic client (defaults to cluster dynamic client).
+	DynamicClient dynamic.Interface
+
+	// RESTMapper is an optional RESTMapper (defaults to cluster discovery RESTMapper).
+	RESTMapper meta.RESTMapper
+
+	// FieldManager is the field manager used for Server-Side Apply (defaults to "ap").
+	FieldManager string
 }
 
 func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error {
@@ -434,29 +452,28 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		return fmt.Errorf("failed to replace placeholders in %s: %w", relPath, err)
 	}
 
-	cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", "-")
-	cmd.Stdin = bytes.NewBufferString(replaced)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("kubectl apply failed for %s: %w", relPath, err)
+	dynClient := t.DynamicClient
+	mapper := t.RESTMapper
+	if dynClient == nil || mapper == nil {
+		defaultDyn, defaultMapper, err := GetDefaultClientAndMapper()
+		if err != nil {
+			return fmt.Errorf("failed to initialize kubernetes client for %s: %w", relPath, err)
+		}
+		if dynClient == nil {
+			dynClient = defaultDyn
+		}
+		if mapper == nil {
+			mapper = defaultMapper
+		}
 	}
 
-	// If this was a CRD, wait for it to be established
-	crdNames, err := getCRDNames(content)
-	if err != nil {
-		klog.Warningf("Failed to check if %s is a CRD: %v", relPath, err)
-	} else {
-		for _, name := range crdNames {
-			klog.Infof("Waiting for CRD %s to be established...", name)
-			waitCmd := exec.CommandContext(ctx, "kubectl", "wait", "--for=condition=Established", "customresourcedefinition/"+name, "--timeout=60s")
-			waitCmd.Stdout = os.Stdout
-			waitCmd.Stderr = os.Stderr
-			if err := waitCmd.Run(); err != nil {
-				return fmt.Errorf("failed to wait for CRD %s: %w", name, err)
-			}
-		}
+	fieldManager := t.FieldManager
+	if fieldManager == "" {
+		fieldManager = "ap"
+	}
+
+	if err := ApplyManifest(ctx, dynClient, mapper, replaced, fieldManager); err != nil {
+		return fmt.Errorf("apply failed for %s: %w", relPath, err)
 	}
 
 	return nil
@@ -470,48 +487,118 @@ func (t *KubectlApplyTask) GetChildren() []tasks.Task {
 	return nil
 }
 
-func getCRDNames(content []byte) ([]string, error) {
-	var names []string
-	decoder := yaml.NewDecoder(bytes.NewReader(content))
+// ApplyManifest applies multi-document Kubernetes YAML content using client-go Server-Side Apply (SSA).
+func ApplyManifest(ctx context.Context, dynamicClient dynamic.Interface, restMapper meta.RESTMapper, manifestContent string, fieldManager string) error {
+	if fieldManager == "" {
+		fieldManager = "ap"
+	}
+
+	decoder := apimachineryyaml.NewYAMLOrJSONDecoder(strings.NewReader(manifestContent), 4096)
 	for {
-		var doc yaml.Node
-		if err := decoder.Decode(&doc); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, err
+		var rawObj unstructured.Unstructured
+		err := decoder.Decode(&rawObj)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to decode YAML object: %w", err)
+		}
+		if len(rawObj.Object) == 0 {
+			continue
 		}
 
-		// Basic check for CRD
-		// We look for kind: CustomResourceDefinition and metadata.name
-		if doc.Kind == yaml.DocumentNode && len(doc.Content) > 0 {
-			root := doc.Content[0]
-			if root.Kind == yaml.MappingNode {
-				isCRD := false
-				name := ""
-				for i := 0; i+1 < len(root.Content); i += 2 {
-					key := root.Content[i].Value
-					val := root.Content[i+1]
-					if key == "kind" && val.Kind == yaml.ScalarNode && val.Value == "CustomResourceDefinition" {
-						isCRD = true
-					}
-					if key == "metadata" && val.Kind == yaml.MappingNode {
-						for j := 0; j+1 < len(val.Content); j += 2 {
-							mKey := val.Content[j].Value
-							mVal := val.Content[j+1]
-							if mKey == "name" && mVal.Kind == yaml.ScalarNode {
-								name = mVal.Value
-							}
-						}
-					}
-				}
-				if isCRD && name != "" {
-					names = append(names, name)
-				}
+		gvk := rawObj.GroupVersionKind()
+		mapping, err := restMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+		if err != nil {
+			if resetter, ok := restMapper.(interface{ Reset() }); ok {
+				resetter.Reset()
+				mapping, err = restMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("failed to find REST mapping for %s: %w", gvk, err)
+		}
+
+		var dr dynamic.ResourceInterface
+		if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+			ns := rawObj.GetNamespace()
+			if ns == "" {
+				ns = "default"
+			}
+			dr = dynamicClient.Resource(mapping.Resource).Namespace(ns)
+		} else {
+			dr = dynamicClient.Resource(mapping.Resource)
+		}
+
+		data, err := json.Marshal(rawObj.Object)
+		if err != nil {
+			return fmt.Errorf("failed to marshal object %s/%s: %w", gvk.Kind, rawObj.GetName(), err)
+		}
+
+		force := true
+		patchOpts := metav1.PatchOptions{
+			FieldManager: fieldManager,
+			Force:        &force,
+		}
+
+		klog.V(2).Infof("Server-Side Apply %s/%s (GVR: %s)", gvk.Kind, rawObj.GetName(), mapping.Resource)
+		_, err = dr.Patch(ctx, rawObj.GetName(), types.ApplyPatchType, data, patchOpts)
+		if err != nil {
+			return fmt.Errorf("failed to apply %s/%s: %w", gvk.Kind, rawObj.GetName(), err)
+		}
+
+		// If this is a CRD, wait for it to become established
+		if gvk.Group == "apiextensions.k8s.io" && gvk.Kind == "CustomResourceDefinition" {
+			if err := WaitForCRDEstablished(ctx, dynamicClient, rawObj.GetName(), 60*time.Second); err != nil {
+				return fmt.Errorf("failed waiting for CRD %s: %w", rawObj.GetName(), err)
+			}
+			if resetter, ok := restMapper.(interface{ Reset() }); ok {
+				resetter.Reset()
 			}
 		}
 	}
-	return names, nil
+
+	return nil
+}
+
+// WaitForCRDEstablished waits until the CRD with the given name has condition Established=True.
+func WaitForCRDEstablished(ctx context.Context, dynamicClient dynamic.Interface, crdName string, timeout time.Duration) error {
+	klog.Infof("Waiting for CRD %s to be established...", crdName)
+	crdGVR := schema.GroupVersionResource{
+		Group:    "apiextensions.k8s.io",
+		Version:  "v1",
+		Resource: "customresourcedefinitions",
+	}
+
+	pollInterval := 500 * time.Millisecond
+	return wait.PollUntilContextTimeout(ctx, pollInterval, timeout, true, func(ctx context.Context) (bool, error) {
+		obj, err := dynamicClient.Resource(crdGVR).Get(ctx, crdName, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				return false, nil
+			}
+			return false, err
+		}
+
+		conditions, found, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
+		if err != nil || !found {
+			return false, nil
+		}
+
+		for _, c := range conditions {
+			condMap, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			condType, _ := condMap["type"].(string)
+			condStatus, _ := condMap["status"].(string)
+			if condType == "Established" && condStatus == "True" {
+				return true, nil
+			}
+		}
+
+		return false, nil
+	})
 }
 
 // DeployTasksForManifests returns a task group for deploying the specified k8s manifests.
