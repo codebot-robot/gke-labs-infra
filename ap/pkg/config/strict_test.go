@@ -275,20 +275,24 @@ lint:
 	if cfg.DroppedErrorsBaseline() != ".ap/droppederrors-baseline.txt" {
 		t.Errorf("expected baseline .ap/droppederrors-baseline.txt, got %q", cfg.DroppedErrorsBaseline())
 	}
-	if !cfg.IsTestOnlyImportsEnabled() {
-		t.Errorf("expected IsTestOnlyImportsEnabled to be true")
+	toi := cfg.TestOnlyImports()
+	if toi == nil {
+		t.Fatalf("expected TestOnlyImports to not be nil")
 	}
-	if !cfg.IsTestOnlyImportsError() {
-		t.Errorf("expected IsTestOnlyImportsError to be true")
+	if !toi.IsEnabled() {
+		t.Errorf("expected IsEnabled to be true")
 	}
-	if len(cfg.TestOnlyImportsPackages()) != 1 || cfg.TestOnlyImportsPackages()[0] != "github.com/google/go-cmp" {
-		t.Errorf("expected TestOnlyImportsPackages [github.com/google/go-cmp], got %v", cfg.TestOnlyImportsPackages())
+	if !toi.IsError() {
+		t.Errorf("expected IsError to be true")
 	}
-	if cfg.TestOnlyImportsSkipGenerated() == nil || *cfg.TestOnlyImportsSkipGenerated() != true {
-		t.Errorf("expected TestOnlyImportsSkipGenerated to be true")
+	if len(toi.PackagesOrDefault()) != 1 || toi.PackagesOrDefault()[0] != "github.com/google/go-cmp" {
+		t.Errorf("expected TestOnlyImports packages [github.com/google/go-cmp], got %v", toi.PackagesOrDefault())
 	}
-	if cfg.TestOnlyImportsSkipTests() == nil || *cfg.TestOnlyImportsSkipTests() != true {
-		t.Errorf("expected TestOnlyImportsSkipTests to be true")
+	if toi.SkipGenerated == nil || *toi.SkipGenerated != true {
+		t.Errorf("expected TestOnlyImports.SkipGenerated to be true")
+	}
+	if toi.SkipTests == nil || *toi.SkipTests != true {
+		t.Errorf("expected TestOnlyImports.SkipTests to be true")
 	}
 }
 

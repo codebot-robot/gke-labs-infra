@@ -377,14 +377,15 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 				SkipGlobs:     cfg.Skip,
 			})
 		}
-		if cfg.IsTestOnlyImportsEnabled() {
+		toi := cfg.TestOnlyImports()
+		if toi.IsEnabled() {
 			modGroup.Tasks = append(modGroup.Tasks, &TestOnlyImportsCheckTask{
 				Dir:           dir,
 				RepoRoot:      root,
-				IsError:       cfg.IsTestOnlyImportsError(),
-				Packages:      cfg.TestOnlyImportsPackages(),
-				SkipGenerated: cfg.ResolveSkipGenerated(cfg.TestOnlyImportsSkipGenerated(), false),
-				SkipTests:     cfg.ResolveSkipTests(cfg.TestOnlyImportsSkipTests(), false),
+				IsError:       toi.IsError(),
+				Packages:      toi.PackagesOrDefault(),
+				SkipGenerated: cfg.ResolveCommonSkipGenerated(toi.Common(), false),
+				SkipTests:     cfg.ResolveCommonSkipTests(toi.Common(), false),
 				SkipGlobs:     cfg.Skip,
 			})
 		}

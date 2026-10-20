@@ -105,17 +105,15 @@ func TestLoadDefault(t *testing.T) {
 	if cfg.DroppedErrorsUseDefaultExcludes() != true {
 		t.Errorf("expected default droppederrors useDefaultExcludes to be true")
 	}
-	if cfg.IsTestOnlyImportsEnabled() != true {
+	toi := cfg.TestOnlyImports()
+	if !toi.IsEnabled() {
 		t.Errorf("expected default testOnlyImports enabled to be true")
 	}
-	if cfg.IsTestOnlyImportsError() != true {
+	if !toi.IsError() {
 		t.Errorf("expected default testOnlyImports error to be true (error mode)")
 	}
-	if cfg.TestOnlyImportsMode() != "error" {
-		t.Errorf("expected default testOnlyImports mode to be error, got %q", cfg.TestOnlyImportsMode())
-	}
-	if len(cfg.TestOnlyImportsPackages()) != 4 {
-		t.Errorf("expected 4 default testOnlyImports packages, got %d", len(cfg.TestOnlyImportsPackages()))
+	if len(toi.PackagesOrDefault()) != 4 {
+		t.Errorf("expected 4 default testOnlyImports packages, got %d", len(toi.PackagesOrDefault()))
 	}
 }
 
@@ -150,23 +148,27 @@ lint:
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	if !cfg.IsTestOnlyImportsEnabled() {
+	toi := cfg.TestOnlyImports()
+	if toi == nil {
+		t.Fatalf("expected TestOnlyImports to not be nil")
+	}
+	if !toi.IsEnabled() {
 		t.Errorf("expected testOnlyImports to be enabled")
 	}
-	if cfg.IsTestOnlyImportsError() {
+	if toi.IsError() {
 		t.Errorf("expected testOnlyImports not to be error mode (warn)")
 	}
-	if cfg.TestOnlyImportsMode() != "warn" {
-		t.Errorf("expected mode warn, got %q", cfg.TestOnlyImportsMode())
+	if toi.Mode != "warn" {
+		t.Errorf("expected mode warn, got %q", toi.Mode)
 	}
-	pkgs := cfg.TestOnlyImportsPackages()
+	pkgs := toi.PackagesOrDefault()
 	if len(pkgs) != 2 || pkgs[0] != "github.com/google/go-cmp" || pkgs[1] != "example.com/custom" {
 		t.Errorf("unexpected packages list: %v", pkgs)
 	}
-	if cfg.TestOnlyImportsSkipGenerated() == nil || *cfg.TestOnlyImportsSkipGenerated() != true {
+	if toi.SkipGenerated == nil || *toi.SkipGenerated != true {
 		t.Errorf("expected skipGenerated to be true")
 	}
-	if cfg.TestOnlyImportsSkipTests() == nil || *cfg.TestOnlyImportsSkipTests() != true {
+	if toi.SkipTests == nil || *toi.SkipTests != true {
 		t.Errorf("expected skipTests to be true")
 	}
 }

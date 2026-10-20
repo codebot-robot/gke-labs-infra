@@ -53,22 +53,25 @@ type LintConfig struct {
 	TestOnlyImports              *TestOnlyImportsConfig              `json:"testOnlyImports"`
 }
 
-type UnusedConfig struct {
-	Enabled       *bool `json:"enabled"`
+// CommonLinterConfig holds file-skipping configuration common across linters.
+type CommonLinterConfig struct {
 	SkipGenerated *bool `json:"skipGenerated"`
 	SkipTests     *bool `json:"skipTests"`
+}
+
+type UnusedConfig struct {
+	CommonLinterConfig
+	Enabled *bool `json:"enabled"`
 }
 
 type ReplaceEmptyInterfaceWithAnyConfig struct {
-	Enabled       *bool `json:"enabled"`
-	SkipGenerated *bool `json:"skipGenerated"`
-	SkipTests     *bool `json:"skipTests"`
+	CommonLinterConfig
+	Enabled *bool `json:"enabled"`
 }
 
 type TestContextConfig struct {
-	Mode          string `json:"mode"`
-	SkipGenerated *bool  `json:"skipGenerated"`
-	SkipTests     *bool  `json:"skipTests"`
+	CommonLinterConfig
+	Mode string `json:"mode"`
 }
 
 type UnusedParametersConfig struct {
@@ -76,20 +79,18 @@ type UnusedParametersConfig struct {
 }
 
 type DroppedErrorsConfig struct {
+	CommonLinterConfig
 	Mode               string   `json:"mode"`
 	Exclude            []string `json:"exclude"`
 	Baseline           string   `json:"baseline"`
-	SkipTests          *bool    `json:"skipTests"`
-	SkipGenerated      *bool    `json:"skipGenerated"`
 	UseDefaultExcludes *bool    `json:"useDefaultExcludes"`
 	GOOS               []string `json:"goos"`
 }
 
 type TestOnlyImportsConfig struct {
-	Mode          string   `json:"mode"`
-	Packages      []string `json:"packages"`
-	SkipGenerated *bool    `json:"skipGenerated"`
-	SkipTests     *bool    `json:"skipTests"`
+	CommonLinterConfig
+	Mode     string   `json:"mode"`
+	Packages []string `json:"packages"`
 }
 
 // Load loads the configuration from .ap/go.yaml in the repository root.
@@ -247,33 +248,43 @@ var DefaultTestOnlyPackages = []string{
 	"k8s.io/client-go/kubernetes/fake",
 }
 
-// IsTestOnlyImportsEnabled returns true if test-only import checking is enabled (defaulting to true, mode != "ignore").
-func (c *Config) IsTestOnlyImportsEnabled() bool {
-	if c.Lint != nil && c.Lint.TestOnlyImports != nil {
-		return c.Lint.TestOnlyImports.Mode != "ignore"
+// TestOnlyImports returns the configuration for testOnlyImports, or nil if not configured.
+func (c *Config) TestOnlyImports() *TestOnlyImportsConfig {
+	if c != nil && c.Lint != nil {
+		return c.Lint.TestOnlyImports
+	}
+	return nil
+}
+
+// Common returns the embedded CommonLinterConfig, or nil if c is nil.
+func (c *TestOnlyImportsConfig) Common() *CommonLinterConfig {
+	if c == nil {
+		return nil
+	}
+	return &c.CommonLinterConfig
+}
+
+// IsEnabled returns true if test-only import checking is enabled (defaulting to true, mode != "ignore").
+func (c *TestOnlyImportsConfig) IsEnabled() bool {
+	if c != nil && c.Mode != "" {
+		return c.Mode != "ignore"
 	}
 	return true
 }
 
-// IsTestOnlyImportsError returns true if test-only imports should be reported as an error.
+// IsError returns true if test-only imports should be reported as an error.
 // Default is true ("error" mode).
-func (c *Config) IsTestOnlyImportsError() bool {
-	return c.TestOnlyImportsMode() == "error"
-}
-
-// TestOnlyImportsMode returns the mode for test-only import checking: "ignore", "warn", or "error".
-// Default is "error".
-func (c *Config) TestOnlyImportsMode() string {
-	if c.Lint != nil && c.Lint.TestOnlyImports != nil && c.Lint.TestOnlyImports.Mode != "" {
-		return c.Lint.TestOnlyImports.Mode
+func (c *TestOnlyImportsConfig) IsError() bool {
+	if c != nil && c.Mode != "" {
+		return c.Mode == "error"
 	}
-	return "error"
+	return true
 }
 
-// TestOnlyImportsPackages returns the configured test-only packages, or the default list if not set.
-func (c *Config) TestOnlyImportsPackages() []string {
-	if c.Lint != nil && c.Lint.TestOnlyImports != nil && c.Lint.TestOnlyImports.Packages != nil {
-		return c.Lint.TestOnlyImports.Packages
+// PackagesOrDefault returns the configured test-only packages, or the default list if not set.
+func (c *TestOnlyImportsConfig) PackagesOrDefault() []string {
+	if c != nil && c.Packages != nil {
+		return c.Packages
 	}
 	return DefaultTestOnlyPackages
 }
@@ -312,6 +323,26 @@ func (c *Config) ResolveSkipTests(override *bool, analyzerDefault bool) bool {
 		shared = c.Lint.SkipTests
 	}
 	return resolve(override, shared, analyzerDefault)
+}
+
+// ResolveCommonSkipGenerated resolves whether generated files should be skipped for a linter,
+// checking the common linter config override first, then lint.skipGenerated, then analyzerDefault.
+func (c *Config) ResolveCommonSkipGenerated(common *CommonLinterConfig, analyzerDefault bool) bool {
+	var override *bool
+	if common != nil {
+		override = common.SkipGenerated
+	}
+	return c.ResolveSkipGenerated(override, analyzerDefault)
+}
+
+// ResolveCommonSkipTests resolves whether test files should be skipped for a linter,
+// checking the common linter config override first, then lint.skipTests, then analyzerDefault.
+func (c *Config) ResolveCommonSkipTests(common *CommonLinterConfig, analyzerDefault bool) bool {
+	var override *bool
+	if common != nil {
+		override = common.SkipTests
+	}
+	return c.ResolveSkipTests(override, analyzerDefault)
 }
 
 func resolve(override *bool, shared *bool, analyzerDefault bool) bool {
@@ -368,22 +399,6 @@ func (c *Config) ReplaceEmptyInterfaceWithAnySkipGenerated() *bool {
 func (c *Config) ReplaceEmptyInterfaceWithAnySkipTests() *bool {
 	if c.Lint != nil && c.Lint.ReplaceEmptyInterfaceWithAny != nil {
 		return c.Lint.ReplaceEmptyInterfaceWithAny.SkipTests
-	}
-	return nil
-}
-
-// TestOnlyImportsSkipGenerated returns the per-check override for testOnlyImports skipGenerated, or nil.
-func (c *Config) TestOnlyImportsSkipGenerated() *bool {
-	if c.Lint != nil && c.Lint.TestOnlyImports != nil {
-		return c.Lint.TestOnlyImports.SkipGenerated
-	}
-	return nil
-}
-
-// TestOnlyImportsSkipTests returns the per-check override for testOnlyImports skipTests, or nil.
-func (c *Config) TestOnlyImportsSkipTests() *bool {
-	if c.Lint != nil && c.Lint.TestOnlyImports != nil {
-		return c.Lint.TestOnlyImports.SkipTests
 	}
 	return nil
 }
