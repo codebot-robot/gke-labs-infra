@@ -399,9 +399,21 @@ func findEnd(content string, start int, style yaml.Style) int {
 	return len(content)
 }
 
+// DeployTaskOptions holds configuration options for deploying manifests.
+type DeployTaskOptions struct {
+	Namespace         string
+	OriginalNamespace string
+	ScopeResolver     ScopeResolver
+	CheckNamespace    func(ctx context.Context, namespace string) error
+}
+
 // KubectlApplyTask represents a task to apply a single k8s manifest.
 type KubectlApplyTask struct {
-	ManifestPath string
+	ManifestPath      string
+	Namespace         string
+	OriginalNamespace string
+	ScopeResolver     ScopeResolver
+	CheckNamespace    func(ctx context.Context, namespace string) error
 }
 
 func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error {
@@ -434,6 +446,34 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		return fmt.Errorf("failed to replace placeholders in %s: %w", relPath, err)
 	}
 
+	if t.Namespace != "" {
+		checkFn := t.CheckNamespace
+		if checkFn == nil {
+			checkFn = DefaultCheckNamespaceCached
+		}
+		if err := checkFn(ctx, t.Namespace); err != nil {
+			return err
+		}
+
+		resolver := t.ScopeResolver
+		if resolver == nil {
+			var err error
+			resolver, err = GetDiscoveryScopeResolver()
+			if err != nil {
+				return fmt.Errorf("failed to get discovery scope resolver: %w", err)
+			}
+		}
+
+		retargeted, clusterScoped, err := RetargetManifestNamespace(replaced, t.Namespace, resolver, t.OriginalNamespace)
+		if err != nil {
+			return fmt.Errorf("failed to retarget namespace in %s: %w", relPath, err)
+		}
+		if len(clusterScoped) > 0 {
+			klog.Warningf("Cluster-scoped object(s) left unchanged in %s: %s (names may collide between deployments into different namespaces)", relPath, strings.Join(clusterScoped, ", "))
+		}
+		replaced = retargeted
+	}
+
 	cmd := exec.CommandContext(ctx, "kubectl", "apply", "-f", "-")
 	cmd.Stdin = bytes.NewBufferString(replaced)
 	cmd.Stdout = os.Stdout
@@ -463,6 +503,9 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 }
 
 func (t *KubectlApplyTask) GetName() string {
+	if t.Namespace != "" {
+		return fmt.Sprintf("kubectl-apply-%s (namespace: %s)", filepath.Base(t.ManifestPath), t.Namespace)
+	}
 	return fmt.Sprintf("kubectl-apply-%s", filepath.Base(t.ManifestPath))
 }
 
@@ -515,11 +558,20 @@ func getCRDNames(content []byte) ([]string, error) {
 }
 
 // DeployTasksForManifests returns a task group for deploying the specified k8s manifests.
-func DeployTasksForManifests(manifests []string) tasks.Task {
+func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) tasks.Task {
+	var opt DeployTaskOptions
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+
 	var deployTasks []tasks.Task
 	for _, manifest := range manifests {
 		deployTasks = append(deployTasks, &KubectlApplyTask{
-			ManifestPath: manifest,
+			ManifestPath:      manifest,
+			Namespace:         opt.Namespace,
+			OriginalNamespace: opt.OriginalNamespace,
+			ScopeResolver:     opt.ScopeResolver,
+			CheckNamespace:    opt.CheckNamespace,
 		})
 	}
 

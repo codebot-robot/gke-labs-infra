@@ -16,6 +16,8 @@ package cmd
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -921,5 +923,154 @@ spec:
 	}
 	if !strings.Contains(err.Error(), filepath.Join("k8s", "manifest.yaml")) {
 		t.Errorf("expected error to mention manifest path 'k8s/manifest.yaml', got: %v", err)
+	}
+}
+
+func TestBuildDeployCommand_NamespaceFlags(t *testing.T) {
+	rootOpt := &RootOptions{}
+	cmd := BuildDeployCommand(rootOpt)
+
+	nsFlag := cmd.Flags().Lookup("namespace")
+	if nsFlag == nil {
+		t.Fatal("expected --namespace flag")
+	}
+	if nsFlag.Shorthand != "n" {
+		t.Errorf("expected shorthand 'n', got %q", nsFlag.Shorthand)
+	}
+	if nsFlag.DefValue != "" {
+		t.Errorf("expected default empty, got %q", nsFlag.DefValue)
+	}
+
+	// Test parsing --namespace
+	cmd1 := BuildDeployCommand(&RootOptions{})
+	if err := cmd1.ParseFlags([]string{"--namespace=corp-gke"}); err != nil {
+		t.Fatalf("ParseFlags failed: %v", err)
+	}
+	val, err := cmd1.Flags().GetString("namespace")
+	if err != nil || val != "corp-gke" {
+		t.Errorf("expected namespace=corp-gke, got %q (err: %v)", val, err)
+	}
+
+	// Test parsing -n
+	cmd2 := BuildDeployCommand(&RootOptions{})
+	if err := cmd2.ParseFlags([]string{"-n", "custom-ns"}); err != nil {
+		t.Fatalf("ParseFlags failed: %v", err)
+	}
+	val, err = cmd2.Flags().GetString("namespace")
+	if err != nil || val != "custom-ns" {
+		t.Errorf("expected namespace=custom-ns, got %q (err: %v)", val, err)
+	}
+}
+
+func TestDeploy_InvalidNamespace(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+		Namespace: "INVALID_NAME",
+	}
+
+	err := opt.Resolve([]string{"."})
+	if err == nil {
+		t.Fatalf("expected error for invalid namespace, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid") {
+		t.Errorf("expected error to mention 'invalid', got: %v", err)
+	}
+}
+
+func TestDeploy_DryRun_WithNamespace(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: "k8s://autodeploy-system/buildkit",
+		Namespace:    "corp-gke",
+	}
+
+	if err := opt.Resolve([]string{"./k8s"}); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := RunDeploy(t.Context(), opt); err != nil {
+			t.Fatalf("RunDeploy failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "kubectl-apply-a.yaml (namespace: corp-gke)") {
+		t.Errorf("expected dry-run to show 'kubectl-apply-a.yaml (namespace: corp-gke)', got:\n%s", out)
+	}
+	if !strings.Contains(out, "kubectl-apply-cm.yaml (namespace: corp-gke)") {
+		t.Errorf("expected dry-run to show 'kubectl-apply-cm.yaml (namespace: corp-gke)', got:\n%s", out)
+	}
+}
+
+func TestDeploy_DryRun_WithoutNamespace_Unchanged(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   true,
+		},
+		BuildkitHost: "k8s://autodeploy-system/buildkit",
+		Namespace:    "",
+	}
+
+	if err := opt.Resolve([]string{"./k8s"}); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if err := RunDeploy(t.Context(), opt); err != nil {
+			t.Fatalf("RunDeploy failed: %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "kubectl-apply-a.yaml\n") {
+		t.Errorf("expected dry-run to show unchanged 'kubectl-apply-a.yaml', got:\n%s", out)
+	}
+	if strings.Contains(out, "(namespace:") {
+		t.Errorf("expected dry-run without --namespace to not contain '(namespace:', got:\n%s", out)
+	}
+}
+
+func TestDeploy_RunDeploy_NonexistentNamespaceFailsEarly(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoot:   tempDir,
+			DryRun:   false,
+		},
+		Namespace: "nonexistent-ns",
+	}
+
+	if err := opt.Resolve([]string{"./k8s"}); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+
+	restore := k8s.SetCheckNamespaceExistsForTest(func(ctx context.Context, ns string) error {
+		return fmt.Errorf("target namespace %q does not exist: not found", ns)
+	})
+	defer restore()
+
+	err := RunDeploy(t.Context(), opt)
+	if err == nil {
+		t.Fatalf("expected error when namespace does not exist, got nil")
+	}
+	if !strings.Contains(err.Error(), "target namespace \"nonexistent-ns\" does not exist") {
+		t.Errorf("expected error to mention 'target namespace \"nonexistent-ns\" does not exist', got: %v", err)
 	}
 }

@@ -34,6 +34,7 @@ type DeployOptions struct {
 	*RootOptions
 	SkipPush     bool
 	BuildkitHost string
+	Namespace    string
 	Targets      []string
 
 	plans []deployPlan
@@ -59,6 +60,7 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 
 	cmd.Flags().BoolVar(&opt.SkipPush, "skip-push", false, "Skip pushing images to registry")
 	cmd.Flags().StringVar(&opt.BuildkitHost, "buildkit-host", "", "Buildkit host to use (e.g. k8s://namespace/service)")
+	cmd.Flags().StringVarP(&opt.Namespace, "namespace", "n", "", "Target namespace for namespaced manifests")
 
 	return cmd
 }
@@ -68,6 +70,10 @@ func (opt *DeployOptions) Resolve(args []string) error {
 	opt.Targets = args
 	if opt.RepoRoot == "" {
 		return fmt.Errorf("repo root is not set")
+	}
+
+	if err := k8s.ValidateNamespaceName(opt.Namespace); err != nil {
+		return err
 	}
 
 	if opt.RootFlag != "" {
@@ -280,11 +286,21 @@ func buildDeployPlans(r *repo.Repo, repoRoot, currentAPRoot string, targets []st
 
 // BuildDeployPlan constructs the task tree for deploying artifacts according to DeployOptions.
 func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string) ([]tasks.Task, error) {
-	return buildDeployTasks(r, opt.plans, !opt.SkipPush, buildkitHost)
+	return buildDeployTasks(r, opt.plans, !opt.SkipPush, buildkitHost, opt.Namespace)
 }
 
-func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string) ([]tasks.Task, error) {
+func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string) ([]tasks.Task, error) {
 	var allTasks []tasks.Task
+
+	var originalNamespace string
+	if namespace != "" {
+		var allManifests []string
+		for _, plan := range plans {
+			allManifests = append(allManifests, plan.manifests...)
+		}
+		originalNamespace = k8s.FindOriginalNamespaceInFiles(allManifests, nil)
+	}
+
 	for _, plan := range plans {
 		group := &tasks.Group{
 			Name: fmt.Sprintf("deploy-%s", filepath.Base(plan.apRoot)),
@@ -296,7 +312,10 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 		}
 		group.Tasks = append(group.Tasks, buildTasks)
 
-		deployTasks := k8s.DeployTasksForManifests(plan.manifests)
+		deployTasks := k8s.DeployTasksForManifests(plan.manifests, k8s.DeployTaskOptions{
+			Namespace:         namespace,
+			OriginalNamespace: originalNamespace,
+		})
 		group.Tasks = append(group.Tasks, deployTasks)
 
 		allTasks = append(allTasks, group)
@@ -309,6 +328,12 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 func RunDeploy(ctx context.Context, opt DeployOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
+	}
+
+	if !opt.DryRun && opt.Namespace != "" {
+		if err := k8s.DefaultCheckNamespaceCached(ctx, opt.Namespace); err != nil {
+			return err
+		}
 	}
 
 	buildkitHost, err := images.ResolveBuildkitHost(opt.BuildkitHost)
