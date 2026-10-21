@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// +k8s:deepcopy-gen=package
 package v1alpha1
 
-//go:generate go run sigs.k8s.io/controller-tools/cmd/controller-gen object:headerFile="../../../../../.ap/headers.yaml" paths="./..."
+//go:generate go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.17.2 object:headerFile="../../../../boilerplate.go.txt" paths="./..."
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
