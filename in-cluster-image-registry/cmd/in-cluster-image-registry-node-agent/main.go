@@ -364,21 +364,18 @@ func updateContainerdConfig(path string) (bool, error) {
 	}
 	tmpName := tmpFile.Name()
 	defer func() {
+		if closeErr := tmpFile.Close(); closeErr != nil {
+			klog.V(2).Infof("failed to close %s: %v", tmpName, closeErr)
+		}
 		if rmErr := os.Remove(tmpName); rmErr != nil && !os.IsNotExist(rmErr) {
 			klog.Warningf("Failed to remove temporary config file %s: %v", tmpName, rmErr)
 		}
 	}()
 
 	if _, err := tmpFile.WriteString(newContent); err != nil {
-		if closeErr := tmpFile.Close(); closeErr != nil {
-			klog.Warningf("Failed to close temp file %s: %v", tmpName, closeErr)
-		}
 		return false, fmt.Errorf("failed to write candidate config to %s: %w", tmpName, err)
 	}
 	if err := tmpFile.Chmod(0644); err != nil {
-		if closeErr := tmpFile.Close(); closeErr != nil {
-			klog.Warningf("Failed to close temp file %s: %v", tmpName, closeErr)
-		}
 		return false, fmt.Errorf("failed to chmod %s: %w", tmpName, err)
 	}
 	if err := tmpFile.Close(); err != nil {
