@@ -161,6 +161,7 @@ func BuildRootCommand() *cobra.Command {
 	cmd.AddCommand(BuildBuildCommand(&opt))
 	cmd.AddCommand(BuildDeployCommand(&opt))
 	cmd.AddCommand(BuildGenerateCommand(&opt))
+	cmd.AddCommand(BuildVerifyGenerateCommand(&opt))
 	cmd.AddCommand(BuildFormatCommand(&opt))
 	cmd.AddCommand(BuildVersionBumpCommand(&opt))
 	cmd.AddCommand(BuildAlphaCommand(&opt))

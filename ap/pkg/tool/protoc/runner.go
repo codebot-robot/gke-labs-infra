@@ -155,12 +155,18 @@ func RunProtoc(ctx context.Context, cfg *config.ProtoConfig, workDir string, arg
 	finalArgs := make([]string, 0, len(args)+1)
 	finalArgs = append(finalArgs, args...)
 
+	hasUserInclude := false
 	hasInclude := false
 	for _, arg := range args {
+		if strings.HasPrefix(arg, "-I") || strings.HasPrefix(arg, "--proto_path") {
+			hasUserInclude = true
+		}
 		if arg == "-I"+env.IncludeDir || arg == env.IncludeDir {
 			hasInclude = true
-			break
 		}
+	}
+	if !hasUserInclude {
+		finalArgs = append(finalArgs, "-I.")
 	}
 	if !hasInclude && env.IncludeDir != "" {
 		finalArgs = append(finalArgs, "-I"+env.IncludeDir)

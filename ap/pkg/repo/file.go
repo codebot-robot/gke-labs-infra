@@ -15,12 +15,14 @@
 package repo
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -35,6 +37,18 @@ type File struct {
 
 	isGeneratedOnce sync.Once
 	isGenerated     bool
+	generatedHeader string
+
+	hasGoGenerateOnce sync.Once
+	hasGoGenerate     bool
+
+	hashOnce sync.Once
+	hash     string
+	hashErr  error
+
+	metaSize  int64
+	metaMtime int64
+	metaInode uint64
 
 	infoOnce sync.Once
 	info     os.FileInfo
@@ -68,24 +82,189 @@ func (f *File) IsTest() bool {
 	return strings.HasSuffix(f.Name, "_test.go")
 }
 
-// IsGenerated reports whether this file is generated code (per https://go.dev/s/generatedcode).
-func (f *File) IsGenerated() bool {
+// HasGoGenerate reports whether this file contains a //go:generate directive.
+func (f *File) HasGoGenerate() bool {
 	if !strings.HasSuffix(f.Name, ".go") {
 		return false
 	}
+	f.hasGoGenerateOnce.Do(func() {
+		f.hasGoGenerate = f.scanGoGenerate()
+	})
+	return f.hasGoGenerate
+}
+
+func (f *File) scanGoGenerate() bool {
+	data, err := os.ReadFile(f.Path)
+	if err != nil {
+		return false
+	}
+	if !bytes.Contains(data, []byte("//go:generate")) {
+		return false
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "//go:generate") {
+			return true
+		}
+	}
+	return false
+}
+
+// IsGenerated reports whether this file is generated code.
+// A file is generated if any of its first 30 lines contains a comment
+// starting with "Code generated" and ending with "DO NOT EDIT."
+func (f *File) IsGenerated() bool {
 	f.isGeneratedOnce.Do(func() {
-		f.isGenerated = checkIsGenerated(f.Path)
+		f.isGenerated, f.generatedHeader = f.scanGenerated()
 	})
 	return f.isGenerated
 }
 
-func checkIsGenerated(path string) bool {
-	fset := token.NewFileSet()
-	astFile, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.PackageClauseOnly)
+// GeneratedHeader returns the matched generated header line if the file is generated.
+func (f *File) GeneratedHeader() string {
+	_ = f.IsGenerated()
+	return f.generatedHeader
+}
+
+func (f *File) scanGenerated() (bool, string) {
+	data, err := os.ReadFile(f.Path)
 	if err != nil {
-		return false
+		return false, ""
 	}
-	return ast.IsGenerated(astFile)
+
+	checkLen := len(data)
+	if checkLen > 4096 {
+		checkLen = 4096
+	}
+
+	lines := strings.Split(string(data[:checkLen]), "\n")
+	if len(lines) > 30 {
+		lines = lines[:30]
+	}
+
+	for _, line := range lines {
+		if isGen, header := IsGeneratedLine(line); isGen {
+			return true, header
+		}
+	}
+	return false, ""
+}
+
+// IsGeneratedLine reports whether a line indicates generated code.
+// It strips leading comment delimiters (//, #, <!--, -->, --, /*, *, */) and
+// checks if the line starts with "Code generated" and ends with "DO NOT EDIT.".
+func IsGeneratedLine(line string) (bool, string) {
+	trimmed := strings.TrimSpace(line)
+
+	for {
+		stripped := false
+		if strings.HasPrefix(trimmed, "//") {
+			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "//"))
+			stripped = true
+		} else if strings.HasPrefix(trimmed, "#") {
+			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "#"))
+			stripped = true
+		} else if strings.HasPrefix(trimmed, "<!--") {
+			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "<!--"))
+			trimmed = strings.TrimSpace(strings.TrimSuffix(trimmed, "-->"))
+			stripped = true
+		} else if strings.HasPrefix(trimmed, "--") {
+			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "--"))
+			stripped = true
+		} else if strings.HasPrefix(trimmed, "/*") {
+			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "/*"))
+			trimmed = strings.TrimSpace(strings.TrimSuffix(trimmed, "*/"))
+			stripped = true
+		} else if strings.HasPrefix(trimmed, "*") {
+			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "*"))
+			stripped = true
+		}
+		if !stripped {
+			break
+		}
+	}
+
+	if strings.HasPrefix(trimmed, "Code generated") && strings.HasSuffix(trimmed, "DO NOT EDIT.") {
+		return true, trimmed
+	}
+	return false, ""
+}
+
+// CheckIsGenerated reports whether the file at path contains a generated code header.
+func CheckIsGenerated(path string) bool {
+	f := &File{Path: path}
+	return f.IsGenerated()
+}
+
+// Hash returns a hex-encoded SHA-256 hash of the file content, memoized in the tree.
+// It uses a fast path keyed on size, mtime (nanoseconds), and inode.
+func (f *File) Hash() (string, error) {
+	f.hashOnce.Do(func() {
+		f.hash, f.hashErr = f.computeHash()
+	})
+	return f.hash, f.hashErr
+}
+
+func (f *File) computeHash() (string, error) {
+	fi, err := os.Lstat(f.Path)
+	if err != nil {
+		return "", err
+	}
+
+	var ino uint64
+	if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
+		ino = stat.Ino
+	}
+
+	mtime := fi.ModTime().UnixNano()
+	size := fi.Size()
+
+	if f.hash != "" && f.metaSize == size && f.metaMtime == mtime && f.metaInode == ino {
+		return f.hash, nil
+	}
+
+	h, err := hashFilePath(f.Path)
+	if err != nil {
+		return "", err
+	}
+
+	f.metaSize = size
+	f.metaMtime = mtime
+	f.metaInode = ino
+	return h, nil
+}
+
+func hashFilePath(path string) (retHash string, retErr error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil && retErr == nil {
+			retErr = closeErr
+		}
+	}()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// Refresh clears memoized metadata, IsGenerated, and Hash, forcing them to re-evaluate.
+func (f *File) Refresh() {
+	f.infoOnce = sync.Once{}
+	f.info = nil
+	f.isGeneratedOnce = sync.Once{}
+	f.isGenerated = false
+	f.generatedHeader = ""
+	f.hasGoGenerateOnce = sync.Once{}
+	f.hasGoGenerate = false
+	f.hashOnce = sync.Once{}
+	f.hash = ""
+	f.hashErr = nil
 }
 
 type fileInfo struct {
