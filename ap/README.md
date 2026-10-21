@@ -101,3 +101,9 @@ Commands:
 - `generate`: Run generation tasks
 - `format`: Run formatting tasks
 - `version`: Print version information
+
+## Documentation
+
+- [Onboarding Guide](docs/onboarding.md)
+- [Design Note: Distributing protoc and Plugins via Multi-Arch Container Images](docs/protoc-registry-distribution.md)
+
