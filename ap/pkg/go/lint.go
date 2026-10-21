@@ -308,6 +308,57 @@ func (t *TestOnlyImportsCheckTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+// CloseWriterCheckTask represents a task to run closewriter check.
+type CloseWriterCheckTask struct {
+	Dir           string
+	RepoRoot      string
+	IsError       bool
+	Types         []string
+	SkipGenerated bool
+	SkipTests     bool
+	SkipGlobs     []string
+}
+
+func (t *CloseWriterCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
+	klog.Infof("Running closewriter check in %s", t.Dir)
+	apPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("could not find ap executable: %w", err)
+	}
+	args := []string{"lint", "closewriter"}
+	args = append(args, fmt.Sprintf("-closewriter.skip-generated=%t", t.SkipGenerated))
+	args = append(args, fmt.Sprintf("-closewriter.skip-tests=%t", t.SkipTests))
+	if t.RepoRoot != "" {
+		args = append(args, "-closewriter.repo-root="+t.RepoRoot)
+	}
+	for _, g := range t.SkipGlobs {
+		args = append(args, "-closewriter.skip-glob="+g)
+	}
+	for _, typ := range t.Types {
+		args = append(args, "-closewriter.type="+typ)
+	}
+	args = append(args, "./...")
+	cmd := exec.CommandContext(ctx, apPath, args...)
+	cmd.Dir = t.Dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		if t.IsError {
+			return fmt.Errorf("closewriter check failed in %s: %w", t.Dir, err)
+		}
+		klog.Warningf("closewriter check failed in %s: %v", t.Dir, err)
+	}
+	return nil
+}
+
+func (t *CloseWriterCheckTask) GetName() string {
+	return "closewriter-check"
+}
+
+func (t *CloseWriterCheckTask) GetChildren() []tasks.Task {
+	return nil
+}
+
 // LintTasks returns a task group for running go linting in discovered modules.
 func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
@@ -386,6 +437,18 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 				Packages:      toi.PackagesOrDefault(),
 				SkipGenerated: cfg.ResolveCommonSkipGenerated(toi.Common(), false),
 				SkipTests:     cfg.ResolveCommonSkipTests(toi.Common(), false),
+				SkipGlobs:     cfg.Skip,
+			})
+		}
+		cw := cfg.CloseWriter()
+		if cw.IsEnabled() {
+			modGroup.Tasks = append(modGroup.Tasks, &CloseWriterCheckTask{
+				Dir:           dir,
+				RepoRoot:      root,
+				IsError:       cw.IsError(),
+				Types:         cw.TypesOrDefault(),
+				SkipGenerated: cfg.ResolveCommonSkipGenerated(cw.Common(), false),
+				SkipTests:     cfg.ResolveCommonSkipTests(cw.Common(), false),
 				SkipGlobs:     cfg.Skip,
 			})
 		}

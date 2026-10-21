@@ -677,7 +677,9 @@ func captureStdout(t *testing.T, fn func()) string {
 
 	fn()
 
-	w.Close()
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
 	var buf bytes.Buffer
 	io.Copy(&buf, r)
 	return buf.String()

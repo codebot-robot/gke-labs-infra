@@ -51,6 +51,7 @@ type LintConfig struct {
 	ReplaceEmptyInterfaceWithAny *ReplaceEmptyInterfaceWithAnyConfig `json:"replaceEmptyInterfaceWithAny"`
 	DroppedErrors                *DroppedErrorsConfig                `json:"droppedErrors"`
 	TestOnlyImports              *TestOnlyImportsConfig              `json:"testOnlyImports"`
+	CloseWriter                  *CloseWriterConfig                  `json:"closeWriter"`
 }
 
 // CommonLinterConfig holds configuration common across linters.
@@ -87,6 +88,11 @@ type DroppedErrorsConfig struct {
 type TestOnlyImportsConfig struct {
 	CommonLinterConfig
 	Packages []string `json:"packages"`
+}
+
+type CloseWriterConfig struct {
+	CommonLinterConfig
+	Types []string `json:"types"`
 }
 
 // Load loads the configuration from .ap/go.yaml in the repository root.
@@ -145,6 +151,11 @@ func (c *Config) Validate() error {
 		}
 		if c.Lint.TestOnlyImports != nil {
 			if err := checkMode("testOnlyImports", c.Lint.TestOnlyImports.Mode); err != nil {
+				return err
+			}
+		}
+		if c.Lint.CloseWriter != nil {
+			if err := checkMode("closeWriter", c.Lint.CloseWriter.Mode); err != nil {
 				return err
 			}
 		}
@@ -265,6 +276,18 @@ var DefaultTestOnlyPackages = []string{
 	"k8s.io/client-go/kubernetes/fake",
 }
 
+// DefaultCloseWriterTypes returns the default list of writer types whose Close flushes.
+var DefaultCloseWriterTypes = []string{
+	"*bufio.Writer",
+	"*compress/gzip.Writer",
+	"*compress/zlib.Writer",
+	"*archive/tar.Writer",
+	"*archive/zip.Writer",
+	"*encoding/csv.Writer",
+	"*io.PipeWriter",
+	"io.WriteCloser",
+}
+
 // Common returns the embedded CommonLinterConfig, or nil if c is nil.
 func (c *CommonLinterConfig) Common() *CommonLinterConfig {
 	return c
@@ -339,6 +362,47 @@ func (c *TestOnlyImportsConfig) PackagesOrDefault() []string {
 		return c.Packages
 	}
 	return DefaultTestOnlyPackages
+}
+
+// CloseWriter returns the configuration for closeWriter, or nil if not configured.
+func (c *Config) CloseWriter() *CloseWriterConfig {
+	if c != nil && c.Lint != nil {
+		return c.Lint.CloseWriter
+	}
+	return nil
+}
+
+// Common returns the embedded CommonLinterConfig, or nil if c is nil.
+func (c *CloseWriterConfig) Common() *CommonLinterConfig {
+	if c == nil {
+		return nil
+	}
+	return &c.CommonLinterConfig
+}
+
+// IsEnabled returns true if closeWriter checking is enabled (defaulting to true, mode != "ignore").
+func (c *CloseWriterConfig) IsEnabled() bool {
+	if c == nil {
+		return true
+	}
+	return c.CommonLinterConfig.IsEnabled()
+}
+
+// IsError returns true if closeWriter findings should be reported as an error.
+// Default is true ("error" mode).
+func (c *CloseWriterConfig) IsError() bool {
+	if c == nil {
+		return true
+	}
+	return c.CommonLinterConfig.IsError()
+}
+
+// TypesOrDefault returns the configured writer types, or the default list if not set.
+func (c *CloseWriterConfig) TypesOrDefault() []string {
+	if c != nil && c.Types != nil {
+		return c.Types
+	}
+	return DefaultCloseWriterTypes
 }
 
 // IsLintSkipGenerated returns true if generated files should be skipped across lint checks (default false).
