@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"k8s.io/klog/v2"
 )
 
@@ -41,11 +42,11 @@ type Manager struct {
 }
 
 func NewManager() (*Manager, error) {
-	cacheDir, err := os.UserCacheDir()
+	cacheDir, err := fileutils.CacheDir()
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(cacheDir, "ap", "codestyle")
+	dir := filepath.Join(cacheDir, "codestyle")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
