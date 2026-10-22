@@ -60,6 +60,7 @@ type LintConfig struct {
 type LinterConfig interface {
 	IsEnabled() bool
 	IsError() bool
+	GetMode() string
 	SkipGeneratedOverride() *bool
 	SkipTestsOverride() *bool
 }
@@ -315,6 +316,14 @@ func (c *Config) DroppedErrorsExclude() []string {
 		return c.Lint.DroppedErrors.Exclude
 	}
 	return nil
+}
+
+// GetMode returns the configured mode, or empty string if unset.
+func (c *CommonLinterConfig) GetMode() string {
+	if c == nil {
+		return ""
+	}
+	return c.Mode
 }
 
 // IsEnabled returns true if the linter is enabled (defaulting to true, mode != "ignore").

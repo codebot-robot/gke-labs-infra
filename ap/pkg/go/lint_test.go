@@ -19,8 +19,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -266,26 +268,26 @@ func TestLintTasks_SkipGenerated(t *testing.T) {
 		return dir, r
 	}
 
-	findTasks := func(taskGroup tasks.Task) (*DroppedErrorsCheckTask, *TestContextCheckTask) {
+	findTasks := func(taskGroup tasks.Task) (*DroppedErrorsCheckTask, *AnalyzersTask) {
 		group, ok := taskGroup.(*tasks.Group)
 		if !ok {
 			return nil, nil
 		}
 		var dt *DroppedErrorsCheckTask
-		var tc *TestContextCheckTask
+		var at *AnalyzersTask
 		for _, t := range group.Tasks {
 			if modGroup, ok := t.(*tasks.Group); ok {
 				for _, sub := range modGroup.Tasks {
 					if d, ok := sub.(*DroppedErrorsCheckTask); ok {
 						dt = d
 					}
-					if c, ok := sub.(*TestContextCheckTask); ok {
-						tc = c
+					if a, ok := sub.(*AnalyzersTask); ok {
+						at = a
 					}
 				}
 			}
 		}
-		return dt, tc
+		return dt, at
 	}
 
 	t.Run("skipGenerated_true", func(t *testing.T) {
@@ -294,15 +296,15 @@ func TestLintTasks_SkipGenerated(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		dt, tc := findTasks(taskGroup)
-		if dt == nil || tc == nil {
+		dt, at := findTasks(taskGroup)
+		if dt == nil || at == nil {
 			t.Fatalf("expected tasks to be found")
 		}
 		if !dt.SkipGenerated {
 			t.Errorf("expected DroppedErrorsCheckTask.SkipGenerated to be true")
 		}
-		if !tc.SkipGenerated {
-			t.Errorf("expected TestContextCheckTask.SkipGenerated to be true")
+		if !at.SkipGenerated("testcontext") {
+			t.Errorf("expected testcontext SkipGenerated to be true")
 		}
 	})
 
@@ -312,17 +314,34 @@ func TestLintTasks_SkipGenerated(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		dt, tc := findTasks(taskGroup)
-		if dt == nil || tc == nil {
+		dt, at := findTasks(taskGroup)
+		if dt == nil || at == nil {
 			t.Fatalf("expected tasks to be found")
 		}
 		if dt.SkipGenerated {
 			t.Errorf("expected DroppedErrorsCheckTask.SkipGenerated to be false by default")
 		}
-		if tc.SkipGenerated {
-			t.Errorf("expected TestContextCheckTask.SkipGenerated to be false by default")
+		if at.SkipGenerated("testcontext") {
+			t.Errorf("expected testcontext SkipGenerated to be false by default")
 		}
 	})
+}
+
+func findAnalyzersTask(taskGroup tasks.Task) *AnalyzersTask {
+	group, ok := taskGroup.(*tasks.Group)
+	if !ok {
+		return nil
+	}
+	for _, t := range group.Tasks {
+		if modGroup, ok := t.(*tasks.Group); ok {
+			for _, sub := range modGroup.Tasks {
+				if at, ok := sub.(*AnalyzersTask); ok {
+					return at
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func TestLintTasks_PerCheckOverrides(t *testing.T) {
@@ -356,36 +375,6 @@ func TestLintTasks_PerCheckOverrides(t *testing.T) {
 		return dir, r
 	}
 
-	findAllTasks := func(taskGroup tasks.Task) (*UnusedCheckTask, *TestContextCheckTask, *ReplaceEmptyInterfaceWithAnyTask, *DroppedErrorsCheckTask) {
-		group, ok := taskGroup.(*tasks.Group)
-		if !ok {
-			return nil, nil, nil, nil
-		}
-		var u *UnusedCheckTask
-		var tc *TestContextCheckTask
-		var a *ReplaceEmptyInterfaceWithAnyTask
-		var d *DroppedErrorsCheckTask
-		for _, t := range group.Tasks {
-			if modGroup, ok := t.(*tasks.Group); ok {
-				for _, sub := range modGroup.Tasks {
-					if ut, ok := sub.(*UnusedCheckTask); ok {
-						u = ut
-					}
-					if tct, ok := sub.(*TestContextCheckTask); ok {
-						tc = tct
-					}
-					if at, ok := sub.(*ReplaceEmptyInterfaceWithAnyTask); ok {
-						a = at
-					}
-					if dt, ok := sub.(*DroppedErrorsCheckTask); ok {
-						d = dt
-					}
-				}
-			}
-		}
-		return u, tc, a, d
-	}
-
 	t.Run("unused_skipGenerated_false_takes_effect", func(t *testing.T) {
 		dir, r := setupModule(t, `
 lint:
@@ -397,15 +386,15 @@ lint:
 		if err != nil {
 			t.Fatal(err)
 		}
-		u, _, _, _ := findAllTasks(taskGroup)
-		if u == nil {
-			t.Fatalf("expected UnusedCheckTask to be found")
+		at := findAnalyzersTask(taskGroup)
+		if at == nil {
+			t.Fatalf("expected AnalyzersTask to be found")
 		}
-		if u.SkipGenerated {
-			t.Errorf("expected UnusedCheckTask.SkipGenerated to be false when configured")
+		if at.SkipGenerated("unused") {
+			t.Errorf("expected unused SkipGenerated to be false when configured")
 		}
-		if !u.SkipTests {
-			t.Errorf("expected UnusedCheckTask.SkipTests to be true when configured")
+		if !at.SkipTests("unused") {
+			t.Errorf("expected unused SkipTests to be true when configured")
 		}
 	})
 
@@ -423,21 +412,21 @@ lint:
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, tc, a, _ := findAllTasks(taskGroup)
-		if tc == nil || a == nil {
-			t.Fatalf("expected TestContext and ReplaceEmptyInterface tasks to be found")
+		at := findAnalyzersTask(taskGroup)
+		if at == nil {
+			t.Fatalf("expected AnalyzersTask to be found")
 		}
-		if !tc.SkipGenerated {
-			t.Errorf("expected TestContextCheckTask.SkipGenerated to be true")
+		if !at.SkipGenerated("testcontext") {
+			t.Errorf("expected testcontext SkipGenerated to be true")
 		}
-		if !tc.SkipTests {
-			t.Errorf("expected TestContextCheckTask.SkipTests to be true")
+		if !at.SkipTests("testcontext") {
+			t.Errorf("expected testcontext SkipTests to be true")
 		}
-		if a.SkipGenerated {
-			t.Errorf("expected ReplaceEmptyInterfaceWithAnyTask.SkipGenerated to be false")
+		if at.SkipGenerated("replaceEmptyInterfaceWithAny") {
+			t.Errorf("expected replaceEmptyInterfaceWithAny SkipGenerated to be false")
 		}
-		if !a.SkipTests {
-			t.Errorf("expected ReplaceEmptyInterfaceWithAnyTask.SkipTests to be true")
+		if !at.SkipTests("replaceEmptyInterfaceWithAny") {
+			t.Errorf("expected replaceEmptyInterfaceWithAny SkipTests to be true")
 		}
 	})
 }
@@ -473,43 +462,27 @@ func TestLintTasks_TestOnlyImports(t *testing.T) {
 		return dir, r
 	}
 
-	findTestOnlyImportsTask := func(taskGroup tasks.Task) *TestOnlyImportsCheckTask {
-		group, ok := taskGroup.(*tasks.Group)
-		if !ok {
-			return nil
-		}
-		for _, t := range group.Tasks {
-			if modGroup, ok := t.(*tasks.Group); ok {
-				for _, sub := range modGroup.Tasks {
-					if toi, ok := sub.(*TestOnlyImportsCheckTask); ok {
-						return toi
-					}
-				}
-			}
-		}
-		return nil
-	}
-
 	t.Run("default_enabled_with_error_mode", func(t *testing.T) {
 		dir, r := setupModule(t, "")
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		task := findTestOnlyImportsTask(taskGroup)
+		task := findAnalyzersTask(taskGroup)
 		if task == nil {
-			t.Fatalf("expected TestOnlyImportsCheckTask to be created by default")
+			t.Fatalf("expected AnalyzersTask to be created by default")
 		}
-		if !task.IsError {
-			t.Errorf("expected IsError to be true by default")
+		if task.Enabled["testonlyimports"] != codestyle.ModeError {
+			t.Errorf("expected ModeError by default, got %v", task.Enabled["testonlyimports"])
 		}
-		if len(task.Packages) != 0 {
-			t.Errorf("expected empty packages by default (analyzer defaults used), got %d", len(task.Packages))
+		pkgs := task.Packages("testonlyimports")
+		if len(pkgs) != 0 {
+			t.Errorf("expected empty packages by default (analyzer defaults used), got %d", len(pkgs))
 		}
-		if task.SkipGenerated {
+		if task.SkipGenerated("testonlyimports") {
 			t.Errorf("expected SkipGenerated to be false by default")
 		}
-		if task.SkipTests {
+		if task.SkipTests("testonlyimports") {
 			t.Errorf("expected SkipTests to be false by default")
 		}
 	})
@@ -528,20 +501,21 @@ lint:
 		if err != nil {
 			t.Fatal(err)
 		}
-		task := findTestOnlyImportsTask(taskGroup)
+		task := findAnalyzersTask(taskGroup)
 		if task == nil {
-			t.Fatalf("expected TestOnlyImportsCheckTask to be created")
+			t.Fatalf("expected AnalyzersTask to be created")
 		}
-		if task.IsError {
-			t.Errorf("expected IsError to be false in warn mode")
+		if task.Enabled["testonlyimports"] != codestyle.ModeWarn {
+			t.Errorf("expected ModeWarn in warn mode, got %v", task.Enabled["testonlyimports"])
 		}
-		if len(task.Packages) != 1 || task.Packages[0] != "github.com/google/go-cmp" {
-			t.Errorf("unexpected packages: %v", task.Packages)
+		pkgs := task.Packages("testonlyimports")
+		if len(pkgs) != 1 || pkgs[0] != "github.com/google/go-cmp" {
+			t.Errorf("unexpected packages: %v", pkgs)
 		}
-		if !task.SkipGenerated {
+		if !task.SkipGenerated("testonlyimports") {
 			t.Errorf("expected SkipGenerated to be true")
 		}
-		if !task.SkipTests {
+		if !task.SkipTests("testonlyimports") {
 			t.Errorf("expected SkipTests to be true")
 		}
 	})
@@ -556,9 +530,12 @@ lint:
 		if err != nil {
 			t.Fatal(err)
 		}
-		task := findTestOnlyImportsTask(taskGroup)
-		if task != nil {
-			t.Fatalf("expected TestOnlyImportsCheckTask to not be created when mode is ignore")
+		task := findAnalyzersTask(taskGroup)
+		if task == nil {
+			t.Fatalf("expected AnalyzersTask to be created for other analyzers")
+		}
+		if _, ok := task.Enabled["testonlyimports"]; ok {
+			t.Fatalf("expected testonlyimports to not be enabled when mode is ignore")
 		}
 	})
 }
@@ -595,43 +572,27 @@ func TestLintTasks_CloseWriter(t *testing.T) {
 		return dir, r
 	}
 
-	findCloseWriterTask := func(taskGroup tasks.Task) *CloseWriterCheckTask {
-		group, ok := taskGroup.(*tasks.Group)
-		if !ok {
-			return nil
-		}
-		for _, t := range group.Tasks {
-			if modGroup, ok := t.(*tasks.Group); ok {
-				for _, sub := range modGroup.Tasks {
-					if cw, ok := sub.(*CloseWriterCheckTask); ok {
-						return cw
-					}
-				}
-			}
-		}
-		return nil
-	}
-
 	t.Run("default_enabled_with_error_mode", func(t *testing.T) {
 		dir, r := setupModule(t, "")
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		task := findCloseWriterTask(taskGroup)
+		task := findAnalyzersTask(taskGroup)
 		if task == nil {
-			t.Fatalf("expected CloseWriterCheckTask to be created by default")
+			t.Fatalf("expected AnalyzersTask to be created by default")
 		}
-		if !task.IsError {
-			t.Errorf("expected IsError to be true by default")
+		if task.Enabled["closewriter"] != codestyle.ModeError {
+			t.Errorf("expected ModeError by default, got %v", task.Enabled["closewriter"])
 		}
-		if len(task.Types) != 0 {
-			t.Errorf("expected empty types by default (analyzer defaults used), got %d", len(task.Types))
+		types := task.Types("closewriter")
+		if len(types) != 0 {
+			t.Errorf("expected empty types by default (analyzer defaults used), got %d", len(types))
 		}
-		if task.SkipGenerated {
+		if task.SkipGenerated("closewriter") {
 			t.Errorf("expected SkipGenerated to be false by default")
 		}
-		if task.SkipTests {
+		if task.SkipTests("closewriter") {
 			t.Errorf("expected SkipTests to be false by default")
 		}
 	})
@@ -650,20 +611,21 @@ lint:
 		if err != nil {
 			t.Fatal(err)
 		}
-		task := findCloseWriterTask(taskGroup)
+		task := findAnalyzersTask(taskGroup)
 		if task == nil {
-			t.Fatalf("expected CloseWriterCheckTask to be created")
+			t.Fatalf("expected AnalyzersTask to be created")
 		}
-		if task.IsError {
-			t.Errorf("expected IsError to be false in warn mode")
+		if task.Enabled["closewriter"] != codestyle.ModeWarn {
+			t.Errorf("expected ModeWarn in warn mode, got %v", task.Enabled["closewriter"])
 		}
-		if len(task.Types) != 1 || task.Types[0] != "*bufio.Writer" {
-			t.Errorf("unexpected types: %v", task.Types)
+		types := task.Types("closewriter")
+		if len(types) != 1 || types[0] != "*bufio.Writer" {
+			t.Errorf("unexpected types: %v", types)
 		}
-		if !task.SkipGenerated {
+		if !task.SkipGenerated("closewriter") {
 			t.Errorf("expected SkipGenerated to be true")
 		}
-		if !task.SkipTests {
+		if !task.SkipTests("closewriter") {
 			t.Errorf("expected SkipTests to be true")
 		}
 	})
@@ -678,9 +640,12 @@ lint:
 		if err != nil {
 			t.Fatal(err)
 		}
-		task := findCloseWriterTask(taskGroup)
-		if task != nil {
-			t.Fatalf("expected CloseWriterCheckTask to not be created when mode is ignore")
+		task := findAnalyzersTask(taskGroup)
+		if task == nil {
+			t.Fatalf("expected AnalyzersTask to be created for other analyzers")
+		}
+		if _, ok := task.Enabled["closewriter"]; ok {
+			t.Fatalf("expected closewriter to not be enabled when mode is ignore")
 		}
 	})
 }
@@ -717,40 +682,23 @@ func TestLintTasks_DeferInLoop(t *testing.T) {
 		return dir, r
 	}
 
-	findDeferInLoopTask := func(taskGroup tasks.Task) *DeferInLoopCheckTask {
-		group, ok := taskGroup.(*tasks.Group)
-		if !ok {
-			return nil
-		}
-		for _, t := range group.Tasks {
-			if modGroup, ok := t.(*tasks.Group); ok {
-				for _, sub := range modGroup.Tasks {
-					if dil, ok := sub.(*DeferInLoopCheckTask); ok {
-						return dil
-					}
-				}
-			}
-		}
-		return nil
-	}
-
 	t.Run("default_enabled_with_error_mode", func(t *testing.T) {
 		dir, r := setupModule(t, "")
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		task := findDeferInLoopTask(taskGroup)
+		task := findAnalyzersTask(taskGroup)
 		if task == nil {
-			t.Fatalf("expected DeferInLoopCheckTask to be created by default")
+			t.Fatalf("expected AnalyzersTask to be created by default")
 		}
-		if !task.IsError {
-			t.Errorf("expected IsError to be true by default")
+		if task.Enabled["deferinloop"] != codestyle.ModeError {
+			t.Errorf("expected ModeError by default, got %v", task.Enabled["deferinloop"])
 		}
-		if task.SkipGenerated {
+		if task.SkipGenerated("deferinloop") {
 			t.Errorf("expected SkipGenerated to be false by default")
 		}
-		if task.SkipTests {
+		if task.SkipTests("deferinloop") {
 			t.Errorf("expected SkipTests to be false by default")
 		}
 	})
@@ -767,17 +715,17 @@ lint:
 		if err != nil {
 			t.Fatal(err)
 		}
-		task := findDeferInLoopTask(taskGroup)
+		task := findAnalyzersTask(taskGroup)
 		if task == nil {
-			t.Fatalf("expected DeferInLoopCheckTask to be created")
+			t.Fatalf("expected AnalyzersTask to be created")
 		}
-		if task.IsError {
-			t.Errorf("expected IsError to be false in warn mode")
+		if task.Enabled["deferinloop"] != codestyle.ModeWarn {
+			t.Errorf("expected ModeWarn in warn mode, got %v", task.Enabled["deferinloop"])
 		}
-		if !task.SkipGenerated {
+		if !task.SkipGenerated("deferinloop") {
 			t.Errorf("expected SkipGenerated to be true")
 		}
-		if !task.SkipTests {
+		if !task.SkipTests("deferinloop") {
 			t.Errorf("expected SkipTests to be true")
 		}
 	})
@@ -792,9 +740,12 @@ lint:
 		if err != nil {
 			t.Fatal(err)
 		}
-		task := findDeferInLoopTask(taskGroup)
-		if task != nil {
-			t.Fatalf("expected DeferInLoopCheckTask to not be created when mode is ignore")
+		task := findAnalyzersTask(taskGroup)
+		if task == nil {
+			t.Fatalf("expected AnalyzersTask to be created for other analyzers")
+		}
+		if _, ok := task.Enabled["deferinloop"]; ok {
+			t.Fatalf("expected deferinloop to not be enabled when mode is ignore")
 		}
 	})
 }
@@ -923,5 +874,39 @@ func TestLintTasks_GovulncheckAndDroppedErrorsBothReport(t *testing.T) {
 	}
 	if !errors.Is(err, errDropped) {
 		t.Errorf("expected joined error to contain droppederrors error")
+	}
+}
+
+func TestLintTasks_PackageLoadError(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Invalid Go file with syntax error that causes package load to fail.
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\ninvalid syntax here\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r, err := repo.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	taskGroup, err := LintTasks(r, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task := findAnalyzersTask(taskGroup)
+	if task == nil {
+		t.Fatalf("expected AnalyzersTask to be created")
+	}
+
+	ctx := t.Context()
+	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r})
+	if err == nil {
+		t.Fatalf("expected task.Run to fail on package load error, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to load packages") {
+		t.Errorf("expected error to mention failed to load packages, got: %v", err)
 	}
 }

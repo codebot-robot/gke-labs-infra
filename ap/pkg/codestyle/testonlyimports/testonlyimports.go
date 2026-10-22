@@ -35,6 +35,10 @@ var DefaultPackages = []string{
 // Setting an empty value resets the list.
 type PackageListFlag []string
 
+func (p *PackageListFlag) Reset() {
+	*p = nil
+}
+
 func (p *PackageListFlag) String() string {
 	return strings.Join(*p, ",")
 }
