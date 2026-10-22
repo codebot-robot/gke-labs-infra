@@ -115,6 +115,102 @@ func TestLoadDefault(t *testing.T) {
 	if len(toi.PackagesOrDefault()) != 4 {
 		t.Errorf("expected 4 default testOnlyImports packages, got %d", len(toi.PackagesOrDefault()))
 	}
+	cw := cfg.CloseWriter()
+	if !cw.IsEnabled() {
+		t.Errorf("expected default closeWriter enabled to be true")
+	}
+	if !cw.IsError() {
+		t.Errorf("expected default closeWriter error to be true (error mode)")
+	}
+	if len(cw.TypesOrDefault()) != len(DefaultCloseWriterTypes) {
+		t.Errorf("expected %d default closeWriter types, got %d", len(DefaultCloseWriterTypes), len(cw.TypesOrDefault()))
+	}
+}
+
+func TestCloseWriterConfig(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "ap-closewriter-config-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  closeWriter:
+    mode: warn
+    types:
+      - "*bufio.Writer"
+      - example.com/custom.MyWriter
+    skipGenerated: true
+    skipTests: true
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	cw := cfg.CloseWriter()
+	if cw == nil {
+		t.Fatalf("expected CloseWriter to not be nil")
+	}
+	if !cw.IsEnabled() {
+		t.Errorf("expected closeWriter to be enabled")
+	}
+	if cw.IsError() {
+		t.Errorf("expected closeWriter not to be error mode (warn)")
+	}
+	if cw.Mode != "warn" {
+		t.Errorf("expected mode warn, got %q", cw.Mode)
+	}
+	types := cw.TypesOrDefault()
+	if len(types) != 2 || types[0] != "*bufio.Writer" || types[1] != "example.com/custom.MyWriter" {
+		t.Errorf("unexpected types list: %v", types)
+	}
+	if cw.SkipGenerated == nil || *cw.SkipGenerated != true {
+		t.Errorf("expected skipGenerated to be true")
+	}
+	if cw.SkipTests == nil || *cw.SkipTests != true {
+		t.Errorf("expected skipTests to be true")
+	}
+}
+
+func TestConfig_InvalidCloseWriterMode(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "ap-invalid-cw-mode-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  closeWriter:
+    mode: invalid
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Load(tempDir)
+	if err == nil {
+		t.Fatalf("expected Load to fail on invalid closeWriter mode")
+	}
+	if !strings.Contains(err.Error(), "invalid closeWriter mode") {
+		t.Errorf("expected error to mention 'invalid closeWriter mode', got: %v", err)
+	}
 }
 
 func TestTestOnlyImportsConfig(t *testing.T) {

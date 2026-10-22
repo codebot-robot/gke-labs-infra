@@ -51,6 +51,7 @@ func BuildLintCommand(rootOpt *RootOptions) *cobra.Command {
 	cmd.AddCommand(BuildReplaceEmptyInterfaceWithAnyCommand())
 	cmd.AddCommand(BuildDroppedErrorsCommand(rootOpt))
 	cmd.AddCommand(BuildTestOnlyImportsCommand())
+	cmd.AddCommand(BuildCloseWriterCommand())
 
 	return cmd
 }

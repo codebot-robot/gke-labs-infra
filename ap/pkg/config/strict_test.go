@@ -142,6 +142,27 @@ lint:
 			wantKey:    `"lint.testOnlyImports.pakcages"`,
 			wantDidYou: `"packages"`,
 		},
+		{
+			name: "typo in lint.closeWriter key",
+			yaml: `
+lint:
+  closeWritr:
+    mode: error
+`,
+			wantKey:    `"lint.closeWritr"`,
+			wantDidYou: `"closeWriter"`,
+		},
+		{
+			name: "typo in lint.closeWriter types",
+			yaml: `
+lint:
+  closeWriter:
+    typess:
+      - "*bufio.Writer"
+`,
+			wantKey:    `"lint.closeWriter.typess"`,
+			wantDidYou: `"types"`,
+		},
 	}
 
 	for _, tc := range tests {
@@ -218,6 +239,12 @@ lint:
       - github.com/google/go-cmp
     skipGenerated: true
     skipTests: true
+  closeWriter:
+    mode: error
+    types:
+      - "*bufio.Writer"
+    skipGenerated: false
+    skipTests: true
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -293,6 +320,26 @@ lint:
 	}
 	if toi.SkipTests == nil || *toi.SkipTests != true {
 		t.Errorf("expected TestOnlyImports.SkipTests to be true")
+	}
+
+	cw := cfg.CloseWriter()
+	if cw == nil {
+		t.Fatalf("expected CloseWriter to not be nil")
+	}
+	if !cw.IsEnabled() {
+		t.Errorf("expected CloseWriter.IsEnabled to be true")
+	}
+	if !cw.IsError() {
+		t.Errorf("expected CloseWriter.IsError to be true")
+	}
+	if len(cw.TypesOrDefault()) != 1 || cw.TypesOrDefault()[0] != "*bufio.Writer" {
+		t.Errorf("expected CloseWriter types [*bufio.Writer], got %v", cw.TypesOrDefault())
+	}
+	if cw.SkipGenerated == nil || *cw.SkipGenerated != false {
+		t.Errorf("expected CloseWriter.SkipGenerated to be false")
+	}
+	if cw.SkipTests == nil || *cw.SkipTests != true {
+		t.Errorf("expected CloseWriter.SkipTests to be true")
 	}
 }
 
