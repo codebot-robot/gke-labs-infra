@@ -298,20 +298,19 @@ func downloadProtocZip(ctx context.Context, downloadURL, expectedDigest, cacheRo
 		return "", fmt.Errorf("failed to create temporary zip file: %w", err)
 	}
 	tmpZipName := tmpZip.Name()
-
-	req, err := newGitHubRequest(ctx, downloadURL)
-	if err != nil {
+	defer func() {
 		if closeErr := tmpZip.Close(); closeErr != nil {
 			klog.V(2).Infof("failed to close temporary file: %v", closeErr)
 		}
+	}()
+
+	req, err := newGitHubRequest(ctx, downloadURL)
+	if err != nil {
 		return "", fmt.Errorf("failed to create request for %s: %w", downloadURL, err)
 	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		if closeErr := tmpZip.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close temporary file: %v", closeErr)
-		}
 		return "", fmt.Errorf("failed to download protoc from %s: %w", downloadURL, err)
 	}
 	defer func() {
@@ -321,9 +320,6 @@ func downloadProtocZip(ctx context.Context, downloadURL, expectedDigest, cacheRo
 	}()
 
 	if resp.StatusCode != http.StatusOK {
-		if closeErr := tmpZip.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close temporary file: %v", closeErr)
-		}
 		return "", fmt.Errorf("failed to download protoc from %s: status %s", downloadURL, resp.Status)
 	}
 
@@ -331,9 +327,6 @@ func downloadProtocZip(ctx context.Context, downloadURL, expectedDigest, cacheRo
 	writer := io.MultiWriter(tmpZip, hasher)
 
 	if _, err := io.Copy(writer, resp.Body); err != nil {
-		if closeErr := tmpZip.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close temporary file: %v", closeErr)
-		}
 		return "", fmt.Errorf("failed writing downloaded protoc zip: %w", err)
 	}
 	if err := tmpZip.Close(); err != nil {
