@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 )
 
@@ -54,11 +55,60 @@ type LintConfig struct {
 	CloseWriter                  *CloseWriterConfig                  `json:"closeWriter"`
 }
 
+// LinterConfig represents common configuration options for a linter.
+type LinterConfig interface {
+	IsEnabled() bool
+	IsError() bool
+	SkipGenerated() *bool
+	SkipTests() *bool
+}
+
 // CommonLinterConfig holds configuration common across linters.
 type CommonLinterConfig struct {
-	Mode          string `json:"mode"`
-	SkipGenerated *bool  `json:"skipGenerated"`
-	SkipTests     *bool  `json:"skipTests"`
+	Mode               string `json:"mode"`
+	SkipGeneratedField *bool  `json:"skipGenerated"`
+	SkipTestsField     *bool  `json:"skipTests"`
+}
+
+var _ LinterConfig = (*CommonLinterConfig)(nil)
+
+var linters = map[string]func(*LintConfig) *CommonLinterConfig{
+	"unused": func(l *LintConfig) *CommonLinterConfig {
+		if l.Unused == nil {
+			return nil
+		}
+		return &l.Unused.CommonLinterConfig
+	},
+	"testcontext": func(l *LintConfig) *CommonLinterConfig {
+		if l.TestContext == nil {
+			return nil
+		}
+		return &l.TestContext.CommonLinterConfig
+	},
+	"replaceEmptyInterfaceWithAny": func(l *LintConfig) *CommonLinterConfig {
+		if l.ReplaceEmptyInterfaceWithAny == nil {
+			return nil
+		}
+		return &l.ReplaceEmptyInterfaceWithAny.CommonLinterConfig
+	},
+	"droppedErrors": func(l *LintConfig) *CommonLinterConfig {
+		if l.DroppedErrors == nil {
+			return nil
+		}
+		return &l.DroppedErrors.CommonLinterConfig
+	},
+	"testOnlyImports": func(l *LintConfig) *CommonLinterConfig {
+		if l.TestOnlyImports == nil {
+			return nil
+		}
+		return &l.TestOnlyImports.CommonLinterConfig
+	},
+	"closeWriter": func(l *LintConfig) *CommonLinterConfig {
+		if l.CloseWriter == nil {
+			return nil
+		}
+		return &l.CloseWriter.CommonLinterConfig
+	},
 }
 
 type UnusedConfig struct {
@@ -95,6 +145,16 @@ type CloseWriterConfig struct {
 	Types []string `json:"types"`
 }
 
+// Linter returns the LinterConfig for the named linter.
+// If the linter is unknown or not explicitly configured, it returns a nil-safe LinterConfig with defaults.
+func (c *Config) Linter(name string) LinterConfig {
+	getter, ok := linters[name]
+	if !ok || c == nil || c.Lint == nil {
+		return (*CommonLinterConfig)(nil)
+	}
+	return getter(c.Lint)
+}
+
 // Load loads the configuration from .ap/go.yaml in the repository root.
 func Load(repoRoot string) (*Config, error) {
 	configFile := filepath.Join(repoRoot, ".ap/go.yaml")
@@ -129,34 +189,16 @@ func (c *Config) Validate() error {
 			}
 			return nil
 		}
-		if c.Lint.Unused != nil {
-			if err := checkMode("unused", c.Lint.Unused.Mode); err != nil {
-				return err
-			}
+		names := make([]string, 0, len(linters))
+		for name := range linters {
+			names = append(names, name)
 		}
-		if c.Lint.TestContext != nil {
-			if err := checkMode("testcontext", c.Lint.TestContext.Mode); err != nil {
-				return err
-			}
-		}
-		if c.Lint.ReplaceEmptyInterfaceWithAny != nil {
-			if err := checkMode("replaceEmptyInterfaceWithAny", c.Lint.ReplaceEmptyInterfaceWithAny.Mode); err != nil {
-				return err
-			}
-		}
-		if c.Lint.DroppedErrors != nil {
-			if err := checkMode("droppedErrors", c.Lint.DroppedErrors.Mode); err != nil {
-				return err
-			}
-		}
-		if c.Lint.TestOnlyImports != nil {
-			if err := checkMode("testOnlyImports", c.Lint.TestOnlyImports.Mode); err != nil {
-				return err
-			}
-		}
-		if c.Lint.CloseWriter != nil {
-			if err := checkMode("closeWriter", c.Lint.CloseWriter.Mode); err != nil {
-				return err
+		sort.Strings(names)
+		for _, name := range names {
+			if common := linters[name](c.Lint); common != nil {
+				if err := checkMode(name, common.Mode); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -189,10 +231,7 @@ func (c *Config) IsGovulncheckEnabled() bool {
 
 // IsUnusedEnabled returns true if unused detection is enabled in the config (defaulting to true, mode != "ignore").
 func (c *Config) IsUnusedEnabled() bool {
-	if c.Lint != nil && c.Lint.Unused != nil {
-		return c.Lint.Unused.IsEnabled()
-	}
-	return true
+	return c.Linter("unused").IsEnabled()
 }
 
 // IsUnusedParametersEnabled returns true if unused parameter detection is enabled.
@@ -206,10 +245,7 @@ func (c *Config) IsUnusedParametersEnabled() bool {
 
 // IsTestContextEnabled returns true if testcontext detection is enabled in the config (defaulting to true, mode != "ignore").
 func (c *Config) IsTestContextEnabled() bool {
-	if c.Lint != nil && c.Lint.TestContext != nil {
-		return c.Lint.TestContext.IsEnabled()
-	}
-	return true
+	return c.Linter("testcontext").IsEnabled()
 }
 
 // IsTestContextError returns true if testcontext should be reported as an error.
@@ -223,18 +259,12 @@ func (c *Config) IsTestContextError() bool {
 
 // IsReplaceEmptyInterfaceWithAnyEnabled returns true if the replace-empty-interface-with-any linter is enabled in the config (defaulting to true, mode != "ignore").
 func (c *Config) IsReplaceEmptyInterfaceWithAnyEnabled() bool {
-	if c.Lint != nil && c.Lint.ReplaceEmptyInterfaceWithAny != nil {
-		return c.Lint.ReplaceEmptyInterfaceWithAny.IsEnabled()
-	}
-	return true
+	return c.Linter("replaceEmptyInterfaceWithAny").IsEnabled()
 }
 
 // IsDroppedErrorsEnabled returns true if dropped error checking is enabled (defaulting to true, mode != "ignore").
 func (c *Config) IsDroppedErrorsEnabled() bool {
-	if c.Lint != nil && c.Lint.DroppedErrors != nil {
-		return c.Lint.DroppedErrors.IsEnabled()
-	}
-	return true
+	return c.Linter("droppedErrors").IsEnabled()
 }
 
 // IsDroppedErrorsError returns true if dropped errors should be reported as an error.
@@ -268,26 +298,6 @@ func (c *Config) DroppedErrorsExclude() []string {
 	return nil
 }
 
-// DefaultTestOnlyPackages returns the default list of test-only package import prefixes.
-var DefaultTestOnlyPackages = []string{
-	"github.com/google/go-cmp",
-	"github.com/stretchr/testify",
-	"golang.org/x/tools/go/analysis/analysistest",
-	"k8s.io/client-go/kubernetes/fake",
-}
-
-// DefaultCloseWriterTypes returns the default list of writer types whose Close flushes.
-var DefaultCloseWriterTypes = []string{
-	"*bufio.Writer",
-	"*compress/gzip.Writer",
-	"*compress/zlib.Writer",
-	"*archive/tar.Writer",
-	"*archive/zip.Writer",
-	"*encoding/csv.Writer",
-	"*io.PipeWriter",
-	"io.WriteCloser",
-}
-
 // Common returns the embedded CommonLinterConfig, or nil if c is nil.
 func (c *CommonLinterConfig) Common() *CommonLinterConfig {
 	return c
@@ -309,18 +319,20 @@ func (c *CommonLinterConfig) IsError() bool {
 	return true
 }
 
-func (c *UnusedConfig) IsEnabled() bool {
+// SkipGenerated returns the configured skipGenerated override, or nil if unset.
+func (c *CommonLinterConfig) SkipGenerated() *bool {
 	if c == nil {
-		return true
+		return nil
 	}
-	return c.CommonLinterConfig.IsEnabled()
+	return c.SkipGeneratedField
 }
 
-func (c *ReplaceEmptyInterfaceWithAnyConfig) IsEnabled() bool {
+// SkipTests returns the configured skipTests override, or nil if unset.
+func (c *CommonLinterConfig) SkipTests() *bool {
 	if c == nil {
-		return true
+		return nil
 	}
-	return c.CommonLinterConfig.IsEnabled()
+	return c.SkipTestsField
 }
 
 // TestOnlyImports returns the configuration for testOnlyImports, or nil if not configured.
@@ -331,78 +343,12 @@ func (c *Config) TestOnlyImports() *TestOnlyImportsConfig {
 	return nil
 }
 
-// Common returns the embedded CommonLinterConfig, or nil if c is nil.
-func (c *TestOnlyImportsConfig) Common() *CommonLinterConfig {
-	if c == nil {
-		return nil
-	}
-	return &c.CommonLinterConfig
-}
-
-// IsEnabled returns true if test-only import checking is enabled (defaulting to true, mode != "ignore").
-func (c *TestOnlyImportsConfig) IsEnabled() bool {
-	if c == nil {
-		return true
-	}
-	return c.CommonLinterConfig.IsEnabled()
-}
-
-// IsError returns true if test-only imports should be reported as an error.
-// Default is true ("error" mode).
-func (c *TestOnlyImportsConfig) IsError() bool {
-	if c == nil {
-		return true
-	}
-	return c.CommonLinterConfig.IsError()
-}
-
-// PackagesOrDefault returns the configured test-only packages, or the default list if not set.
-func (c *TestOnlyImportsConfig) PackagesOrDefault() []string {
-	if c != nil && c.Packages != nil {
-		return c.Packages
-	}
-	return DefaultTestOnlyPackages
-}
-
 // CloseWriter returns the configuration for closeWriter, or nil if not configured.
 func (c *Config) CloseWriter() *CloseWriterConfig {
 	if c != nil && c.Lint != nil {
 		return c.Lint.CloseWriter
 	}
 	return nil
-}
-
-// Common returns the embedded CommonLinterConfig, or nil if c is nil.
-func (c *CloseWriterConfig) Common() *CommonLinterConfig {
-	if c == nil {
-		return nil
-	}
-	return &c.CommonLinterConfig
-}
-
-// IsEnabled returns true if closeWriter checking is enabled (defaulting to true, mode != "ignore").
-func (c *CloseWriterConfig) IsEnabled() bool {
-	if c == nil {
-		return true
-	}
-	return c.CommonLinterConfig.IsEnabled()
-}
-
-// IsError returns true if closeWriter findings should be reported as an error.
-// Default is true ("error" mode).
-func (c *CloseWriterConfig) IsError() bool {
-	if c == nil {
-		return true
-	}
-	return c.CommonLinterConfig.IsError()
-}
-
-// TypesOrDefault returns the configured writer types, or the default list if not set.
-func (c *CloseWriterConfig) TypesOrDefault() []string {
-	if c != nil && c.Types != nil {
-		return c.Types
-	}
-	return DefaultCloseWriterTypes
 }
 
 // IsLintSkipGenerated returns true if generated files should be skipped across lint checks (default false).
@@ -423,7 +369,11 @@ func (c *Config) IsLintSkipTests() bool {
 
 // ResolveSkipGenerated resolves whether generated files should be skipped,
 // checking a per-check override first, then lint.skipGenerated, then analyzerDefault.
-func (c *Config) ResolveSkipGenerated(override *bool, analyzerDefault bool) bool {
+func (c *Config) ResolveSkipGenerated(lc LinterConfig, analyzerDefault bool) bool {
+	var override *bool
+	if lc != nil {
+		override = lc.SkipGenerated()
+	}
 	var shared *bool
 	if c != nil && c.Lint != nil {
 		shared = c.Lint.SkipGenerated
@@ -433,7 +383,11 @@ func (c *Config) ResolveSkipGenerated(override *bool, analyzerDefault bool) bool
 
 // ResolveSkipTests resolves whether test files should be skipped,
 // checking a per-check override first, then lint.skipTests, then analyzerDefault.
-func (c *Config) ResolveSkipTests(override *bool, analyzerDefault bool) bool {
+func (c *Config) ResolveSkipTests(lc LinterConfig, analyzerDefault bool) bool {
+	var override *bool
+	if lc != nil {
+		override = lc.SkipTests()
+	}
 	var shared *bool
 	if c != nil && c.Lint != nil {
 		shared = c.Lint.SkipTests
@@ -444,21 +398,13 @@ func (c *Config) ResolveSkipTests(override *bool, analyzerDefault bool) bool {
 // ResolveCommonSkipGenerated resolves whether generated files should be skipped for a linter,
 // checking the common linter config override first, then lint.skipGenerated, then analyzerDefault.
 func (c *Config) ResolveCommonSkipGenerated(common *CommonLinterConfig, analyzerDefault bool) bool {
-	var override *bool
-	if common != nil {
-		override = common.SkipGenerated
-	}
-	return c.ResolveSkipGenerated(override, analyzerDefault)
+	return c.ResolveSkipGenerated(common, analyzerDefault)
 }
 
 // ResolveCommonSkipTests resolves whether test files should be skipped for a linter,
 // checking the common linter config override first, then lint.skipTests, then analyzerDefault.
 func (c *Config) ResolveCommonSkipTests(common *CommonLinterConfig, analyzerDefault bool) bool {
-	var override *bool
-	if common != nil {
-		override = common.SkipTests
-	}
-	return c.ResolveSkipTests(override, analyzerDefault)
+	return c.ResolveSkipTests(common, analyzerDefault)
 }
 
 func resolve(override *bool, shared *bool, analyzerDefault bool) bool {
@@ -471,70 +417,14 @@ func resolve(override *bool, shared *bool, analyzerDefault bool) bool {
 	return analyzerDefault
 }
 
-// UnusedSkipGenerated returns the per-check override for unused skipGenerated, or nil.
-func (c *Config) UnusedSkipGenerated() *bool {
-	if c.Lint != nil && c.Lint.Unused != nil {
-		return c.Lint.Unused.SkipGenerated
-	}
-	return nil
-}
-
-// UnusedSkipTests returns the per-check override for unused skipTests, or nil.
-func (c *Config) UnusedSkipTests() *bool {
-	if c.Lint != nil && c.Lint.Unused != nil {
-		return c.Lint.Unused.SkipTests
-	}
-	return nil
-}
-
-// TestContextSkipGenerated returns the per-check override for testcontext skipGenerated, or nil.
-func (c *Config) TestContextSkipGenerated() *bool {
-	if c.Lint != nil && c.Lint.TestContext != nil {
-		return c.Lint.TestContext.SkipGenerated
-	}
-	return nil
-}
-
-// TestContextSkipTests returns the per-check override for testcontext skipTests, or nil.
-func (c *Config) TestContextSkipTests() *bool {
-	if c.Lint != nil && c.Lint.TestContext != nil {
-		return c.Lint.TestContext.SkipTests
-	}
-	return nil
-}
-
-// ReplaceEmptyInterfaceWithAnySkipGenerated returns the per-check override for replaceEmptyInterfaceWithAny skipGenerated, or nil.
-func (c *Config) ReplaceEmptyInterfaceWithAnySkipGenerated() *bool {
-	if c.Lint != nil && c.Lint.ReplaceEmptyInterfaceWithAny != nil {
-		return c.Lint.ReplaceEmptyInterfaceWithAny.SkipGenerated
-	}
-	return nil
-}
-
-// ReplaceEmptyInterfaceWithAnySkipTests returns the per-check override for replaceEmptyInterfaceWithAny skipTests, or nil.
-func (c *Config) ReplaceEmptyInterfaceWithAnySkipTests() *bool {
-	if c.Lint != nil && c.Lint.ReplaceEmptyInterfaceWithAny != nil {
-		return c.Lint.ReplaceEmptyInterfaceWithAny.SkipTests
-	}
-	return nil
-}
-
 // DroppedErrorsSkipTests returns true if test files should be skipped (default true).
 func (c *Config) DroppedErrorsSkipTests() bool {
-	var override *bool
-	if c != nil && c.Lint != nil && c.Lint.DroppedErrors != nil {
-		override = c.Lint.DroppedErrors.SkipTests
-	}
-	return c.ResolveSkipTests(override, true)
+	return c.ResolveSkipTests(c.Linter("droppedErrors"), true)
 }
 
 // DroppedErrorsSkipGenerated returns true if generated files should be skipped (default false).
 func (c *Config) DroppedErrorsSkipGenerated() bool {
-	var override *bool
-	if c != nil && c.Lint != nil && c.Lint.DroppedErrors != nil {
-		override = c.Lint.DroppedErrors.SkipGenerated
-	}
-	return c.ResolveSkipGenerated(override, false)
+	return c.ResolveSkipGenerated(c.Linter("droppedErrors"), false)
 }
 
 // DroppedErrorsUseDefaultExcludes returns true if default exclusions should be used (default true).

@@ -390,31 +390,34 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 			modGroup.Tasks = append(modGroup.Tasks, &GovulncheckTask{Dir: dir})
 		}
 		if cfg.IsUnusedEnabled() {
+			lc := cfg.Linter("unused")
 			modGroup.Tasks = append(modGroup.Tasks, &UnusedCheckTask{
 				Dir:             dir,
 				RepoRoot:        root,
 				CheckParameters: cfg.IsUnusedParametersEnabled(),
-				SkipGenerated:   cfg.ResolveSkipGenerated(cfg.UnusedSkipGenerated(), true),
-				SkipTests:       cfg.ResolveSkipTests(cfg.UnusedSkipTests(), false),
+				SkipGenerated:   cfg.ResolveSkipGenerated(lc, true),
+				SkipTests:       cfg.ResolveSkipTests(lc, false),
 				SkipGlobs:       cfg.Skip,
 			})
 		}
 		if cfg.IsTestContextEnabled() {
+			lc := cfg.Linter("testcontext")
 			modGroup.Tasks = append(modGroup.Tasks, &TestContextCheckTask{
 				Dir:           dir,
 				RepoRoot:      root,
 				IsError:       cfg.IsTestContextError(),
-				SkipGenerated: cfg.ResolveSkipGenerated(cfg.TestContextSkipGenerated(), false),
-				SkipTests:     cfg.ResolveSkipTests(cfg.TestContextSkipTests(), false),
+				SkipGenerated: cfg.ResolveSkipGenerated(lc, false),
+				SkipTests:     cfg.ResolveSkipTests(lc, false),
 				SkipGlobs:     cfg.Skip,
 			})
 		}
 		if cfg.IsReplaceEmptyInterfaceWithAnyEnabled() {
+			lc := cfg.Linter("replaceEmptyInterfaceWithAny")
 			modGroup.Tasks = append(modGroup.Tasks, &ReplaceEmptyInterfaceWithAnyTask{
 				Dir:           dir,
 				RepoRoot:      root,
-				SkipGenerated: cfg.ResolveSkipGenerated(cfg.ReplaceEmptyInterfaceWithAnySkipGenerated(), true),
-				SkipTests:     cfg.ResolveSkipTests(cfg.ReplaceEmptyInterfaceWithAnySkipTests(), false),
+				SkipGenerated: cfg.ResolveSkipGenerated(lc, true),
+				SkipTests:     cfg.ResolveSkipTests(lc, false),
 				SkipGlobs:     cfg.Skip,
 			})
 		}
@@ -428,27 +431,35 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 				SkipGlobs:     cfg.Skip,
 			})
 		}
-		toi := cfg.TestOnlyImports()
+		toi := cfg.Linter("testOnlyImports")
 		if toi.IsEnabled() {
+			var pkgs []string
+			if c := cfg.TestOnlyImports(); c != nil {
+				pkgs = c.Packages
+			}
 			modGroup.Tasks = append(modGroup.Tasks, &TestOnlyImportsCheckTask{
 				Dir:           dir,
 				RepoRoot:      root,
 				IsError:       toi.IsError(),
-				Packages:      toi.PackagesOrDefault(),
-				SkipGenerated: cfg.ResolveCommonSkipGenerated(toi.Common(), false),
-				SkipTests:     cfg.ResolveCommonSkipTests(toi.Common(), false),
+				Packages:      pkgs,
+				SkipGenerated: cfg.ResolveSkipGenerated(toi, false),
+				SkipTests:     cfg.ResolveSkipTests(toi, false),
 				SkipGlobs:     cfg.Skip,
 			})
 		}
-		cw := cfg.CloseWriter()
+		cw := cfg.Linter("closeWriter")
 		if cw.IsEnabled() {
+			var types []string
+			if c := cfg.CloseWriter(); c != nil {
+				types = c.Types
+			}
 			modGroup.Tasks = append(modGroup.Tasks, &CloseWriterCheckTask{
 				Dir:           dir,
 				RepoRoot:      root,
 				IsError:       cw.IsError(),
-				Types:         cw.TypesOrDefault(),
-				SkipGenerated: cfg.ResolveCommonSkipGenerated(cw.Common(), false),
-				SkipTests:     cfg.ResolveCommonSkipTests(cw.Common(), false),
+				Types:         types,
+				SkipGenerated: cfg.ResolveSkipGenerated(cw, false),
+				SkipTests:     cfg.ResolveSkipTests(cw, false),
 				SkipGlobs:     cfg.Skip,
 			})
 		}

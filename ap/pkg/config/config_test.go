@@ -105,25 +105,25 @@ func TestLoadDefault(t *testing.T) {
 	if cfg.DroppedErrorsUseDefaultExcludes() != true {
 		t.Errorf("expected default droppederrors useDefaultExcludes to be true")
 	}
-	toi := cfg.TestOnlyImports()
+	toi := cfg.Linter("testOnlyImports")
 	if !toi.IsEnabled() {
 		t.Errorf("expected default testOnlyImports enabled to be true")
 	}
 	if !toi.IsError() {
 		t.Errorf("expected default testOnlyImports error to be true (error mode)")
 	}
-	if len(toi.PackagesOrDefault()) != 4 {
-		t.Errorf("expected 4 default testOnlyImports packages, got %d", len(toi.PackagesOrDefault()))
+	if cfg.TestOnlyImports() != nil {
+		t.Errorf("expected default testOnlyImports config to be nil, got %v", cfg.TestOnlyImports())
 	}
-	cw := cfg.CloseWriter()
+	cw := cfg.Linter("closeWriter")
 	if !cw.IsEnabled() {
 		t.Errorf("expected default closeWriter enabled to be true")
 	}
 	if !cw.IsError() {
 		t.Errorf("expected default closeWriter error to be true (error mode)")
 	}
-	if len(cw.TypesOrDefault()) != len(DefaultCloseWriterTypes) {
-		t.Errorf("expected %d default closeWriter types, got %d", len(DefaultCloseWriterTypes), len(cw.TypesOrDefault()))
+	if cfg.CloseWriter() != nil {
+		t.Errorf("expected default closeWriter config to be nil, got %v", cfg.CloseWriter())
 	}
 }
 
@@ -158,27 +158,28 @@ lint:
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	cw := cfg.CloseWriter()
-	if cw == nil {
-		t.Fatalf("expected CloseWriter to not be nil")
-	}
+	cw := cfg.Linter("closeWriter")
 	if !cw.IsEnabled() {
 		t.Errorf("expected closeWriter to be enabled")
 	}
 	if cw.IsError() {
 		t.Errorf("expected closeWriter not to be error mode (warn)")
 	}
-	if cw.Mode != "warn" {
-		t.Errorf("expected mode warn, got %q", cw.Mode)
+	cwc := cfg.CloseWriter()
+	if cwc == nil {
+		t.Fatalf("expected CloseWriter to not be nil")
 	}
-	types := cw.TypesOrDefault()
+	if cwc.Mode != "warn" {
+		t.Errorf("expected mode warn, got %q", cwc.Mode)
+	}
+	types := cwc.Types
 	if len(types) != 2 || types[0] != "*bufio.Writer" || types[1] != "example.com/custom.MyWriter" {
 		t.Errorf("unexpected types list: %v", types)
 	}
-	if cw.SkipGenerated == nil || *cw.SkipGenerated != true {
+	if cw.SkipGenerated() == nil || *cw.SkipGenerated() != true {
 		t.Errorf("expected skipGenerated to be true")
 	}
-	if cw.SkipTests == nil || *cw.SkipTests != true {
+	if cw.SkipTests() == nil || *cw.SkipTests() != true {
 		t.Errorf("expected skipTests to be true")
 	}
 }
@@ -244,27 +245,28 @@ lint:
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	toi := cfg.TestOnlyImports()
-	if toi == nil {
-		t.Fatalf("expected TestOnlyImports to not be nil")
-	}
+	toi := cfg.Linter("testOnlyImports")
 	if !toi.IsEnabled() {
 		t.Errorf("expected testOnlyImports to be enabled")
 	}
 	if toi.IsError() {
 		t.Errorf("expected testOnlyImports not to be error mode (warn)")
 	}
-	if toi.Mode != "warn" {
-		t.Errorf("expected mode warn, got %q", toi.Mode)
+	toic := cfg.TestOnlyImports()
+	if toic == nil {
+		t.Fatalf("expected TestOnlyImports to not be nil")
 	}
-	pkgs := toi.PackagesOrDefault()
+	if toic.Mode != "warn" {
+		t.Errorf("expected mode warn, got %q", toic.Mode)
+	}
+	pkgs := toic.Packages
 	if len(pkgs) != 2 || pkgs[0] != "github.com/google/go-cmp" || pkgs[1] != "example.com/custom" {
 		t.Errorf("unexpected packages list: %v", pkgs)
 	}
-	if toi.SkipGenerated == nil || *toi.SkipGenerated != true {
+	if toi.SkipGenerated() == nil || *toi.SkipGenerated() != true {
 		t.Errorf("expected skipGenerated to be true")
 	}
-	if toi.SkipTests == nil || *toi.SkipTests != true {
+	if toi.SkipTests() == nil || *toi.SkipTests() != true {
 		t.Errorf("expected skipTests to be true")
 	}
 }

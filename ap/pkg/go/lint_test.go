@@ -503,8 +503,8 @@ func TestLintTasks_TestOnlyImports(t *testing.T) {
 		if !task.IsError {
 			t.Errorf("expected IsError to be true by default")
 		}
-		if len(task.Packages) != 4 {
-			t.Errorf("expected 4 default packages, got %d", len(task.Packages))
+		if len(task.Packages) != 0 {
+			t.Errorf("expected empty packages by default (analyzer defaults used), got %d", len(task.Packages))
 		}
 		if task.SkipGenerated {
 			t.Errorf("expected SkipGenerated to be false by default")
@@ -625,8 +625,8 @@ func TestLintTasks_CloseWriter(t *testing.T) {
 		if !task.IsError {
 			t.Errorf("expected IsError to be true by default")
 		}
-		if len(task.Types) != len(config.DefaultCloseWriterTypes) {
-			t.Errorf("expected %d default types, got %d", len(config.DefaultCloseWriterTypes), len(task.Types))
+		if len(task.Types) != 0 {
+			t.Errorf("expected empty types by default (analyzer defaults used), got %d", len(task.Types))
 		}
 		if task.SkipGenerated {
 			t.Errorf("expected SkipGenerated to be false by default")
