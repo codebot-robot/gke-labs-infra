@@ -59,15 +59,15 @@ type LintConfig struct {
 type LinterConfig interface {
 	IsEnabled() bool
 	IsError() bool
-	SkipGenerated() *bool
-	SkipTests() *bool
+	SkipGeneratedOverride() *bool
+	SkipTestsOverride() *bool
 }
 
 // CommonLinterConfig holds configuration common across linters.
 type CommonLinterConfig struct {
-	Mode               string `json:"mode"`
-	SkipGeneratedField *bool  `json:"skipGenerated"`
-	SkipTestsField     *bool  `json:"skipTests"`
+	Mode          string `json:"mode"`
+	SkipGenerated *bool  `json:"skipGenerated"`
+	SkipTests     *bool  `json:"skipTests"`
 }
 
 var _ LinterConfig = (*CommonLinterConfig)(nil)
@@ -146,13 +146,21 @@ type CloseWriterConfig struct {
 }
 
 // Linter returns the LinterConfig for the named linter.
-// If the linter is unknown or not explicitly configured, it returns a nil-safe LinterConfig with defaults.
+// It panics if the linter name is not registered.
+// If the linter is not explicitly configured, it returns a nil-safe LinterConfig with defaults.
 func (c *Config) Linter(name string) LinterConfig {
 	getter, ok := linters[name]
-	if !ok || c == nil || c.Lint == nil {
+	if !ok {
+		panic(fmt.Sprintf("unknown linter %q", name))
+	}
+	if c == nil || c.Lint == nil {
 		return (*CommonLinterConfig)(nil)
 	}
-	return getter(c.Lint)
+	common := getter(c.Lint)
+	if common == nil {
+		return (*CommonLinterConfig)(nil)
+	}
+	return common
 }
 
 // Load loads the configuration from .ap/go.yaml in the repository root.
@@ -298,11 +306,6 @@ func (c *Config) DroppedErrorsExclude() []string {
 	return nil
 }
 
-// Common returns the embedded CommonLinterConfig, or nil if c is nil.
-func (c *CommonLinterConfig) Common() *CommonLinterConfig {
-	return c
-}
-
 // IsEnabled returns true if the linter is enabled (defaulting to true, mode != "ignore").
 func (c *CommonLinterConfig) IsEnabled() bool {
 	if c != nil && c.Mode != "" {
@@ -319,20 +322,20 @@ func (c *CommonLinterConfig) IsError() bool {
 	return true
 }
 
-// SkipGenerated returns the configured skipGenerated override, or nil if unset.
-func (c *CommonLinterConfig) SkipGenerated() *bool {
+// SkipGeneratedOverride returns the configured skipGenerated override, or nil if unset.
+func (c *CommonLinterConfig) SkipGeneratedOverride() *bool {
 	if c == nil {
 		return nil
 	}
-	return c.SkipGeneratedField
+	return c.SkipGenerated
 }
 
-// SkipTests returns the configured skipTests override, or nil if unset.
-func (c *CommonLinterConfig) SkipTests() *bool {
+// SkipTestsOverride returns the configured skipTests override, or nil if unset.
+func (c *CommonLinterConfig) SkipTestsOverride() *bool {
 	if c == nil {
 		return nil
 	}
-	return c.SkipTestsField
+	return c.SkipTests
 }
 
 // TestOnlyImports returns the configuration for testOnlyImports, or nil if not configured.
@@ -372,7 +375,7 @@ func (c *Config) IsLintSkipTests() bool {
 func (c *Config) ResolveSkipGenerated(lc LinterConfig, analyzerDefault bool) bool {
 	var override *bool
 	if lc != nil {
-		override = lc.SkipGenerated()
+		override = lc.SkipGeneratedOverride()
 	}
 	var shared *bool
 	if c != nil && c.Lint != nil {
@@ -386,25 +389,13 @@ func (c *Config) ResolveSkipGenerated(lc LinterConfig, analyzerDefault bool) boo
 func (c *Config) ResolveSkipTests(lc LinterConfig, analyzerDefault bool) bool {
 	var override *bool
 	if lc != nil {
-		override = lc.SkipTests()
+		override = lc.SkipTestsOverride()
 	}
 	var shared *bool
 	if c != nil && c.Lint != nil {
 		shared = c.Lint.SkipTests
 	}
 	return resolve(override, shared, analyzerDefault)
-}
-
-// ResolveCommonSkipGenerated resolves whether generated files should be skipped for a linter,
-// checking the common linter config override first, then lint.skipGenerated, then analyzerDefault.
-func (c *Config) ResolveCommonSkipGenerated(common *CommonLinterConfig, analyzerDefault bool) bool {
-	return c.ResolveSkipGenerated(common, analyzerDefault)
-}
-
-// ResolveCommonSkipTests resolves whether test files should be skipped for a linter,
-// checking the common linter config override first, then lint.skipTests, then analyzerDefault.
-func (c *Config) ResolveCommonSkipTests(common *CommonLinterConfig, analyzerDefault bool) bool {
-	return c.ResolveSkipTests(common, analyzerDefault)
 }
 
 func resolve(override *bool, shared *bool, analyzerDefault bool) bool {

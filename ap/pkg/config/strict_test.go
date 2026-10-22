@@ -275,22 +275,22 @@ lint:
 	}
 
 	// Verify per-check overrides
-	if cfg.Linter("unused").SkipGenerated() == nil || *cfg.Linter("unused").SkipGenerated() != false {
+	if cfg.Linter("unused").SkipGeneratedOverride() == nil || *cfg.Linter("unused").SkipGeneratedOverride() != false {
 		t.Errorf("expected UnusedSkipGenerated to be false")
 	}
-	if cfg.Linter("unused").SkipTests() == nil || *cfg.Linter("unused").SkipTests() != true {
+	if cfg.Linter("unused").SkipTestsOverride() == nil || *cfg.Linter("unused").SkipTestsOverride() != true {
 		t.Errorf("expected UnusedSkipTests to be true")
 	}
-	if cfg.Linter("testcontext").SkipGenerated() == nil || *cfg.Linter("testcontext").SkipGenerated() != true {
+	if cfg.Linter("testcontext").SkipGeneratedOverride() == nil || *cfg.Linter("testcontext").SkipGeneratedOverride() != true {
 		t.Errorf("expected TestContextSkipGenerated to be true")
 	}
-	if cfg.Linter("testcontext").SkipTests() == nil || *cfg.Linter("testcontext").SkipTests() != true {
+	if cfg.Linter("testcontext").SkipTestsOverride() == nil || *cfg.Linter("testcontext").SkipTestsOverride() != true {
 		t.Errorf("expected TestContextSkipTests to be true")
 	}
-	if cfg.Linter("replaceEmptyInterfaceWithAny").SkipGenerated() == nil || *cfg.Linter("replaceEmptyInterfaceWithAny").SkipGenerated() != true {
+	if cfg.Linter("replaceEmptyInterfaceWithAny").SkipGeneratedOverride() == nil || *cfg.Linter("replaceEmptyInterfaceWithAny").SkipGeneratedOverride() != true {
 		t.Errorf("expected ReplaceEmptyInterfaceWithAnySkipGenerated to be true")
 	}
-	if cfg.Linter("replaceEmptyInterfaceWithAny").SkipTests() == nil || *cfg.Linter("replaceEmptyInterfaceWithAny").SkipTests() != false {
+	if cfg.Linter("replaceEmptyInterfaceWithAny").SkipTestsOverride() == nil || *cfg.Linter("replaceEmptyInterfaceWithAny").SkipTestsOverride() != false {
 		t.Errorf("expected ReplaceEmptyInterfaceWithAnySkipTests to be false")
 	}
 	if !cfg.DroppedErrorsSkipTests() {
@@ -316,10 +316,10 @@ lint:
 	if len(toic.Packages) != 1 || toic.Packages[0] != "github.com/google/go-cmp" {
 		t.Errorf("expected TestOnlyImports packages [github.com/google/go-cmp], got %v", toic.Packages)
 	}
-	if toi.SkipGenerated() == nil || *toi.SkipGenerated() != true {
+	if toi.SkipGeneratedOverride() == nil || *toi.SkipGeneratedOverride() != true {
 		t.Errorf("expected TestOnlyImports.SkipGenerated to be true")
 	}
-	if toi.SkipTests() == nil || *toi.SkipTests() != true {
+	if toi.SkipTestsOverride() == nil || *toi.SkipTestsOverride() != true {
 		t.Errorf("expected TestOnlyImports.SkipTests to be true")
 	}
 
@@ -337,10 +337,10 @@ lint:
 	if len(cwc.Types) != 1 || cwc.Types[0] != "*bufio.Writer" {
 		t.Errorf("expected CloseWriter types [*bufio.Writer], got %v", cwc.Types)
 	}
-	if cw.SkipGenerated() == nil || *cw.SkipGenerated() != false {
+	if cw.SkipGeneratedOverride() == nil || *cw.SkipGeneratedOverride() != false {
 		t.Errorf("expected CloseWriter.SkipGenerated to be false")
 	}
-	if cw.SkipTests() == nil || *cw.SkipTests() != true {
+	if cw.SkipTestsOverride() == nil || *cw.SkipTestsOverride() != true {
 		t.Errorf("expected CloseWriter.SkipTests to be true")
 	}
 }
