@@ -27,6 +27,8 @@ func (v Verbose) Warning(args ...any)                 {}
 func (v Verbose) Warningf(format string, args ...any) {}
 func (v Verbose) Error(args ...any)                   {}
 func (v Verbose) Errorf(format string, args ...any)   {}
+func (v Verbose) Fatal(args ...any)                   {}
+func (v Verbose) Fatalf(format string, args ...any)   {}
 
 func Info(args ...any)                    {}
 func Infof(format string, args ...any)    {}
@@ -37,3 +39,9 @@ func Warningln(args ...any)               {}
 func Error(args ...any)                   {}
 func Errorf(format string, args ...any)   {}
 func Errorln(args ...any)                 {}
+func Fatal(args ...any)                   {}
+func Fatalf(format string, args ...any)   {}
+func Fatalln(args ...any)                 {}
+func Exit(args ...any)                    {}
+func Exitf(format string, args ...any)    {}
+func Exitln(args ...any)                  {}

@@ -211,6 +211,12 @@ func checkFunction(fnNode ast.Node, body *ast.BlockStmt, encFuncName string, pas
 			continue
 		}
 
+		// Only report if the error was actually logged (not dropped outright).
+		// Dropped-outright errors (e.g. defer f.Close() or _ = f.Close()) are handled by droppederrors.
+		if !isErrorOnlyLogged(call, fnNode, parentMap, pass.TypesInfo) {
+			continue
+		}
+
 		msg := fmt.Sprintf("error from %s() on a writer is only logged in %s; return it so write failures are not silent", methodName, encFuncName)
 		pass.Report(analysis.Diagnostic{
 			Pos:      call.Pos(),
@@ -582,9 +588,9 @@ func isErrorHandled(call *ast.CallExpr, fnNode ast.Node, parentMap map[ast.Node]
 		return true
 	}
 
-	// 2. Direct panic: panic(f.Close())
+	// 2. Direct process-terminating call: panic(f.Close()), log.Fatal(f.Close()), etc.
 	if callParent, ok := parent.(*ast.CallExpr); ok {
-		if id, ok := callParent.Fun.(*ast.Ident); ok && id.Name == "panic" {
+		if isProcessTerminatingCall(callParent, info) {
 			return true
 		}
 		// 3. Test failure: t.Fatal(f.Close()), t.Error(f.Close())
@@ -660,6 +666,9 @@ func isSinkHandled(node ast.Node, namedReturns map[*types.Var]bool, parentMap ma
 	if _, ok := node.(*ast.ReturnStmt); ok {
 		return true
 	}
+	if call, ok := node.(*ast.CallExpr); ok && isProcessTerminatingCall(call, info) {
+		return true
+	}
 	if assign, ok := node.(*ast.AssignStmt); ok {
 		for _, lhs := range assign.Lhs {
 			if id, ok := unwrapIdent(lhs); ok {
@@ -711,8 +720,8 @@ func isUseReachingCaller(id *ast.Ident, fnNode ast.Node, parentMap map[ast.Node]
 
 	// In a CallExpr:
 	if call, ok := parent.(*ast.CallExpr); ok {
-		// panic(cerr)
-		if fnId, ok := call.Fun.(*ast.Ident); ok && fnId.Name == "panic" {
+		// panic(cerr), os.Exit(...), log.Fatalf(...), klog.Fatalf(...), etc.
+		if isProcessTerminatingCall(call, info) {
 			return true
 		}
 		// t.Fatal(cerr), t.Error(cerr)
@@ -759,15 +768,272 @@ func isUseReachingCaller(id *ast.Ident, fnNode ast.Node, parentMap map[ast.Node]
 		}
 	}
 
-	// If inside cerr != nil condition:
-	if bin, ok := parent.(*ast.BinaryExpr); ok {
-		if bin.Op == token.NEQ || bin.Op == token.EQL {
-			// Check if part of if cerr := f.Close(); cerr != nil && retErr == nil { retErr = cerr }
-			// Condition itself does not propagate error; other uses in the block will.
-			return false
+	// Check if this use occurs within an if-statement or closure whose block terminates the process
+	if ifStmt := findEnclosingIfStmt(id, parentMap); ifStmt != nil {
+		if blockContainsTerminatingCall(ifStmt.Body, info) {
+			return true
+		}
+	}
+	if fnLit := findEnclosingFuncLit(id, parentMap); fnLit != nil {
+		if blockContainsTerminatingCall(fnLit.Body, info) {
+			return true
 		}
 	}
 
+	return false
+}
+
+func findEnclosingIfStmt(n ast.Node, parentMap map[ast.Node]ast.Node) *ast.IfStmt {
+	curr := n
+	for curr != nil {
+		parent := parentMap[curr]
+		if parent == nil {
+			break
+		}
+		if ifStmt, ok := parent.(*ast.IfStmt); ok {
+			return ifStmt
+		}
+		curr = parent
+	}
+	return nil
+}
+
+func findEnclosingFuncLit(n ast.Node, parentMap map[ast.Node]ast.Node) *ast.FuncLit {
+	curr := n
+	for curr != nil {
+		parent := parentMap[curr]
+		if parent == nil {
+			break
+		}
+		if fnLit, ok := parent.(*ast.FuncLit); ok {
+			return fnLit
+		}
+		curr = parent
+	}
+	return nil
+}
+
+func blockContainsTerminatingCall(n ast.Node, info *types.Info) bool {
+	if n == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(n, func(node ast.Node) bool {
+		if found {
+			return false
+		}
+		if call, ok := node.(*ast.CallExpr); ok {
+			if isProcessTerminatingCall(call, info) {
+				found = true
+				return false
+			}
+		}
+		return true
+	})
+	return found
+}
+
+func isProcessTerminatingCall(call *ast.CallExpr, info *types.Info) bool {
+	if call == nil {
+		return false
+	}
+
+	// panic(...)
+	if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "panic" {
+		return true
+	}
+
+	// os.Exit(...)
+	fnName, pkgPath := resolveCallee(call.Fun, info)
+	if pkgPath == "os" && fnName == "Exit" {
+		return true
+	}
+
+	// log.Fatal*, log.Panic*
+	if pkgPath == "log" && (strings.HasPrefix(fnName, "Fatal") || strings.HasPrefix(fnName, "Panic")) {
+		return true
+	}
+
+	// klog.Fatal*, klog.Exit*
+	if (pkgPath == "k8s.io/klog" || pkgPath == "k8s.io/klog/v2") && (strings.HasPrefix(fnName, "Fatal") || strings.HasPrefix(fnName, "Exit")) {
+		return true
+	}
+
+	// Methods on loggers or verbose:
+	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+		name := sel.Sel.Name
+		if strings.HasPrefix(name, "Fatal") || strings.HasPrefix(name, "Exit") || strings.HasPrefix(name, "Panic") {
+			if recvType := info.TypeOf(sel.X); recvType != nil {
+				typStr := recvType.String()
+				if strings.Contains(typStr, "klog") || strings.Contains(typStr, "log") || strings.Contains(typStr, "slog") || strings.Contains(typStr, "Logger") {
+					return true
+				}
+			}
+			// AST fallback
+			if id, ok := unwrapIdent(sel.X); ok {
+				switch id.Name {
+				case "log", "klog", "slog", "os":
+					return true
+				}
+			}
+			if innerCall, ok := sel.X.(*ast.CallExpr); ok {
+				if innerSel, ok := innerCall.Fun.(*ast.SelectorExpr); ok {
+					if id, ok := unwrapIdent(innerSel.X); ok && (id.Name == "klog" || id.Name == "slog" || id.Name == "log") {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
+func isLogCall(call *ast.CallExpr, info *types.Info) bool {
+	if call == nil {
+		return false
+	}
+
+	// Process-terminating calls (Fatal*, Exit*, panic) are not mere logging
+	if isProcessTerminatingCall(call, info) {
+		return false
+	}
+
+	fnName, pkgPath := resolveCallee(call.Fun, info)
+	if pkgPath == "k8s.io/klog" || pkgPath == "k8s.io/klog/v2" {
+		return true
+	}
+	if pkgPath == "log" || pkgPath == "log/slog" {
+		return true
+	}
+	if pkgPath == "fmt" && (fnName == "Fprint" || fnName == "Fprintf" || fnName == "Fprintln") {
+		if len(call.Args) > 0 && isStderr(call.Args[0], info) {
+			return true
+		}
+	}
+
+	// Selector method fallback
+	if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
+		if recvType := info.TypeOf(sel.X); recvType != nil {
+			typStr := recvType.String()
+			if strings.Contains(typStr, "klog") || strings.Contains(typStr, "log") || strings.Contains(typStr, "slog") || strings.Contains(typStr, "Logger") {
+				return true
+			}
+		}
+		if id, ok := unwrapIdent(sel.X); ok {
+			switch id.Name {
+			case "klog", "log", "slog":
+				return true
+			case "fmt":
+				if sel.Sel.Name == "Fprint" || sel.Sel.Name == "Fprintf" || sel.Sel.Name == "Fprintln" {
+					if len(call.Args) > 0 && isStderr(call.Args[0], info) {
+						return true
+					}
+				}
+			}
+		}
+		if innerCall, ok := sel.X.(*ast.CallExpr); ok {
+			if innerSel, ok := innerCall.Fun.(*ast.SelectorExpr); ok {
+				if id, ok := unwrapIdent(innerSel.X); ok && (id.Name == "klog" || id.Name == "slog" || id.Name == "log") {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+func isStderr(arg ast.Expr, info *types.Info) bool {
+	arg = unwrapParen(arg)
+	if sel, ok := arg.(*ast.SelectorExpr); ok {
+		if id, ok := unwrapIdent(sel.X); ok && id.Name == "os" && sel.Sel.Name == "Stderr" {
+			return true
+		}
+		if obj := info.Uses[sel.Sel]; obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == "os" && obj.Name() == "Stderr" {
+			return true
+		}
+	}
+	if id, ok := unwrapIdent(arg); ok {
+		if obj := info.Uses[id]; obj != nil && obj.Pkg() != nil && obj.Pkg().Path() == "os" && obj.Name() == "Stderr" {
+			return true
+		}
+	}
+	return false
+}
+
+func isErrorOnlyLogged(call *ast.CallExpr, fnNode ast.Node, parentMap map[ast.Node]ast.Node, info *types.Info) bool {
+	parent := parentMap[call]
+	if parent == nil {
+		return false
+	}
+
+	// Direct call inside a log call: klog.Infof("close: %v", f.Close())
+	if callParent, ok := parent.(*ast.CallExpr); ok {
+		if isLogCall(callParent, info) {
+			return true
+		}
+	}
+
+	// Assigned to a variable: cerr := f.Close() or var cerr = f.Close()
+	switch p := parent.(type) {
+	case *ast.AssignStmt:
+		for i, rhs := range p.Rhs {
+			if rhs != call {
+				continue
+			}
+			if i < len(p.Lhs) {
+				lhs := p.Lhs[i]
+				if id, ok := unwrapIdent(lhs); ok && id.Name != "_" {
+					if v := lookupVar(id, info); v != nil {
+						return isVarLogged(v, fnNode, parentMap, info)
+					}
+				}
+			}
+		}
+	case *ast.ValueSpec:
+		for i, val := range p.Values {
+			if val != call {
+				continue
+			}
+			if i < len(p.Names) {
+				name := p.Names[i]
+				if id, ok := unwrapIdent(name); ok && id.Name != "_" {
+					if v := lookupVar(id, info); v != nil {
+						return isVarLogged(v, fnNode, parentMap, info)
+					}
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+func isVarLogged(v *types.Var, fnNode ast.Node, parentMap map[ast.Node]ast.Node, info *types.Info) bool {
+	var uses []*ast.Ident
+	ast.Inspect(fnNode, func(n ast.Node) bool {
+		id, ok := n.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if obj, ok := info.Uses[id]; ok && obj == v {
+			uses = append(uses, id)
+		}
+		return true
+	})
+
+	for _, u := range uses {
+		curr := parentMap[u]
+		// Handle err.Error() inside log call
+		if sel, ok := curr.(*ast.SelectorExpr); ok && sel.Sel.Name == "Error" {
+			curr = parentMap[curr]
+		}
+		if call, ok := curr.(*ast.CallExpr); ok {
+			if isLogCall(call, info) {
+				return true
+			}
+		}
+	}
 	return false
 }
 

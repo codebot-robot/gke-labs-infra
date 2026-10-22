@@ -99,12 +99,14 @@ func testOpenFileAppend(dst string) error {
 	return nil
 }
 
+// Dropped-outright cases (plain defer or _ = close) are skipped by closewriter
+// and left to droppederrors to avoid double-reporting.
 func testDiscardedClose(dst string) error {
 	f, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer f.Close() // want `error from Close\(\) on a writer is only logged in testDiscardedClose; return it so write failures are not silent`
+	defer f.Close()
 	return nil
 }
 
@@ -114,7 +116,7 @@ func testBlankIdentifierClose(dst string) error {
 		return err
 	}
 	defer func() {
-		_ = f.Close() // want `error from Close\(\) on a writer is only logged in testBlankIdentifierClose; return it so write failures are not silent`
+		_ = f.Close()
 	}()
 	return nil
 }
@@ -244,6 +246,20 @@ func testPipeWriterClose() error {
 	return nil
 }
 
+func testNonDeferredLog(dst string) error {
+	f, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString("data"); err != nil {
+		if closeErr := f.Close(); closeErr != nil { // want `error from Close\(\) on a writer is only logged in testNonDeferredLog; return it so write failures are not silent`
+			klog.Warningf("close: %v", closeErr)
+		}
+		return err
+	}
+	return f.Close()
+}
+
 // --- OK Cases ---
 
 func testDirectReturn(dst string) error {
@@ -325,6 +341,64 @@ func testPanicIf(dst string) {
 	if err := out.Close(); err != nil {
 		panic(err)
 	}
+}
+
+func testFatalLog(dst string) error {
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := out.Close(); err != nil {
+			log.Fatalf("failed to close: %v", err)
+		}
+	}()
+	return nil
+}
+
+func testKlogFatal(dst string) error {
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := out.Close(); err != nil {
+			klog.Fatalf("failed to close: %v", err)
+		}
+	}()
+	return nil
+}
+
+func testKlogExit(dst string) error {
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := out.Close(); err != nil {
+			klog.Exitf("failed to close: %v", err)
+		}
+	}()
+	return nil
+}
+
+func testOsExit(dst string) error {
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := out.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "failed to close: %v\n", err)
+			os.Exit(1)
+		}
+	}()
+	return nil
+}
+
+func testDirectLogFatal(dst string) {
+	out, _ := os.Create(dst)
+	log.Fatal(out.Close())
 }
 
 func TestInTestFile(t *testing.T) {
