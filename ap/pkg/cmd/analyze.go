@@ -17,22 +17,22 @@ package cmd
 import (
 	"os"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/closewriter"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle"
 	"github.com/spf13/cobra"
 	"golang.org/x/tools/go/analysis/multichecker"
 )
 
-// BuildCloseWriterCommand constructs the cobra command for "closewriter".
-// This is a hidden command used by "ap lint" to run the closewriter analyzer.
-func BuildCloseWriterCommand() *cobra.Command {
+// BuildAnalyzeCommand constructs the cobra command for "analyze".
+// This is a hidden command used for debugging registered analyzers via multichecker.
+func BuildAnalyzeCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:                "closewriter",
-		Short:              "Run the closewriter analyzer",
+		Use:                "analyze",
+		Short:              "Run registered analyzers via multichecker",
 		Hidden:             true,
 		DisableFlagParsing: true,
 		Run: func(_ *cobra.Command, args []string) {
 			os.Args = append([]string{os.Args[0]}, args...)
-			multichecker.Main(closewriter.Analyzer)
+			multichecker.Main(codestyle.PlainAnalyzers()...)
 		},
 	}
 

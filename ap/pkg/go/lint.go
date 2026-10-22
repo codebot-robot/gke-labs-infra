@@ -16,16 +16,29 @@ package golang
 
 import (
 	"context"
+	"errors"
+	"flag"
 	"fmt"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/analysis/checker"
+	"golang.org/x/tools/go/packages"
 	"k8s.io/klog/v2"
 )
+
+var analyzerMu sync.Mutex
 
 // GoVetTask represents a task to run go vet.
 type GoVetTask struct {
@@ -77,142 +90,231 @@ func (t *GovulncheckTask) GetChildren() []tasks.Task {
 	return nil
 }
 
-// UnusedCheckTask represents a task to run unused check.
-type UnusedCheckTask struct {
-	Dir             string
-	RepoRoot        string
-	CheckParameters bool
-	SkipGenerated   bool
-	SkipTests       bool
-	SkipGlobs       []string
+// AnalyzersTask represents a task to run enabled code style analyzers in-process.
+type AnalyzersTask struct {
+	Dir              string
+	RepoRoot         string
+	Enabled          map[string]codestyle.Mode
+	PerAnalyzerFlags map[string][]string
+	SkipGlobs        []string
 }
 
-func (t *UnusedCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
-	klog.Infof("Running unused check in %s", t.Dir)
-	apPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("could not find ap executable: %w", err)
-	}
-	args := []string{"lint", "unused"}
-	if t.CheckParameters {
-		args = append(args, "-unused.check-parameters=true")
-	} else {
-		args = append(args, "-unused.check-parameters=false")
-	}
-	args = append(args, fmt.Sprintf("-unused.skip-generated=%t", t.SkipGenerated))
-	args = append(args, fmt.Sprintf("-unused.skip-tests=%t", t.SkipTests))
-	if t.RepoRoot != "" {
-		args = append(args, "-unused.repo-root="+t.RepoRoot)
-	}
-	for _, g := range t.SkipGlobs {
-		args = append(args, "-unused.skip-glob="+g)
-	}
-	args = append(args, "./...")
-	unusedCmd := exec.CommandContext(ctx, apPath, args...)
-	unusedCmd.Dir = t.Dir
-	unusedCmd.Stdout = os.Stdout
-	unusedCmd.Stderr = os.Stderr
-	if err := unusedCmd.Run(); err != nil {
-		return fmt.Errorf("unused check failed in %s: %w", t.Dir, err)
-	}
-	return nil
-}
-
-func (t *UnusedCheckTask) GetName() string {
-	return "unused-check"
-}
-
-func (t *UnusedCheckTask) GetChildren() []tasks.Task {
-	return nil
-}
-
-// TestContextCheckTask represents a task to run testcontext check.
-type TestContextCheckTask struct {
-	Dir           string
-	RepoRoot      string
-	IsError       bool
-	SkipGenerated bool
-	SkipTests     bool
-	SkipGlobs     []string
-}
-
-func (t *TestContextCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
-	klog.Infof("Running testcontext check in %s", t.Dir)
-	apPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("could not find ap executable: %w", err)
-	}
-	args := []string{"lint", "testcontext"}
-	args = append(args, fmt.Sprintf("-testcontext.skip-generated=%t", t.SkipGenerated))
-	args = append(args, fmt.Sprintf("-testcontext.skip-tests=%t", t.SkipTests))
-	if t.RepoRoot != "" {
-		args = append(args, "-testcontext.repo-root="+t.RepoRoot)
-	}
-	for _, g := range t.SkipGlobs {
-		args = append(args, "-testcontext.skip-glob="+g)
-	}
-	args = append(args, "./...")
-	testcontextCmd := exec.CommandContext(ctx, apPath, args...)
-	testcontextCmd.Dir = t.Dir
-	testcontextCmd.Stdout = os.Stdout
-	testcontextCmd.Stderr = os.Stderr
-	if err := testcontextCmd.Run(); err != nil {
-		if t.IsError {
-			return fmt.Errorf("testcontext check failed in %s: %w", t.Dir, err)
+// SkipGenerated reports whether skipGenerated is enabled for the named analyzer.
+func (t *AnalyzersTask) SkipGenerated(name string) bool {
+	for _, f := range t.PerAnalyzerFlags[name] {
+		if strings.HasPrefix(f, "-skip-generated=") {
+			return strings.TrimPrefix(f, "-skip-generated=") == "true"
 		}
-		klog.Warningf("testcontext check failed in %s: %v", t.Dir, err)
 	}
-	return nil
+	return false
 }
 
-func (t *TestContextCheckTask) GetName() string {
-	return "testcontext-check"
+// SkipTests reports whether skipTests is enabled for the named analyzer.
+func (t *AnalyzersTask) SkipTests(name string) bool {
+	for _, f := range t.PerAnalyzerFlags[name] {
+		if strings.HasPrefix(f, "-skip-tests=") {
+			return strings.TrimPrefix(f, "-skip-tests=") == "true"
+		}
+	}
+	return false
 }
 
-func (t *TestContextCheckTask) GetChildren() []tasks.Task {
-	return nil
+// Packages returns any -package flags configured for the named analyzer.
+func (t *AnalyzersTask) Packages(name string) []string {
+	var pkgs []string
+	for _, f := range t.PerAnalyzerFlags[name] {
+		if strings.HasPrefix(f, "-package=") {
+			pkgs = append(pkgs, strings.TrimPrefix(f, "-package="))
+		}
+	}
+	return pkgs
 }
 
-// ReplaceEmptyInterfaceWithAnyTask represents a task to run replace-empty-interface-with-any check.
-type ReplaceEmptyInterfaceWithAnyTask struct {
-	Dir           string
-	RepoRoot      string
-	SkipGenerated bool
-	SkipTests     bool
-	SkipGlobs     []string
+// Types returns any -type flags configured for the named analyzer.
+func (t *AnalyzersTask) Types(name string) []string {
+	var types []string
+	for _, f := range t.PerAnalyzerFlags[name] {
+		if strings.HasPrefix(f, "-type=") {
+			types = append(types, strings.TrimPrefix(f, "-type="))
+		}
+	}
+	return types
 }
 
-func (t *ReplaceEmptyInterfaceWithAnyTask) Run(ctx context.Context, scope *tasks.APScope) error {
-	klog.Infof("Running replace-empty-interface-with-any check in %s", t.Dir)
-	apPath, err := os.Executable()
+func setAnalyzerFlag(fs *flag.FlagSet, analyzerName, flagStr string) error {
+	flagStr = strings.TrimLeft(flagStr, "-")
+	if idx := strings.Index(flagStr, "."); idx != -1 {
+		prefix := flagStr[:idx]
+		if strings.EqualFold(prefix, analyzerName) || strings.EqualFold(strings.ReplaceAll(prefix, "-", ""), strings.ReplaceAll(analyzerName, "-", "")) {
+			flagStr = flagStr[idx+1:]
+		}
+	}
+	k, v, hasVal := strings.Cut(flagStr, "=")
+	if !hasVal {
+		v = "true"
+	}
+	f := fs.Lookup(k)
+	if f == nil {
+		return fmt.Errorf("unknown flag %q for analyzer %s", k, analyzerName)
+	}
+	return fs.Set(k, v)
+}
+
+func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
+	klog.Infof("Running analyzers in %s", t.Dir)
+
+	var analyzersToRun []*analysis.Analyzer
+	for _, reg := range codestyle.Analyzers {
+		if reg.CustomTask {
+			continue
+		}
+		mode, ok := t.Enabled[reg.Name]
+		if !ok || mode == codestyle.ModeIgnore {
+			continue
+		}
+		analyzersToRun = append(analyzersToRun, reg.Analyzer)
+	}
+	if len(analyzersToRun) == 0 {
+		return nil
+	}
+
+	analyzerMu.Lock()
+	defer analyzerMu.Unlock()
+
+	for _, a := range analyzersToRun {
+		a.Flags.VisitAll(func(f *flag.Flag) {
+			if r, ok := f.Value.(fileset.Resettable); ok {
+				r.Reset()
+			}
+		})
+
+		if t.RepoRoot != "" {
+			if f := a.Flags.Lookup("repo-root"); f != nil {
+				if err := a.Flags.Set("repo-root", t.RepoRoot); err != nil {
+					return fmt.Errorf("failed to set repo-root for %s: %w", a.Name, err)
+				}
+			}
+		}
+		for _, g := range t.SkipGlobs {
+			if f := a.Flags.Lookup("skip-glob"); f != nil {
+				if err := a.Flags.Set("skip-glob", g); err != nil {
+					return fmt.Errorf("failed to set skip-glob for %s: %w", a.Name, err)
+				}
+			}
+		}
+		for _, flagStr := range t.PerAnalyzerFlags[a.Name] {
+			if err := setAnalyzerFlag(&a.Flags, a.Name, flagStr); err != nil {
+				return err
+			}
+		}
+	}
+
+	cfg := &packages.Config{
+		Context: ctx,
+		Mode:    packages.LoadAllSyntax | packages.NeedModule,
+		Dir:     t.Dir,
+		Tests:   true,
+	}
+
+	pkgs, err := packages.Load(cfg, "./...")
 	if err != nil {
-		return fmt.Errorf("could not find ap executable: %w", err)
+		return fmt.Errorf("failed to load packages in %s: %w", t.Dir, err)
 	}
-	args := []string{"lint", "replace-empty-interface-with-any"}
-	args = append(args, fmt.Sprintf("-replaceEmptyInterfaceWithAny.skip-generated=%t", t.SkipGenerated))
-	args = append(args, fmt.Sprintf("-replaceEmptyInterfaceWithAny.skip-tests=%t", t.SkipTests))
-	if t.RepoRoot != "" {
-		args = append(args, "-replaceEmptyInterfaceWithAny.repo-root="+t.RepoRoot)
+	if len(pkgs) == 0 {
+		return nil
 	}
-	for _, g := range t.SkipGlobs {
-		args = append(args, "-replaceEmptyInterfaceWithAny.skip-glob="+g)
+
+	if n := packages.PrintErrors(pkgs); n > 0 {
+		return fmt.Errorf("failed to load packages in %s: %d error(s)", t.Dir, n)
 	}
-	args = append(args, "./...")
-	anyCmd := exec.CommandContext(ctx, apPath, args...)
-	anyCmd.Dir = t.Dir
-	anyCmd.Stdout = os.Stdout
-	anyCmd.Stderr = os.Stderr
-	if err := anyCmd.Run(); err != nil {
-		klog.Warningf("replace-empty-interface-with-any check failed in %s: %v", t.Dir, err)
+
+	graph, err := checker.Analyze(analyzersToRun, pkgs, nil)
+	if err != nil {
+		return fmt.Errorf("analyzers failed in %s: %w", t.Dir, err)
 	}
-	return nil
+
+	type diagKey struct {
+		pos     token.Position
+		end     token.Position
+		name    string
+		message string
+	}
+	seen := make(map[diagKey]bool)
+
+	type positionedDiag struct {
+		diag analysis.Diagnostic
+		fset *token.FileSet
+	}
+	diagsByAnalyzer := make(map[string][]positionedDiag)
+	var actionErrors []error
+
+	for _, act := range graph.Roots {
+		if act.Err != nil {
+			actionErrors = append(actionErrors, fmt.Errorf("%s: %w", act.Analyzer.Name, act.Err))
+			continue
+		}
+		if !act.IsRoot {
+			continue
+		}
+		for _, diag := range act.Diagnostics {
+			posn := act.Package.Fset.Position(diag.Pos)
+			end := act.Package.Fset.Position(diag.End)
+			k := diagKey{pos: posn, end: end, name: act.Analyzer.Name, message: diag.Message}
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			diagsByAnalyzer[act.Analyzer.Name] = append(diagsByAnalyzer[act.Analyzer.Name], positionedDiag{
+				diag: diag,
+				fset: act.Package.Fset,
+			})
+		}
+	}
+
+	var errs []error
+	for _, a := range analyzersToRun {
+		diags := diagsByAnalyzer[a.Name]
+		if len(diags) == 0 {
+			continue
+		}
+		sort.Slice(diags, func(i, j int) bool {
+			pi := diags[i].fset.Position(diags[i].diag.Pos)
+			pj := diags[j].fset.Position(diags[j].diag.Pos)
+			if pi.Filename != pj.Filename {
+				return pi.Filename < pj.Filename
+			}
+			if pi.Line != pj.Line {
+				return pi.Line < pj.Line
+			}
+			return pi.Column < pj.Column
+		})
+
+		for _, pd := range diags {
+			posn := pd.fset.Position(pd.diag.Pos)
+			fmt.Fprintf(os.Stderr, "%s: %s\n", posn, pd.diag.Message)
+			for _, rel := range pd.diag.Related {
+				relPosn := pd.fset.Position(rel.Pos)
+				fmt.Fprintf(os.Stderr, "%s:\t%s\n", relPosn, rel.Message)
+			}
+		}
+
+		mode := t.Enabled[a.Name]
+		if mode == codestyle.ModeError {
+			errs = append(errs, fmt.Errorf("%s check failed in %s", a.Name, t.Dir))
+		} else if mode == codestyle.ModeWarn {
+			klog.Warningf("%s check failed in %s: %d diagnostics found", a.Name, t.Dir, len(diags))
+		}
+	}
+
+	errs = append(errs, actionErrors...)
+	return errors.Join(errs...)
 }
 
-func (t *ReplaceEmptyInterfaceWithAnyTask) GetName() string {
-	return "replace-empty-interface-with-any-check"
+func (t *AnalyzersTask) GetName() string {
+	return "analyzers"
 }
 
-func (t *ReplaceEmptyInterfaceWithAnyTask) GetChildren() []tasks.Task {
+func (t *AnalyzersTask) GetChildren() []tasks.Task {
 	return nil
 }
 
@@ -257,108 +359,6 @@ func (t *DroppedErrorsCheckTask) GetChildren() []tasks.Task {
 	return nil
 }
 
-// TestOnlyImportsCheckTask represents a task to run testonlyimports check.
-type TestOnlyImportsCheckTask struct {
-	Dir           string
-	RepoRoot      string
-	IsError       bool
-	Packages      []string
-	SkipGenerated bool
-	SkipTests     bool
-	SkipGlobs     []string
-}
-
-func (t *TestOnlyImportsCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
-	klog.Infof("Running testonlyimports check in %s", t.Dir)
-	apPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("could not find ap executable: %w", err)
-	}
-	args := []string{"lint", "testonlyimports"}
-	args = append(args, fmt.Sprintf("-testonlyimports.skip-generated=%t", t.SkipGenerated))
-	args = append(args, fmt.Sprintf("-testonlyimports.skip-tests=%t", t.SkipTests))
-	if t.RepoRoot != "" {
-		args = append(args, "-testonlyimports.repo-root="+t.RepoRoot)
-	}
-	for _, g := range t.SkipGlobs {
-		args = append(args, "-testonlyimports.skip-glob="+g)
-	}
-	for _, p := range t.Packages {
-		args = append(args, "-testonlyimports.package="+p)
-	}
-	args = append(args, "./...")
-	cmd := exec.CommandContext(ctx, apPath, args...)
-	cmd.Dir = t.Dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		if t.IsError {
-			return fmt.Errorf("testonlyimports check failed in %s: %w", t.Dir, err)
-		}
-		klog.Warningf("testonlyimports check failed in %s: %v", t.Dir, err)
-	}
-	return nil
-}
-
-func (t *TestOnlyImportsCheckTask) GetName() string {
-	return "testonlyimports-check"
-}
-
-func (t *TestOnlyImportsCheckTask) GetChildren() []tasks.Task {
-	return nil
-}
-
-// CloseWriterCheckTask represents a task to run closewriter check.
-type CloseWriterCheckTask struct {
-	Dir           string
-	RepoRoot      string
-	IsError       bool
-	Types         []string
-	SkipGenerated bool
-	SkipTests     bool
-	SkipGlobs     []string
-}
-
-func (t *CloseWriterCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
-	klog.Infof("Running closewriter check in %s", t.Dir)
-	apPath, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("could not find ap executable: %w", err)
-	}
-	args := []string{"lint", "closewriter"}
-	args = append(args, fmt.Sprintf("-closewriter.skip-generated=%t", t.SkipGenerated))
-	args = append(args, fmt.Sprintf("-closewriter.skip-tests=%t", t.SkipTests))
-	if t.RepoRoot != "" {
-		args = append(args, "-closewriter.repo-root="+t.RepoRoot)
-	}
-	for _, g := range t.SkipGlobs {
-		args = append(args, "-closewriter.skip-glob="+g)
-	}
-	for _, typ := range t.Types {
-		args = append(args, "-closewriter.type="+typ)
-	}
-	args = append(args, "./...")
-	cmd := exec.CommandContext(ctx, apPath, args...)
-	cmd.Dir = t.Dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		if t.IsError {
-			return fmt.Errorf("closewriter check failed in %s: %w", t.Dir, err)
-		}
-		klog.Warningf("closewriter check failed in %s: %v", t.Dir, err)
-	}
-	return nil
-}
-
-func (t *CloseWriterCheckTask) GetName() string {
-	return "closewriter-check"
-}
-
-func (t *CloseWriterCheckTask) GetChildren() []tasks.Task {
-	return nil
-}
-
 // LintTasks returns a task group for running go linting in discovered modules.
 func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
@@ -389,79 +389,69 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 		if cfg.IsGovulncheckEnabled() {
 			modGroup.Tasks = append(modGroup.Tasks, &GovulncheckTask{Dir: dir})
 		}
-		if cfg.IsUnusedEnabled() {
-			lc := cfg.Linter("unused")
-			modGroup.Tasks = append(modGroup.Tasks, &UnusedCheckTask{
-				Dir:             dir,
-				RepoRoot:        root,
-				CheckParameters: cfg.IsUnusedParametersEnabled(),
-				SkipGenerated:   cfg.ResolveSkipGenerated(lc, true),
-				SkipTests:       cfg.ResolveSkipTests(lc, false),
-				SkipGlobs:       cfg.Skip,
-			})
+
+		analyzersTask := &AnalyzersTask{
+			Dir:              dir,
+			RepoRoot:         root,
+			Enabled:          make(map[string]codestyle.Mode),
+			PerAnalyzerFlags: make(map[string][]string),
+			SkipGlobs:        cfg.Skip,
 		}
-		if cfg.IsTestContextEnabled() {
-			lc := cfg.Linter("testcontext")
-			modGroup.Tasks = append(modGroup.Tasks, &TestContextCheckTask{
-				Dir:           dir,
-				RepoRoot:      root,
-				IsError:       cfg.IsTestContextError(),
-				SkipGenerated: cfg.ResolveSkipGenerated(lc, false),
-				SkipTests:     cfg.ResolveSkipTests(lc, false),
-				SkipGlobs:     cfg.Skip,
-			})
-		}
-		if cfg.IsReplaceEmptyInterfaceWithAnyEnabled() {
-			lc := cfg.Linter("replaceEmptyInterfaceWithAny")
-			modGroup.Tasks = append(modGroup.Tasks, &ReplaceEmptyInterfaceWithAnyTask{
-				Dir:           dir,
-				RepoRoot:      root,
-				SkipGenerated: cfg.ResolveSkipGenerated(lc, true),
-				SkipTests:     cfg.ResolveSkipTests(lc, false),
-				SkipGlobs:     cfg.Skip,
-			})
-		}
-		if cfg.IsDroppedErrorsEnabled() {
-			modGroup.Tasks = append(modGroup.Tasks, &DroppedErrorsCheckTask{
-				Dir:           dir,
-				RepoRoot:      root,
-				IsError:       cfg.IsDroppedErrorsError(),
-				SkipGenerated: cfg.DroppedErrorsSkipGenerated(),
-				SkipTests:     cfg.DroppedErrorsSkipTests(),
-				SkipGlobs:     cfg.Skip,
-			})
-		}
-		toi := cfg.Linter("testOnlyImports")
-		if toi.IsEnabled() {
-			var pkgs []string
-			if c := cfg.TestOnlyImports(); c != nil {
-				pkgs = c.Packages
+
+		for _, reg := range codestyle.Analyzers {
+			if reg.CustomTask {
+				if reg.Matches("droppederrors") {
+					mode := reg.ResolveMode(cfg)
+					if mode != codestyle.ModeIgnore {
+						modGroup.Tasks = append(modGroup.Tasks, &DroppedErrorsCheckTask{
+							Dir:           dir,
+							RepoRoot:      root,
+							IsError:       mode == codestyle.ModeError,
+							SkipGenerated: reg.ResolveSkipGenerated(cfg),
+							SkipTests:     reg.ResolveSkipTests(cfg),
+							SkipGlobs:     cfg.Skip,
+						})
+					}
+				}
+				continue
 			}
-			modGroup.Tasks = append(modGroup.Tasks, &TestOnlyImportsCheckTask{
-				Dir:           dir,
-				RepoRoot:      root,
-				IsError:       toi.IsError(),
-				Packages:      pkgs,
-				SkipGenerated: cfg.ResolveSkipGenerated(toi, false),
-				SkipTests:     cfg.ResolveSkipTests(toi, false),
-				SkipGlobs:     cfg.Skip,
-			})
-		}
-		cw := cfg.Linter("closeWriter")
-		if cw.IsEnabled() {
-			var types []string
-			if c := cfg.CloseWriter(); c != nil {
-				types = c.Types
+
+			mode := reg.ResolveMode(cfg)
+			if mode == codestyle.ModeIgnore {
+				continue
 			}
-			modGroup.Tasks = append(modGroup.Tasks, &CloseWriterCheckTask{
-				Dir:           dir,
-				RepoRoot:      root,
-				IsError:       cw.IsError(),
-				Types:         types,
-				SkipGenerated: cfg.ResolveSkipGenerated(cw, false),
-				SkipTests:     cfg.ResolveSkipTests(cw, false),
-				SkipGlobs:     cfg.Skip,
-			})
+			analyzersTask.Enabled[reg.Name] = mode
+			var flags []string
+			skipGen := reg.ResolveSkipGenerated(cfg)
+			flags = append(flags, fmt.Sprintf("-skip-generated=%t", skipGen))
+			skipTests := reg.ResolveSkipTests(cfg)
+			flags = append(flags, fmt.Sprintf("-skip-tests=%t", skipTests))
+
+			switch reg.Name {
+			case "unused":
+				if cfg.IsUnusedParametersEnabled() {
+					flags = append(flags, "-check-parameters=true")
+				} else {
+					flags = append(flags, "-check-parameters=false")
+				}
+			case "testonlyimports":
+				if c := cfg.TestOnlyImports(); c != nil {
+					for _, pkg := range c.Packages {
+						flags = append(flags, "-package="+pkg)
+					}
+				}
+			case "closewriter":
+				if c := cfg.CloseWriter(); c != nil {
+					for _, typ := range c.Types {
+						flags = append(flags, "-type="+typ)
+					}
+				}
+			}
+			analyzersTask.PerAnalyzerFlags[reg.Name] = flags
+		}
+
+		if len(analyzersTask.Enabled) > 0 {
+			modGroup.Tasks = append(modGroup.Tasks, analyzersTask)
 		}
 
 		if len(modGroup.Tasks) > 0 {
