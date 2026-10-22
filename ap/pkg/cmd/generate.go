@@ -26,6 +26,7 @@ import (
 // GenerateOptions holds the configuration for the "generate" command.
 type GenerateOptions struct {
 	*RootOptions
+	Verify bool
 }
 
 // BuildGenerateCommand constructs the cobra command for "generate".
@@ -37,6 +38,30 @@ func BuildGenerateCommand(rootOpt *RootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "generate [path...]",
 		Short: "Run generation tasks",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := opt.Resolve(args); err != nil {
+				return err
+			}
+			return RunGenerate(cmd.Context(), opt)
+		},
+	}
+
+	cmd.Flags().BoolVar(&opt.Verify, "verify", false, "Verify generator coverage by perturbing outputs and verifying restoration")
+
+	return cmd
+}
+
+// BuildVerifyGenerateCommand constructs the cobra command for "verify-generate".
+func BuildVerifyGenerateCommand(rootOpt *RootOptions) *cobra.Command {
+	opt := GenerateOptions{
+		RootOptions: rootOpt,
+		Verify:      true,
+	}
+
+	cmd := &cobra.Command{
+		Use:   "verify-generate [path...]",
+		Short: "Verify generator coverage by perturbing outputs and proving generators restore them",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := opt.Resolve(args); err != nil {
@@ -80,6 +105,10 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 			return err
 		}
 		allTasks = append(allTasks, formatTasks)
+	}
+
+	if opt.Verify {
+		return generate.RunVerify(ctx, opt.RepoRoot, scopes, allTasks, opt.DryRun)
 	}
 
 	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})

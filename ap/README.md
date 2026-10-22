@@ -71,6 +71,9 @@ presubmits:
   skipIfOnlyChanged:
   - docs/*
   - README.md
+generate:
+  ignoreOrphans:
+    - "legacy/*.pb.go"
 ```
 
 `presubmits.skipIfOnlyChanged` is an optional list of bash case globs
@@ -83,6 +86,10 @@ pending forever). The guard fails open — shallow history or a
 non-merge HEAD falls through to a full run — and push / merge_group
 events always run everything, so a merge queue remains a complete
 gate. Only list paths no presubmit output depends on.
+
+`generate.ignoreOrphans` is an optional list of glob patterns to ignore
+when verifying generator coverage, for legacy generated files that do not
+yet have a generator.
 
 ## Usage
 
@@ -98,6 +105,7 @@ Commands:
 - `lint`: Run linting tasks (vet, govulncheck)
 - `build`: Build artifacts
 - `deploy`: Deploy artifacts
-- `generate`: Run generation tasks
+- `generate`: Run generation tasks (runs legacy `dev/tasks/generate-*` scripts, `go generate ./...` in modules that contain `//go:generate` directives, and built-in presubmit/workflow generators; supports `--verify`)
+- `verify-generate`: Verify generator coverage by perturbing outputs and proving generators restore them
 - `format`: Run formatting tasks
 - `version`: Print version information

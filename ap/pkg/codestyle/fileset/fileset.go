@@ -21,6 +21,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"golang.org/x/tools/go/analysis"
 )
 
@@ -29,7 +30,14 @@ func IsGenerated(file *ast.File) bool {
 	if file == nil {
 		return false
 	}
-	return ast.IsGenerated(file)
+	for _, group := range file.Comments {
+		for _, comment := range group.List {
+			if isGen, _ := repo.IsGeneratedLine(comment.Text); isGen {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // IsTest reports whether the given filename is a Go test file.

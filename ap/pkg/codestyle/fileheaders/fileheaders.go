@@ -30,8 +30,6 @@ import (
 	"k8s.io/klog/v2"
 )
 
-var generatedCodeRegexp = regexp.MustCompile(`Code generated .* DO NOT EDIT`)
-
 type FileHeadersOptions struct {
 	IgnoreFiles []string `json:"ignore"`
 }
@@ -163,7 +161,7 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 	}
 
 	if p.config.SkipGenerated != nil && *p.config.SkipGenerated {
-		if generatedCodeRegexp.Match(checkBuf) {
+		if repo.CheckIsGenerated(absPath) {
 			return nil
 		}
 	}
