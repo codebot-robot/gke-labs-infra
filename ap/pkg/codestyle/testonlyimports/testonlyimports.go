@@ -15,10 +15,12 @@
 package testonlyimports
 
 import (
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/baseline"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis"
 )
@@ -98,7 +100,11 @@ func run(pass *analysis.Pass) (any, error) {
 				pathVal = strings.Trim(imp.Path.Value, `"`)
 			}
 			if isTestOnly(pathVal, packages) {
-				pass.Reportf(imp.Pos(), "import of test-only package %s from non-test file", pathVal)
+				pass.Report(analysis.Diagnostic{
+					Pos:      imp.Pos(),
+					Message:  fmt.Sprintf("import of test-only package %s from non-test file", pathVal),
+					Category: baseline.FormatCategoryKey("testonlyimports", pathVal),
+				})
 			}
 		}
 	}

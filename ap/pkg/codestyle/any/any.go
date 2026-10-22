@@ -17,6 +17,7 @@ package any
 import (
 	"go/ast"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/baseline"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis"
 )
@@ -43,7 +44,11 @@ func run(pass *analysis.Pass) (any, error) {
 		ast.Inspect(f, func(n ast.Node) bool {
 			if it, ok := n.(*ast.InterfaceType); ok {
 				if it.Methods == nil || len(it.Methods.List) == 0 {
-					pass.Reportf(it.Pos(), "use any instead of interface{}")
+					pass.Report(analysis.Diagnostic{
+						Pos:      it.Pos(),
+						Message:  "use any instead of interface{}",
+						Category: baseline.FormatCategoryKey("replaceEmptyInterfaceWithAny", "interface{}"),
+					})
 				}
 			}
 			return true

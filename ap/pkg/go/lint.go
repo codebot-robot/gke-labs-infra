@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
@@ -85,6 +86,7 @@ type UnusedCheckTask struct {
 	SkipGenerated   bool
 	SkipTests       bool
 	SkipGlobs       []string
+	Baseline        string
 }
 
 func (t *UnusedCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
@@ -95,17 +97,20 @@ func (t *UnusedCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	}
 	args := []string{"lint", "unused"}
 	if t.CheckParameters {
-		args = append(args, "-unused.check-parameters=true")
+		args = append(args, "--unused.check-parameters=true")
 	} else {
-		args = append(args, "-unused.check-parameters=false")
+		args = append(args, "--unused.check-parameters=false")
 	}
-	args = append(args, fmt.Sprintf("-unused.skip-generated=%t", t.SkipGenerated))
-	args = append(args, fmt.Sprintf("-unused.skip-tests=%t", t.SkipTests))
+	args = append(args, fmt.Sprintf("--unused.skip-generated=%t", t.SkipGenerated))
+	args = append(args, fmt.Sprintf("--unused.skip-tests=%t", t.SkipTests))
 	if t.RepoRoot != "" {
-		args = append(args, "-unused.repo-root="+t.RepoRoot)
+		args = append(args, "--unused.repo-root="+t.RepoRoot)
 	}
 	for _, g := range t.SkipGlobs {
-		args = append(args, "-unused.skip-glob="+g)
+		args = append(args, "--unused.skip-glob="+g)
+	}
+	if t.Baseline != "" {
+		args = append(args, "--baseline="+t.Baseline)
 	}
 	args = append(args, "./...")
 	unusedCmd := exec.CommandContext(ctx, apPath, args...)
@@ -134,6 +139,7 @@ type TestContextCheckTask struct {
 	SkipGenerated bool
 	SkipTests     bool
 	SkipGlobs     []string
+	Baseline      string
 }
 
 func (t *TestContextCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
@@ -143,13 +149,16 @@ func (t *TestContextCheckTask) Run(ctx context.Context, scope *tasks.APScope) er
 		return fmt.Errorf("could not find ap executable: %w", err)
 	}
 	args := []string{"lint", "testcontext"}
-	args = append(args, fmt.Sprintf("-testcontext.skip-generated=%t", t.SkipGenerated))
-	args = append(args, fmt.Sprintf("-testcontext.skip-tests=%t", t.SkipTests))
+	args = append(args, fmt.Sprintf("--testcontext.skip-generated=%t", t.SkipGenerated))
+	args = append(args, fmt.Sprintf("--testcontext.skip-tests=%t", t.SkipTests))
 	if t.RepoRoot != "" {
-		args = append(args, "-testcontext.repo-root="+t.RepoRoot)
+		args = append(args, "--testcontext.repo-root="+t.RepoRoot)
 	}
 	for _, g := range t.SkipGlobs {
-		args = append(args, "-testcontext.skip-glob="+g)
+		args = append(args, "--testcontext.skip-glob="+g)
+	}
+	if t.Baseline != "" {
+		args = append(args, "--baseline="+t.Baseline)
 	}
 	args = append(args, "./...")
 	testcontextCmd := exec.CommandContext(ctx, apPath, args...)
@@ -180,6 +189,7 @@ type ReplaceEmptyInterfaceWithAnyTask struct {
 	SkipGenerated bool
 	SkipTests     bool
 	SkipGlobs     []string
+	Baseline      string
 }
 
 func (t *ReplaceEmptyInterfaceWithAnyTask) Run(ctx context.Context, scope *tasks.APScope) error {
@@ -189,13 +199,16 @@ func (t *ReplaceEmptyInterfaceWithAnyTask) Run(ctx context.Context, scope *tasks
 		return fmt.Errorf("could not find ap executable: %w", err)
 	}
 	args := []string{"lint", "replace-empty-interface-with-any"}
-	args = append(args, fmt.Sprintf("-replaceEmptyInterfaceWithAny.skip-generated=%t", t.SkipGenerated))
-	args = append(args, fmt.Sprintf("-replaceEmptyInterfaceWithAny.skip-tests=%t", t.SkipTests))
+	args = append(args, fmt.Sprintf("--replaceEmptyInterfaceWithAny.skip-generated=%t", t.SkipGenerated))
+	args = append(args, fmt.Sprintf("--replaceEmptyInterfaceWithAny.skip-tests=%t", t.SkipTests))
 	if t.RepoRoot != "" {
-		args = append(args, "-replaceEmptyInterfaceWithAny.repo-root="+t.RepoRoot)
+		args = append(args, "--replaceEmptyInterfaceWithAny.repo-root="+t.RepoRoot)
 	}
 	for _, g := range t.SkipGlobs {
-		args = append(args, "-replaceEmptyInterfaceWithAny.skip-glob="+g)
+		args = append(args, "--replaceEmptyInterfaceWithAny.skip-glob="+g)
+	}
+	if t.Baseline != "" {
+		args = append(args, "--baseline="+t.Baseline)
 	}
 	args = append(args, "./...")
 	anyCmd := exec.CommandContext(ctx, apPath, args...)
@@ -224,6 +237,7 @@ type DroppedErrorsCheckTask struct {
 	SkipGenerated bool
 	SkipTests     bool
 	SkipGlobs     []string
+	Baseline      string
 }
 
 func (t *DroppedErrorsCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
@@ -235,6 +249,9 @@ func (t *DroppedErrorsCheckTask) Run(ctx context.Context, scope *tasks.APScope) 
 	args := []string{"lint", "droppederrors"}
 	args = append(args, fmt.Sprintf("--skip-generated=%t", t.SkipGenerated))
 	args = append(args, fmt.Sprintf("--skip-tests=%t", t.SkipTests))
+	if t.Baseline != "" {
+		args = append(args, "--baseline="+t.Baseline)
+	}
 	args = append(args, "./...")
 	droppedCmd := exec.CommandContext(ctx, apPath, args...)
 	droppedCmd.Dir = t.Dir
@@ -266,6 +283,7 @@ type TestOnlyImportsCheckTask struct {
 	SkipGenerated bool
 	SkipTests     bool
 	SkipGlobs     []string
+	Baseline      string
 }
 
 func (t *TestOnlyImportsCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
@@ -275,16 +293,19 @@ func (t *TestOnlyImportsCheckTask) Run(ctx context.Context, scope *tasks.APScope
 		return fmt.Errorf("could not find ap executable: %w", err)
 	}
 	args := []string{"lint", "testonlyimports"}
-	args = append(args, fmt.Sprintf("-testonlyimports.skip-generated=%t", t.SkipGenerated))
-	args = append(args, fmt.Sprintf("-testonlyimports.skip-tests=%t", t.SkipTests))
+	args = append(args, fmt.Sprintf("--testonlyimports.skip-generated=%t", t.SkipGenerated))
+	args = append(args, fmt.Sprintf("--testonlyimports.skip-tests=%t", t.SkipTests))
 	if t.RepoRoot != "" {
-		args = append(args, "-testonlyimports.repo-root="+t.RepoRoot)
+		args = append(args, "--testonlyimports.repo-root="+t.RepoRoot)
 	}
 	for _, g := range t.SkipGlobs {
-		args = append(args, "-testonlyimports.skip-glob="+g)
+		args = append(args, "--testonlyimports.skip-glob="+g)
 	}
 	for _, p := range t.Packages {
-		args = append(args, "-testonlyimports.package="+p)
+		args = append(args, "--testonlyimports.package="+p)
+	}
+	if t.Baseline != "" {
+		args = append(args, "--baseline="+t.Baseline)
 	}
 	args = append(args, "./...")
 	cmd := exec.CommandContext(ctx, apPath, args...)
@@ -317,6 +338,7 @@ type CloseWriterCheckTask struct {
 	SkipGenerated bool
 	SkipTests     bool
 	SkipGlobs     []string
+	Baseline      string
 }
 
 func (t *CloseWriterCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
@@ -326,16 +348,19 @@ func (t *CloseWriterCheckTask) Run(ctx context.Context, scope *tasks.APScope) er
 		return fmt.Errorf("could not find ap executable: %w", err)
 	}
 	args := []string{"lint", "closewriter"}
-	args = append(args, fmt.Sprintf("-closewriter.skip-generated=%t", t.SkipGenerated))
-	args = append(args, fmt.Sprintf("-closewriter.skip-tests=%t", t.SkipTests))
+	args = append(args, fmt.Sprintf("--closewriter.skip-generated=%t", t.SkipGenerated))
+	args = append(args, fmt.Sprintf("--closewriter.skip-tests=%t", t.SkipTests))
 	if t.RepoRoot != "" {
-		args = append(args, "-closewriter.repo-root="+t.RepoRoot)
+		args = append(args, "--closewriter.repo-root="+t.RepoRoot)
 	}
 	for _, g := range t.SkipGlobs {
-		args = append(args, "-closewriter.skip-glob="+g)
+		args = append(args, "--closewriter.skip-glob="+g)
 	}
 	for _, typ := range t.Types {
-		args = append(args, "-closewriter.type="+typ)
+		args = append(args, "--closewriter.type="+typ)
+	}
+	if t.Baseline != "" {
+		args = append(args, "--baseline="+t.Baseline)
 	}
 	args = append(args, "./...")
 	cmd := exec.CommandContext(ctx, apPath, args...)
@@ -397,6 +422,7 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 				SkipGenerated:   cfg.ResolveSkipGenerated(cfg.UnusedSkipGenerated(), true),
 				SkipTests:       cfg.ResolveSkipTests(cfg.UnusedSkipTests(), false),
 				SkipGlobs:       cfg.Skip,
+				Baseline:        resolveBaseline(cfg.UnusedBaseline(), "unused-baseline.txt", root, r.Root()),
 			})
 		}
 		if cfg.IsTestContextEnabled() {
@@ -407,6 +433,7 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 				SkipGenerated: cfg.ResolveSkipGenerated(cfg.TestContextSkipGenerated(), false),
 				SkipTests:     cfg.ResolveSkipTests(cfg.TestContextSkipTests(), false),
 				SkipGlobs:     cfg.Skip,
+				Baseline:      resolveBaseline(cfg.TestContextBaseline(), "testcontext-baseline.txt", root, r.Root()),
 			})
 		}
 		if cfg.IsReplaceEmptyInterfaceWithAnyEnabled() {
@@ -416,6 +443,7 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 				SkipGenerated: cfg.ResolveSkipGenerated(cfg.ReplaceEmptyInterfaceWithAnySkipGenerated(), true),
 				SkipTests:     cfg.ResolveSkipTests(cfg.ReplaceEmptyInterfaceWithAnySkipTests(), false),
 				SkipGlobs:     cfg.Skip,
+				Baseline:      resolveBaseline(cfg.ReplaceEmptyInterfaceWithAnyBaseline(), "any-baseline.txt", root, r.Root()),
 			})
 		}
 		if cfg.IsDroppedErrorsEnabled() {
@@ -426,6 +454,7 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 				SkipGenerated: cfg.DroppedErrorsSkipGenerated(),
 				SkipTests:     cfg.DroppedErrorsSkipTests(),
 				SkipGlobs:     cfg.Skip,
+				Baseline:      resolveBaseline(cfg.DroppedErrorsBaseline(), "droppederrors-baseline.txt", root, r.Root()),
 			})
 		}
 		toi := cfg.TestOnlyImports()
@@ -438,6 +467,7 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 				SkipGenerated: cfg.ResolveCommonSkipGenerated(toi.Common(), false),
 				SkipTests:     cfg.ResolveCommonSkipTests(toi.Common(), false),
 				SkipGlobs:     cfg.Skip,
+				Baseline:      resolveBaseline(cfg.TestOnlyImportsBaseline(), "testonlyimports-baseline.txt", root, r.Root()),
 			})
 		}
 		cw := cfg.CloseWriter()
@@ -450,6 +480,7 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 				SkipGenerated: cfg.ResolveCommonSkipGenerated(cw.Common(), false),
 				SkipTests:     cfg.ResolveCommonSkipTests(cw.Common(), false),
 				SkipGlobs:     cfg.Skip,
+				Baseline:      resolveBaseline(cfg.CloseWriterBaseline(), "closewriter-baseline.txt", root, r.Root()),
 			})
 		}
 
@@ -478,4 +509,26 @@ func Lint(ctx context.Context, r *repo.Repo, root string) error {
 // (excluding those that are themselves Go modules) contain at least one .go file.
 func hasGoFiles(r *repo.Repo, root string) (bool, error) {
 	return r.Under(root).HasGoFiles(), nil
+}
+
+func resolveBaseline(configured, defaultName, apRoot, repoRoot string) string {
+	if configured != "" {
+		if !filepath.IsAbs(configured) && apRoot != "" {
+			return filepath.Join(apRoot, configured)
+		}
+		return configured
+	}
+	if apRoot != "" {
+		def := filepath.Join(apRoot, ".ap", defaultName)
+		if exists, err := fileutils.FileExists(def); err == nil && exists {
+			return def
+		}
+	}
+	if repoRoot != "" {
+		defRepo := filepath.Join(repoRoot, ".ap", defaultName)
+		if exists, err := fileutils.FileExists(defRepo); err == nil && exists {
+			return defRepo
+		}
+	}
+	return ""
 }

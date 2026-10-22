@@ -15,10 +15,12 @@
 package unused
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/baseline"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis"
 )
@@ -85,7 +87,11 @@ func checkUnusedParams(pass *analysis.Pass, params *ast.FieldList, body *ast.Blo
 			}
 			obj := pass.TypesInfo.Defs[name]
 			if obj != nil && !used[obj.Pos()] {
-				pass.Reportf(name.Pos(), "parameter %s is unused, consider removing or renaming it as _", name.Name)
+				pass.Report(analysis.Diagnostic{
+					Pos:      name.Pos(),
+					Message:  fmt.Sprintf("parameter %s is unused, consider removing or renaming it as _", name.Name),
+					Category: baseline.FormatCategoryKey("unused", name.Name),
+				})
 			}
 		}
 	}
@@ -103,12 +109,20 @@ func checkUnusedFunc(pass *analysis.Pass, fn *ast.FuncDecl, used map[token.Pos]b
 	obj := pass.TypesInfo.Defs[fn.Name]
 	if obj != nil && !used[obj.Pos()] {
 		if fn.Recv == nil {
-			pass.Reportf(fn.Name.Pos(), "func %s is unused", name)
+			pass.Report(analysis.Diagnostic{
+				Pos:      fn.Name.Pos(),
+				Message:  fmt.Sprintf("func %s is unused", name),
+				Category: baseline.FormatCategoryKey("unused", name),
+			})
 		} else {
 			// For methods, we should be careful about interfaces.
 			// But if it's unexported, it can only satisfy unexported interfaces in the same package.
 			// For now, let's report it as unused if it's not in Uses.
-			pass.Reportf(fn.Name.Pos(), "method %s is unused", name)
+			pass.Report(analysis.Diagnostic{
+				Pos:      fn.Name.Pos(),
+				Message:  fmt.Sprintf("method %s is unused", name),
+				Category: baseline.FormatCategoryKey("unused", name),
+			})
 		}
 	}
 }
@@ -124,7 +138,11 @@ func checkUnusedFields(pass *analysis.Pass, st *ast.StructType, used map[token.P
 			}
 			obj := pass.TypesInfo.Defs[name]
 			if obj != nil && !used[obj.Pos()] {
-				pass.Reportf(name.Pos(), "field %s is unused", name.Name)
+				pass.Report(analysis.Diagnostic{
+					Pos:      name.Pos(),
+					Message:  fmt.Sprintf("field %s is unused", name.Name),
+					Category: baseline.FormatCategoryKey("unused", name.Name),
+				})
 			}
 		}
 	}

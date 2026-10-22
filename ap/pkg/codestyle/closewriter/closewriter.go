@@ -21,6 +21,7 @@ import (
 	"go/types"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/baseline"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis"
 )
@@ -211,11 +212,18 @@ func checkFunction(fnNode ast.Node, body *ast.BlockStmt, encFuncName string, pas
 			continue
 		}
 
+		recvTypeName := ""
+		if t := pass.TypesInfo.TypeOf(recv); t != nil {
+			recvTypeName = t.String()
+		} else {
+			recvTypeName = types.ExprString(recv)
+		}
+		key := fmt.Sprintf("%s.%s", recvTypeName, methodName)
 		msg := fmt.Sprintf("error from %s() on a writer is only logged in %s; return it so write failures are not silent", methodName, encFuncName)
 		pass.Report(analysis.Diagnostic{
 			Pos:      call.Pos(),
 			Message:  msg,
-			Category: "closewriter",
+			Category: baseline.FormatCategoryKey("closewriter", key),
 		})
 	}
 }

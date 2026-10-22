@@ -163,6 +163,16 @@ lint:
 			wantKey:    `"lint.closeWriter.typess"`,
 			wantDidYou: `"types"`,
 		},
+		{
+			name: "typo in lint.closeWriter baseline",
+			yaml: `
+lint:
+  closeWriter:
+    basline: .ap/baseline.txt
+`,
+			wantKey:    `"lint.closeWriter.basline"`,
+			wantDidYou: `"baseline"`,
+		},
 	}
 
 	for _, tc := range tests {

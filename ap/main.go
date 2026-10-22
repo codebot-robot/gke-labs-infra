@@ -17,11 +17,17 @@ package main
 import (
 	"context"
 	"os"
+	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/cmd"
 )
 
 func main() {
+	for i, arg := range os.Args {
+		if strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.Contains(arg, ".") {
+			os.Args[i] = "-" + arg
+		}
+	}
 	ctx := context.Background()
 	if err := cmd.Execute(ctx); err != nil {
 		os.Exit(1)

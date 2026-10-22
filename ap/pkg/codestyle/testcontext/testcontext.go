@@ -15,8 +15,10 @@
 package testcontext
 
 import (
+	"fmt"
 	"go/ast"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/baseline"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis"
 )
@@ -97,7 +99,11 @@ func (v *visitor) checkCall(call *ast.CallExpr) {
 		if pkg := obj.Pkg(); pkg != nil && pkg.Path() == "context" {
 			if obj.Name() == "Background" || obj.Name() == "TODO" {
 				if v.isTestFile || v.currentFuncHasT {
-					v.pass.Reportf(call.Pos(), "consider using t.Context() instead of context.%s()", obj.Name())
+					v.pass.Report(analysis.Diagnostic{
+						Pos:      call.Pos(),
+						Message:  fmt.Sprintf("consider using t.Context() instead of context.%s()", obj.Name()),
+						Category: baseline.FormatCategoryKey("testcontext", fmt.Sprintf("context.%s", obj.Name())),
+					})
 				}
 			}
 		}

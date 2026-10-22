@@ -26,6 +26,9 @@ import (
 // LintOptions holds the configuration for the "lint" command.
 type LintOptions struct {
 	*RootOptions
+	WriteBaseline bool
+	Check         string
+	Baseline      string
 }
 
 // BuildLintCommand constructs the cobra command for "lint".
@@ -46,6 +49,10 @@ func BuildLintCommand(rootOpt *RootOptions) *cobra.Command {
 		},
 	}
 
+	cmd.Flags().BoolVar(&opt.WriteBaseline, "write-baseline", false, "Write baseline of current findings")
+	cmd.Flags().StringVar(&opt.Check, "check", "", "Check to regenerate baseline for (e.g. closewriter, droppederrors)")
+	cmd.Flags().StringVar(&opt.Baseline, "baseline", "", "Path to baseline file")
+
 	cmd.AddCommand(BuildUnusedCommand())
 	cmd.AddCommand(BuildTestContextCommand())
 	cmd.AddCommand(BuildReplaceEmptyInterfaceWithAnyCommand())
@@ -58,6 +65,52 @@ func BuildLintCommand(rootOpt *RootOptions) *cobra.Command {
 
 // RunLint executes the business logic for the "lint" command.
 func RunLint(ctx context.Context, opt LintOptions) error {
+	if opt.WriteBaseline {
+		if opt.Check == "" {
+			return fmt.Errorf("--write-baseline requires --check=<name> (e.g. --check=closewriter, --check=droppederrors)")
+		}
+		switch opt.Check {
+		case "closewriter":
+			return RunCloseWriter(ctx, nil, CloseWriterOptions{
+				RootOptions:   opt.RootOptions,
+				Baseline:      opt.Baseline,
+				WriteBaseline: true,
+			}, nil)
+		case "droppederrors":
+			return RunDroppedErrors(ctx, nil, DroppedErrorsOptions{
+				RootOptions:   opt.RootOptions,
+				Baseline:      opt.Baseline,
+				WriteBaseline: true,
+			}, nil)
+		case "unused":
+			return RunUnused(ctx, nil, UnusedOptions{
+				RootOptions:   opt.RootOptions,
+				Baseline:      opt.Baseline,
+				WriteBaseline: true,
+			}, nil)
+		case "testonlyimports":
+			return RunTestOnlyImports(ctx, nil, TestOnlyImportsOptions{
+				RootOptions:   opt.RootOptions,
+				Baseline:      opt.Baseline,
+				WriteBaseline: true,
+			}, nil)
+		case "testcontext":
+			return RunTestContext(ctx, nil, TestContextOptions{
+				RootOptions:   opt.RootOptions,
+				Baseline:      opt.Baseline,
+				WriteBaseline: true,
+			}, nil)
+		case "replace-empty-interface-with-any", "any":
+			return RunReplaceEmptyInterfaceWithAny(ctx, nil, ReplaceEmptyInterfaceWithAnyOptions{
+				RootOptions:   opt.RootOptions,
+				Baseline:      opt.Baseline,
+				WriteBaseline: true,
+			}, nil)
+		default:
+			return fmt.Errorf("unknown check %q for --write-baseline", opt.Check)
+		}
+	}
+
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}

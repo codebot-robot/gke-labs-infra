@@ -573,3 +573,54 @@ platforms:
 		}
 	}
 }
+
+func TestLinterBaselineConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  closeWriter:
+    baseline: .ap/closewriter-baseline.txt
+  unused:
+    baseline: .ap/unused-baseline.txt
+  testcontext:
+    baseline: .ap/testcontext-baseline.txt
+  testOnlyImports:
+    baseline: .ap/testonlyimports-baseline.txt
+  replaceEmptyInterfaceWithAny:
+    baseline: .ap/any-baseline.txt
+  droppedErrors:
+    baseline: .ap/droppederrors-baseline.txt
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if cfg.CloseWriterBaseline() != ".ap/closewriter-baseline.txt" {
+		t.Errorf("expected closeWriter baseline, got %q", cfg.CloseWriterBaseline())
+	}
+	if cfg.UnusedBaseline() != ".ap/unused-baseline.txt" {
+		t.Errorf("expected unused baseline, got %q", cfg.UnusedBaseline())
+	}
+	if cfg.TestContextBaseline() != ".ap/testcontext-baseline.txt" {
+		t.Errorf("expected testcontext baseline, got %q", cfg.TestContextBaseline())
+	}
+	if cfg.TestOnlyImportsBaseline() != ".ap/testonlyimports-baseline.txt" {
+		t.Errorf("expected testOnlyImports baseline, got %q", cfg.TestOnlyImportsBaseline())
+	}
+	if cfg.ReplaceEmptyInterfaceWithAnyBaseline() != ".ap/any-baseline.txt" {
+		t.Errorf("expected replaceEmptyInterfaceWithAny baseline, got %q", cfg.ReplaceEmptyInterfaceWithAnyBaseline())
+	}
+	if cfg.DroppedErrorsBaseline() != ".ap/droppederrors-baseline.txt" {
+		t.Errorf("expected droppedErrors baseline, got %q", cfg.DroppedErrorsBaseline())
+	}
+}

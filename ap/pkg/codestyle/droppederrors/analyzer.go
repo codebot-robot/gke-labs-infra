@@ -47,13 +47,15 @@ func runAnalyzer(pass *analysis.Pass) (any, error) {
 		for _, raw := range rawFindings {
 			callee := formatCallee(raw.expr, pass.TypesInfo)
 			msg := fmt.Sprintf("unchecked error: %s", callee)
+			cat := CategoryDroppedError
 			if raw.category == CategoryErrorOnlyCheckedForSuccess {
 				msg = fmt.Sprintf("error only checked for success: %s", callee)
+				cat = CategoryErrorOnlyCheckedForSuccess
 			}
 			pass.Report(analysis.Diagnostic{
 				Pos:      raw.pos,
 				Message:  msg,
-				Category: "droppederrors",
+				Category: FormatCategoryKey(cat, callee),
 			})
 		}
 	}

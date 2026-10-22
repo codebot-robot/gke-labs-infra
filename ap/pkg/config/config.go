@@ -59,6 +59,7 @@ type CommonLinterConfig struct {
 	Mode          string `json:"mode"`
 	SkipGenerated *bool  `json:"skipGenerated"`
 	SkipTests     *bool  `json:"skipTests"`
+	Baseline      string `json:"baseline"`
 }
 
 type UnusedConfig struct {
@@ -80,7 +81,6 @@ type UnusedParametersConfig struct {
 type DroppedErrorsConfig struct {
 	CommonLinterConfig
 	Exclude            []string `json:"exclude"`
-	Baseline           string   `json:"baseline"`
 	UseDefaultExcludes *bool    `json:"useDefaultExcludes"`
 	GOOS               []string `json:"goos"`
 }
@@ -258,6 +258,54 @@ func (c *Config) DroppedErrorsBaseline() string {
 		return c.Lint.DroppedErrors.Baseline
 	}
 	return ""
+}
+
+// CloseWriterBaseline returns the configured baseline file path for closeWriter, or empty string.
+func (c *Config) CloseWriterBaseline() string {
+	if c != nil && c.Lint != nil && c.Lint.CloseWriter != nil {
+		return c.Lint.CloseWriter.Baseline
+	}
+	return ""
+}
+
+// UnusedBaseline returns the configured baseline file path for unused, or empty string.
+func (c *Config) UnusedBaseline() string {
+	if c != nil && c.Lint != nil && c.Lint.Unused != nil {
+		return c.Lint.Unused.Baseline
+	}
+	return ""
+}
+
+// TestContextBaseline returns the configured baseline file path for testcontext, or empty string.
+func (c *Config) TestContextBaseline() string {
+	if c != nil && c.Lint != nil && c.Lint.TestContext != nil {
+		return c.Lint.TestContext.Baseline
+	}
+	return ""
+}
+
+// TestOnlyImportsBaseline returns the configured baseline file path for testOnlyImports, or empty string.
+func (c *Config) TestOnlyImportsBaseline() string {
+	if c != nil && c.Lint != nil && c.Lint.TestOnlyImports != nil {
+		return c.Lint.TestOnlyImports.Baseline
+	}
+	return ""
+}
+
+// ReplaceEmptyInterfaceWithAnyBaseline returns the configured baseline file path for replaceEmptyInterfaceWithAny, or empty string.
+func (c *Config) ReplaceEmptyInterfaceWithAnyBaseline() string {
+	if c != nil && c.Lint != nil && c.Lint.ReplaceEmptyInterfaceWithAny != nil {
+		return c.Lint.ReplaceEmptyInterfaceWithAny.Baseline
+	}
+	return ""
+}
+
+// BaselineOrDefault returns the configured baseline file path, or defaultBaseline if not set.
+func (c *CommonLinterConfig) BaselineOrDefault(defaultBaseline string) string {
+	if c != nil && c.Baseline != "" {
+		return c.Baseline
+	}
+	return defaultBaseline
 }
 
 // DroppedErrorsExclude returns the configured excluded symbols.

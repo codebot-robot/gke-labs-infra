@@ -683,6 +683,49 @@ lint:
 			t.Fatalf("expected CloseWriterCheckTask to not be created when mode is ignore")
 		}
 	})
+
+	t.Run("baseline_configured", func(t *testing.T) {
+		dir, r := setupModule(t, `
+lint:
+  closeWriter:
+    baseline: .ap/custom-baseline.txt
+`)
+		taskGroup, err := LintTasks(r, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		task := findCloseWriterTask(taskGroup)
+		if task == nil {
+			t.Fatalf("expected CloseWriterCheckTask to be created")
+		}
+		expected := filepath.Join(dir, ".ap/custom-baseline.txt")
+		if task.Baseline != expected {
+			t.Errorf("expected baseline %s, got %s", expected, task.Baseline)
+		}
+	})
+
+	t.Run("default_baseline_detected_when_present_on_disk", func(t *testing.T) {
+		dir, r := setupModule(t, "")
+		apDir := filepath.Join(dir, ".ap")
+		if err := os.MkdirAll(apDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(apDir, "closewriter-baseline.txt"), []byte(""), 0644); err != nil {
+			t.Fatal(err)
+		}
+		taskGroup, err := LintTasks(r, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		task := findCloseWriterTask(taskGroup)
+		if task == nil {
+			t.Fatalf("expected CloseWriterCheckTask to be created")
+		}
+		expected := filepath.Join(apDir, "closewriter-baseline.txt")
+		if task.Baseline != expected {
+			t.Errorf("expected baseline %s, got %s", expected, task.Baseline)
+		}
+	})
 }
 
 func TestLintTasks_ContinueOnError(t *testing.T) {
