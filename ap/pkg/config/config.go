@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -44,8 +43,9 @@ type GovulncheckConfig struct {
 }
 
 type LintConfig struct {
-	SkipGenerated *bool `json:"skipGenerated"`
-	SkipTests     *bool `json:"skipTests"`
+	SkipGenerated *bool    `json:"skipGenerated"`
+	SkipTests     *bool    `json:"skipTests"`
+	GOOS          []string `json:"goos"`
 
 	linters map[string]LinterConfig
 }
@@ -60,6 +60,7 @@ func (l *LintConfig) UnmarshalJSON(data []byte) error {
 	}
 	l.SkipGenerated = p.SkipGenerated
 	l.SkipTests = p.SkipTests
+	l.GOOS = p.GOOS
 
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -71,7 +72,7 @@ func (l *LintConfig) UnmarshalJSON(data []byte) error {
 	}
 
 	for key, rawVal := range raw {
-		if key == "skipGenerated" || key == "skipTests" {
+		if key == "skipGenerated" || key == "skipTests" || key == "goos" {
 			continue
 		}
 		newFn, ok := linterRegistry[key]
@@ -112,7 +113,6 @@ type DroppedErrorsConfig struct {
 	Exclude            []string `json:"exclude"`
 	Baseline           string   `json:"baseline"`
 	UseDefaultExcludes *bool    `json:"useDefaultExcludes"`
-	GOOS               []string `json:"goos"`
 }
 
 // Linter returns the LinterConfig for the named linter.
@@ -364,17 +364,13 @@ func (c *Config) DroppedErrorsUseDefaultExcludes() bool {
 	return true
 }
 
-// DroppedErrorsGOOS returns the list of GOOS targets to check.
-// Default is host plus "linux" (or just "linux" if host is linux).
-func (c *Config) DroppedErrorsGOOS() []string {
-	if de := c.DroppedErrors(); de != nil && len(de.GOOS) > 0 {
-		return de.GOOS
+// LintGOOS returns the list of target GOOS values configured under lint.goos,
+// or nil if omitted (which implies automatic detection).
+func (c *Config) LintGOOS() []string {
+	if c == nil || c.Lint == nil {
+		return nil
 	}
-	host := runtime.GOOS
-	if host == "linux" {
-		return []string{"linux"}
-	}
-	return []string{host, "linux"}
+	return c.Lint.GOOS
 }
 
 // ImageRepo returns the image repository to use, defaulting to "images.local".

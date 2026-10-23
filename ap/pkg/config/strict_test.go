@@ -219,6 +219,8 @@ skip:
 lint:
   skipGenerated: false
   skipTests: false
+  goos:
+    - linux
   unused:
     mode: error
     skipGenerated: false
@@ -241,8 +243,6 @@ lint:
     skipTests: true
     skipGenerated: false
     useDefaultExcludes: true
-    goos:
-      - linux
   testOnlyImports:
     mode: error
     packages:
@@ -311,6 +311,9 @@ lint:
 	}
 	if cfg.DroppedErrorsBaseline() != ".ap/droppederrors-baseline.txt" {
 		t.Errorf("expected baseline .ap/droppederrors-baseline.txt, got %q", cfg.DroppedErrorsBaseline())
+	}
+	if len(cfg.LintGOOS()) != 1 || cfg.LintGOOS()[0] != "linux" {
+		t.Errorf("expected LintGOOS [linux], got %v", cfg.LintGOOS())
 	}
 	toi := cfg.Linter("testOnlyImports")
 	if !toi.IsEnabled() {

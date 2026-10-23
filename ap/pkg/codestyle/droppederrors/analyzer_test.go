@@ -17,22 +17,22 @@ package droppederrors
 import (
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis/analysistest"
 )
 
 func TestAnalyzer(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, Analyzer, "a")
+	analysistest.Run(t, testdata, NewAnalyzer(Config{}), "a")
 }
 
 func TestAnalyzer_GeneratedDefault(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, Analyzer, "generated_check")
+	analysistest.Run(t, testdata, NewAnalyzer(Config{}), "generated_check")
 }
 
 func TestAnalyzer_GeneratedSkip(t *testing.T) {
 	testdata := analysistest.TestData()
-	Analyzer.Flags.Set("skip-generated", "true")
-	defer Analyzer.Flags.Set("skip-generated", "false")
-	analysistest.Run(t, testdata, Analyzer, "generated_skip")
+	policy := fileset.NewPolicy(true, false, nil, "")
+	analysistest.Run(t, testdata, NewAnalyzer(Config{Policy: policy}), "generated_skip")
 }

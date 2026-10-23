@@ -28,7 +28,6 @@ func TestRegistry_FindAndDefaults(t *testing.T) {
 		wantDefaultMode      Mode
 		wantDefaultSkipGen   bool
 		wantDefaultSkipTests bool
-		wantCustom           bool
 	}{
 		{
 			name:                 "unused",
@@ -37,7 +36,6 @@ func TestRegistry_FindAndDefaults(t *testing.T) {
 			wantDefaultMode:      ModeError,
 			wantDefaultSkipGen:   true,
 			wantDefaultSkipTests: false,
-			wantCustom:           false,
 		},
 		{
 			name:                 "testcontext",
@@ -46,7 +44,6 @@ func TestRegistry_FindAndDefaults(t *testing.T) {
 			wantDefaultMode:      ModeWarn,
 			wantDefaultSkipGen:   false,
 			wantDefaultSkipTests: false,
-			wantCustom:           false,
 		},
 		{
 			name:                 "replaceEmptyInterfaceWithAny alias",
@@ -55,7 +52,6 @@ func TestRegistry_FindAndDefaults(t *testing.T) {
 			wantDefaultMode:      ModeWarn,
 			wantDefaultSkipGen:   true,
 			wantDefaultSkipTests: false,
-			wantCustom:           false,
 		},
 		{
 			name:                 "testonlyimports alias",
@@ -64,16 +60,14 @@ func TestRegistry_FindAndDefaults(t *testing.T) {
 			wantDefaultMode:      ModeError,
 			wantDefaultSkipGen:   false,
 			wantDefaultSkipTests: false,
-			wantCustom:           false,
 		},
 		{
-			name:                 "droppederrors custom",
+			name:                 "droppederrors",
 			lookup:               "droppedErrors",
 			wantName:             "droppederrors",
 			wantDefaultMode:      ModeError,
 			wantDefaultSkipGen:   false,
 			wantDefaultSkipTests: true,
-			wantCustom:           true,
 		},
 		{
 			name:                 "closewriter alias",
@@ -82,7 +76,6 @@ func TestRegistry_FindAndDefaults(t *testing.T) {
 			wantDefaultMode:      ModeError,
 			wantDefaultSkipGen:   false,
 			wantDefaultSkipTests: false,
-			wantCustom:           false,
 		},
 		{
 			name:                 "deferinloop alias",
@@ -91,7 +84,6 @@ func TestRegistry_FindAndDefaults(t *testing.T) {
 			wantDefaultMode:      ModeError,
 			wantDefaultSkipGen:   false,
 			wantDefaultSkipTests: false,
-			wantCustom:           false,
 		},
 	}
 
@@ -113,17 +105,14 @@ func TestRegistry_FindAndDefaults(t *testing.T) {
 			if r.DefaultSkipTests != tt.wantDefaultSkipTests {
 				t.Errorf("r.DefaultSkipTests = %v, want %v", r.DefaultSkipTests, tt.wantDefaultSkipTests)
 			}
-			if r.CustomTask != tt.wantCustom {
-				t.Errorf("r.CustomTask = %v, want %v", r.CustomTask, tt.wantCustom)
-			}
 		})
 	}
 }
 
 func TestRegistry_PlainAnalyzers(t *testing.T) {
 	plain := PlainAnalyzers()
-	if len(plain) != 6 {
-		t.Fatalf("expected 6 plain analyzers, got %d", len(plain))
+	if len(plain) != 7 {
+		t.Fatalf("expected 7 plain analyzers, got %d", len(plain))
 	}
 }
 

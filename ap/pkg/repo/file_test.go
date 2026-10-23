@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -228,5 +229,98 @@ func TestFile_HasGoGenerate(t *testing.T) {
 	f3 := &File{Path: txtPath, Name: "file.txt"}
 	if f3.HasGoGenerate() {
 		t.Errorf("non-Go file should not report HasGoGenerate")
+	}
+}
+
+func TestFile_ReferencedGOOS(t *testing.T) {
+	tempDir := t.TempDir()
+
+	tests := []struct {
+		name     string
+		fileName string
+		content  string
+		want     []string
+	}{
+		{
+			name:     "plain file",
+			fileName: "main.go",
+			content:  "package main\n\nfunc main() {}\n",
+			want:     nil,
+		},
+		{
+			name:     "filename suffix linux",
+			fileName: "foo_linux.go",
+			content:  "package foo\n",
+			want:     []string{"linux"},
+		},
+		{
+			name:     "filename suffix _linux.go",
+			fileName: "_linux.go",
+			content:  "package foo\n",
+			want:     []string{"linux"},
+		},
+		{
+			name:     "filename suffix linux amd64",
+			fileName: "foo_linux_amd64.go",
+			content:  "package foo\n",
+			want:     []string{"linux"},
+		},
+		{
+			name:     "filename suffix linux test",
+			fileName: "foo_linux_test.go",
+			content:  "package foo\n",
+			want:     []string{"linux"},
+		},
+		{
+			name:     "linux.go without preceding underscore is not OS specific",
+			fileName: "linux.go",
+			content:  "package linux\n",
+			want:     nil,
+		},
+		{
+			name:     "go build directive with multiple OS tags",
+			fileName: "cross.go",
+			content:  "//go:build (darwin || linux) && !windows\n\npackage cross\n",
+			want:     []string{"darwin", "linux", "windows"},
+		},
+		{
+			name:     "filename suffix and build directive combined and deduplicated",
+			fileName: "bar_darwin.go",
+			content:  "//go:build darwin || freebsd\n\npackage bar\n",
+			want:     []string{"darwin", "freebsd"},
+		},
+		{
+			name:     "non-go file ignored",
+			fileName: "foo_linux.txt",
+			content:  "hello",
+			want:     nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			filePath := filepath.Join(tempDir, tt.fileName)
+			if err := os.WriteFile(filePath, []byte(tt.content), 0644); err != nil {
+				t.Fatal(err)
+			}
+			f := &File{Path: filePath, Name: tt.fileName}
+			got := f.ReferencedGOOS()
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("ReferencedGOOS() = %v, want %v", got, tt.want)
+			}
+
+			// Verify memoization
+			got2 := f.ReferencedGOOS()
+			if !reflect.DeepEqual(got2, tt.want) {
+				t.Errorf("memoized ReferencedGOOS() = %v, want %v", got2, tt.want)
+			}
+
+			// Verify Refresh()
+			f.Refresh()
+			got3 := f.ReferencedGOOS()
+			if !reflect.DeepEqual(got3, tt.want) {
+				t.Errorf("refreshed ReferencedGOOS() = %v, want %v", got3, tt.want)
+			}
+		})
 	}
 }
