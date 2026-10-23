@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/protoc"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 )
 
 type blockTransport struct {
@@ -105,9 +105,7 @@ func TestToolProtoc_ColdVersion_NoRequestToGitHubAPI(t *testing.T) {
 	t.Setenv("REPO_ROOT", tempRoot)
 
 	bt := &blockTransport{blockedHost: "api.github.com"}
-	oldClient := protoc.HTTPClient
-	protoc.HTTPClient = &http.Client{Transport: bt}
-	defer func() { protoc.HTTPClient = oldClient }()
+	client := &http.Client{Transport: bt}
 
 	rootCmd := BuildRootCommand()
 	buf := new(bytes.Buffer)
@@ -115,7 +113,7 @@ func TestToolProtoc_ColdVersion_NoRequestToGitHubAPI(t *testing.T) {
 	rootCmd.SetErr(buf)
 	rootCmd.SetArgs([]string{"tool", "protoc", "--", "--version"})
 
-	err := rootCmd.ExecuteContext(t.Context())
+	err := rootCmd.ExecuteContext(scoped.WithHTTPClient(t.Context(), client))
 	output := buf.String()
 
 	if err != nil {

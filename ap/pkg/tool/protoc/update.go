@@ -27,17 +27,14 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"gopkg.in/yaml.v3"
 	"k8s.io/klog/v2"
 )
 
 // UpdateVersionsFile fetches protoc releases from the GitHub API and plugin versions
 // using 'go list -m -versions', then rewrites ap/pkg/tool/protoc/versions.yaml atomically.
-func UpdateVersionsFile(ctx context.Context, repoRoot string, client *http.Client) error {
-	if client == nil {
-		client = getHTTPClient()
-	}
-
+func UpdateVersionsFile(ctx context.Context, repoRoot string) error {
 	apiBase := os.Getenv("PROTOC_GITHUB_API_BASE_URL")
 	if apiBase == "" {
 		apiBase = "https://api.github.com"
@@ -48,7 +45,7 @@ func UpdateVersionsFile(ctx context.Context, repoRoot string, client *http.Clien
 
 	nextURL := fmt.Sprintf("%s/repos/protocolbuffers/protobuf/releases?per_page=100", strings.TrimRight(apiBase, "/"))
 	for nextURL != "" {
-		pageReleases, next, err := fetchReleasesPage(ctx, client, nextURL)
+		pageReleases, next, err := fetchReleasesPage(ctx, nextURL)
 		if err != nil {
 			return err
 		}
@@ -186,17 +183,13 @@ func parseVersionParts(v string) []int {
 	return parts
 }
 
-func fetchReleasesPage(ctx context.Context, client *http.Client, url string) ([]githubRelease, string, error) {
-	if client == nil {
-		client = getHTTPClient()
-	}
-
+func fetchReleasesPage(ctx context.Context, url string) ([]githubRelease, string, error) {
 	req, err := newGitHubRequest(ctx, url)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create request for %s: %w", url, err)
 	}
 
-	resp, err := client.Do(req)
+	resp, err := scoped.HTTPClient(ctx).Do(req)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to query GitHub releases API: %w", err)
 	}

@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"gopkg.in/yaml.v3"
 )
 
@@ -118,7 +119,8 @@ func TestUpdateVersionsFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := UpdateVersionsFile(t.Context(), tempRepo, server.Client())
+	ctx := scoped.WithHTTPClient(t.Context(), server.Client())
+	err := UpdateVersionsFile(ctx, tempRepo)
 	if err != nil {
 		t.Fatalf("UpdateVersionsFile failed: %v", err)
 	}

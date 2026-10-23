@@ -50,7 +50,7 @@ func BuildToolUpdateProtocVersionsCommand(rootOpt *RootOptions) *cobra.Command {
 					return err
 				}
 			}
-			return protoc.UpdateVersionsFile(cmd.Context(), repoRoot, nil)
+			return protoc.UpdateVersionsFile(cmd.Context(), repoRoot)
 		},
 	}
 }

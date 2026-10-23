@@ -30,6 +30,7 @@ import (
 	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"k8s.io/klog/v2"
 )
 
@@ -55,20 +56,7 @@ var protocBuiltinGenerators = map[string]bool{
 var (
 	protocMu sync.Mutex
 	pluginMu sync.Mutex
-
-	HTTPClient = http.DefaultClient
-	httpClient = http.DefaultClient
 )
-
-func getHTTPClient() *http.Client {
-	if HTTPClient != nil && HTTPClient != http.DefaultClient {
-		return HTTPClient
-	}
-	if httpClient != nil {
-		return httpClient
-	}
-	return http.DefaultClient
-}
 
 // CacheDir returns the root cache directory for ap tools.
 func CacheDir() (string, error) {
@@ -303,7 +291,7 @@ func downloadProtocZip(ctx context.Context, downloadURL, expectedDigest, cacheRo
 		return "", fmt.Errorf("failed to create request for %s: %w", downloadURL, err)
 	}
 
-	resp, err := getHTTPClient().Do(req)
+	resp, err := scoped.HTTPClient(ctx).Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to download protoc from %s: %w", downloadURL, err)
 	}
@@ -535,7 +523,7 @@ func fetchGitHubRelease(ctx context.Context, url string) (*githubRelease, error)
 		return nil, err
 	}
 
-	resp, err := getHTTPClient().Do(req)
+	resp, err := scoped.HTTPClient(ctx).Do(req)
 	if err != nil {
 		return nil, err
 	}
