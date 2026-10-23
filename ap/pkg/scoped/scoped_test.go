@@ -28,13 +28,9 @@ func TestHTTPClient(t *testing.T) {
 	if def == nil {
 		t.Fatal("HTTPClient(ctx) returned nil for unset context")
 	}
-	if def.Timeout <= 0 {
-		t.Errorf("expected positive default timeout, got %v", def.Timeout)
-	}
-
-	// Usable default on nil context
-	if nilCtx := HTTPClient(nil); nilCtx == nil || nilCtx.Timeout <= 0 {
-		t.Errorf("expected usable client on nil context, got %v", nilCtx)
+	tr, ok := def.Transport.(*http.Transport)
+	if !ok || tr.ResponseHeaderTimeout != 30*time.Second {
+		t.Errorf("expected transport with 30s ResponseHeaderTimeout, got %v", def.Transport)
 	}
 
 	// Round trip when set
@@ -51,10 +47,6 @@ func TestLog(t *testing.T) {
 	// Default logger must be usable and not panic on Info
 	def.V(1).Info("test default log")
 
-	// Usable default on nil context
-	nilLog := Log(nil)
-	nilLog.V(1).Info("test nil ctx log")
-
 	// Round trip when set
 	custom := logr.Discard()
 	ctx := WithLog(t.Context(), custom)
@@ -70,11 +62,6 @@ func TestNow(t *testing.T) {
 	after := time.Now()
 	if got.Before(before) || got.After(after) {
 		t.Errorf("Now(ctx) = %v, expected between %v and %v", got, before, after)
-	}
-
-	// Usable default on nil context
-	if nilNow := Now(nil); nilNow.IsZero() {
-		t.Error("Now(nil) returned zero time")
 	}
 
 	// Round trip when set

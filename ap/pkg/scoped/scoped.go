@@ -30,63 +30,47 @@ const (
 	nowKey
 )
 
-const defaultHTTPTimeout = 30 * time.Second
-
-var defaultHTTPClient = &http.Client{
-	Timeout: defaultHTTPTimeout,
-}
+var defaultHTTPClient = func() *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = 30 * time.Second
+	return &http.Client{Transport: t}
+}()
 
 // WithHTTPClient returns a copy of ctx carrying the HTTP client c.
 func WithHTTPClient(ctx context.Context, c *http.Client) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return context.WithValue(ctx, httpClientKey, c)
 }
 
 // HTTPClient returns the HTTP client associated with ctx, or a default
-// client with a sensible timeout if none was set. It never returns nil.
+// client with a response-header timeout if none was set. It never returns nil.
 func HTTPClient(ctx context.Context) *http.Client {
-	if ctx != nil {
-		if c, ok := ctx.Value(httpClientKey).(*http.Client); ok && c != nil {
-			return c
-		}
+	if c, ok := ctx.Value(httpClientKey).(*http.Client); ok && c != nil {
+		return c
 	}
 	return defaultHTTPClient
 }
 
 // WithLog returns a copy of ctx carrying the logger.
 func WithLog(ctx context.Context, log logr.Logger) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return klog.NewContext(ctx, log)
 }
 
 // Log returns the logger associated with ctx, or the default logger
 // if none was set.
 func Log(ctx context.Context) logr.Logger {
-	if ctx == nil {
-		return klog.Background()
-	}
 	return klog.FromContext(ctx)
 }
 
 // WithNow returns a copy of ctx carrying the clock function now.
 func WithNow(ctx context.Context, now func() time.Time) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	return context.WithValue(ctx, nowKey, now)
 }
 
 // Now returns the current time using the clock function in ctx,
 // or time.Now() if none was set.
 func Now(ctx context.Context) time.Time {
-	if ctx != nil {
-		if now, ok := ctx.Value(nowKey).(func() time.Time); ok && now != nil {
-			return now()
-		}
+	if now, ok := ctx.Value(nowKey).(func() time.Time); ok && now != nil {
+		return now()
 	}
 	return time.Now()
 }
