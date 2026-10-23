@@ -259,21 +259,24 @@ func resolvePinnedProtocRelease(ctx context.Context, version string) (resolvedVe
 		apiBase = "https://api.github.com"
 	}
 
-	tagURL := fmt.Sprintf("%s/repos/protocolbuffers/protobuf/releases/tags/v%s", strings.TrimRight(apiBase, "/"), resolvedVer)
-	rel, apiErr := fetchGitHubRelease(ctx, tagURL)
-	if apiErr != nil {
-		if isRateLimitError(apiErr) {
-			return "", "", "", apiErr
+	// GitHub releases for protobuf use two tag conventions: "v<version>" (modern releases)
+	// and "<version>" (legacy releases). Try "v<version>" first, then fall back to "<version>".
+	candidateTags := []string{"v" + resolvedVer, resolvedVer}
+	var rel *githubRelease
+	var lastErr error
+	for _, tag := range candidateTags {
+		tagURL := fmt.Sprintf("%s/repos/protocolbuffers/protobuf/releases/tags/%s", strings.TrimRight(apiBase, "/"), tag)
+		rel, lastErr = fetchGitHubRelease(ctx, tagURL)
+		if lastErr == nil {
+			break
 		}
-		tagURL = fmt.Sprintf("%s/repos/protocolbuffers/protobuf/releases/tags/%s", strings.TrimRight(apiBase, "/"), resolvedVer)
-		var retryErr error
-		rel, retryErr = fetchGitHubRelease(ctx, tagURL)
-		if retryErr != nil {
-			if isRateLimitError(retryErr) {
-				return "", "", "", retryErr
-			}
-			return "", "", "", fmt.Errorf("failed to fetch release for protoc %s: %w", resolvedVer, apiErr)
+		// A rate-limited first attempt exhausts the quota; do not try the second tag format.
+		if isRateLimitError(lastErr) {
+			return "", "", "", lastErr
 		}
+	}
+	if lastErr != nil {
+		return "", "", "", fmt.Errorf("failed to fetch release for protoc %s: %w", resolvedVer, lastErr)
 	}
 
 	asset, found := findAsset(rel.Assets, assetName)
@@ -574,7 +577,16 @@ func buildRateLimitError(resp *http.Response) error {
 	if resetStr := resp.Header.Get("X-RateLimit-Reset"); resetStr != "" {
 		if resetUnix, err := strconv.ParseInt(strings.TrimSpace(resetStr), 10, 64); err == nil && resetUnix > 0 {
 			resetTime := time.Unix(resetUnix, 0).UTC()
-			diff := resetTime.Sub(nowFunc())
+			now := nowFunc()
+			if dateStr := resp.Header.Get("Date"); dateStr != "" {
+				serverTime, err := http.ParseTime(dateStr)
+				if err != nil {
+					klog.V(2).Infof("failed to parse Date header %q: %v", dateStr, err)
+				} else {
+					now = serverTime.UTC()
+				}
+			}
+			diff := resetTime.Sub(now)
 			mins := int(math.Round(diff.Minutes()))
 			if mins < 0 {
 				mins = 0

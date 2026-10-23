@@ -308,6 +308,7 @@ func TestDoGitHubRequest(t *testing.T) {
 	tests := []struct {
 		name         string
 		handler      func(reqCount *int) http.HandlerFunc
+		clientNow    time.Time
 		wantStatus   int
 		wantErrMsg   string
 		wantRequests int
@@ -333,12 +334,45 @@ func TestDoGitHubRequest(t *testing.T) {
 				return func(w http.ResponseWriter, r *http.Request) {
 					*reqCount++
 					resetTime := fixedNow.Add(41 * time.Minute)
+					w.Header().Set("Date", fixedNow.Format(http.TimeFormat))
 					w.Header().Set("X-RateLimit-Remaining", "0")
 					w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
 					w.WriteHeader(http.StatusForbidden)
 				}
 			},
 			wantErrMsg:   "GitHub API rate limit exceeded (resets at 14:32 UTC, in 41m); pin a protoc version listed in ap/pkg/tool/protoc/versions.yaml, or set GITHUB_TOKEN for this one command",
+			wantRequests: 1,
+		},
+		{
+			name: "403 uses server Date header to compute remaining time when local clock is skewed",
+			handler: func(reqCount *int) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					*reqCount++
+					serverTime := fixedNow
+					resetTime := serverTime.Add(25 * time.Minute)
+					w.Header().Set("Date", serverTime.Format(http.TimeFormat))
+					w.Header().Set("X-RateLimit-Remaining", "0")
+					w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
+					w.WriteHeader(http.StatusForbidden)
+				}
+			},
+			clientNow:    fixedNow.Add(-2 * time.Hour),
+			wantErrMsg:   "GitHub API rate limit exceeded (resets at 14:16 UTC, in 25m); pin a protoc version listed in ap/pkg/tool/protoc/versions.yaml, or set GITHUB_TOKEN for this one command",
+			wantRequests: 1,
+		},
+		{
+			name: "403 falls back to local clock when Date header is unparseable",
+			handler: func(reqCount *int) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					*reqCount++
+					resetTime := fixedNow.Add(15 * time.Minute)
+					w.Header().Set("Date", "invalid-date")
+					w.Header().Set("X-RateLimit-Remaining", "0")
+					w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
+					w.WriteHeader(http.StatusForbidden)
+				}
+			},
+			wantErrMsg:   "GitHub API rate limit exceeded (resets at 14:06 UTC, in 15m); pin a protoc version listed in ap/pkg/tool/protoc/versions.yaml, or set GITHUB_TOKEN for this one command",
 			wantRequests: 1,
 		},
 		{
@@ -356,6 +390,12 @@ func TestDoGitHubRequest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			if !tt.clientNow.IsZero() {
+				subNow := tt.clientNow
+				nowFunc = func() time.Time { return subNow }
+				defer func() { nowFunc = func() time.Time { return fixedNow } }()
+			}
+
 			var reqCount int
 			server := httptest.NewServer(tt.handler(&reqCount))
 			defer server.Close()
