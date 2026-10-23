@@ -1,0 +1,137 @@
+protoc:
+    - version: "36.2"
+      assets:
+        protoc-36.2-linux-aarch_64.zip: sha256:8b8f18bd2b30346efbc698dd5a73dd7c805f3ef8380f6dfc95c768f3f1852f6a
+        protoc-36.2-linux-x86_64.zip: sha256:121f6c7afe1d4d0e3ea6aab9432038599250134cbf4474cb1167d2c7decd4278
+        protoc-36.2-osx-aarch_64.zip: sha256:9cd98a532c5c5e0c4161314de0225de27e4c8a323917b6ea7b1b714d3ae23466
+        protoc-36.2-osx-x86_64.zip: sha256:228cc7add4616cc14ca5e80dee83209d44449a7aee95a914ae748fa374efb078
+        protoc-36.2-win64.zip: sha256:f0c128dc0d8492eceece83bb459a4c0e316764b929ffbf1aa416357fd644edd3
+    - version: "36.1"
+      assets:
+        protoc-36.1-linux-aarch_64.zip: sha256:237a68856edf1bd28b6204bddd0596c1cf46d298bc29c620012540b2e44c73e7
+        protoc-36.1-linux-x86_64.zip: sha256:c4bc672d9d49214dc8cafdceadf4df92182d6ca8e3ec65a56b2d7de5602669b4
+        protoc-36.1-osx-aarch_64.zip: sha256:de56d57afe30c5d191b11d24ff93dd4025728d7fb43b773886b2d3613e0bdbb2
+        protoc-36.1-osx-x86_64.zip: sha256:ee2c5496e4af0aa6a224894bc0f7025145260e004d890487d510725ce8b473eb
+        protoc-36.1-win64.zip: sha256:390e515cb456e6a978553bdb57baf087b054885077fd6da7f7ff0160279c07d6
+    - version: "36.0"
+      assets:
+        protoc-36.0-linux-aarch_64.zip: sha256:4a00ec5e256d20a3deadd9e77d56da0ac04c72367c3c959f6d08e110a368400a
+        protoc-36.0-linux-x86_64.zip: sha256:bc8211ce760bd43ee21ddc145d6d9dbaeeabae205267a79d9054a240e367d4b4
+        protoc-36.0-osx-aarch_64.zip: sha256:b6bc4afdcb880124bf342851d05155b6e3d9b6e661236d87b9c614250d26ae00
+        protoc-36.0-osx-x86_64.zip: sha256:2847d952ecd1c466769ae3ca319c9cd34c3613542eba335dc9b02c49537f6c70
+        protoc-36.0-win64.zip: sha256:510fb2369a4720adb457783768c5e1481a0e1137d9e7694478dfe9b8fe445dc1
+    - version: "35.1"
+      assets:
+        protoc-35.1-linux-aarch_64.zip: sha256:01bf9d08808c7f96678b63f4bd8efa559bb4f83d5a7a270d5edaf507f9d5d9cf
+        protoc-35.1-linux-x86_64.zip: sha256:6930ebf62bd4ea607b98fff052596c6ee564b9835b4ce172c75a3f53ae9d91b7
+        protoc-35.1-osx-aarch_64.zip: sha256:193289af0470c6a1aada357d4fba0bbf8d78bfaac8b5e42ca30af2ef75583de2
+        protoc-35.1-osx-x86_64.zip: sha256:537d73604a344ded6fc94e98e07e529d4fe3e4a0b09e59905353950fafc2a1f7
+        protoc-35.1-win64.zip: sha256:5d3ff218d7d91eea95f7569bcb5a98f3030f8996d44151279d9772edcff76082
+    - version: "35.0"
+      assets:
+        protoc-35.0-linux-aarch_64.zip: sha256:36b518ac14d90351cc6598228ed2bbe5afe4e357b1af470b07e0ec1609875de2
+        protoc-35.0-linux-x86_64.zip: sha256:a45cda0989c17dd950db55f6fbe1e5814c50fda08e87aa422980ac1f89dddbbc
+        protoc-35.0-osx-aarch_64.zip: sha256:45444963204757fd3e2fbe304bc1fdadfb488d8556ff099c4cc06575eab88976
+        protoc-35.0-osx-x86_64.zip: sha256:3580c2d115fccb5b0239960c8f70f8da14787b1973a46b2f39c315ad71c11e01
+        protoc-35.0-win64.zip: sha256:d1cede9e308cc3eb072392af1c02ccae4bdd3d2f374ec2970dbd8cdfdaa91363
+    - version: "34.2"
+      assets:
+        protoc-34.2-linux-aarch_64.zip: sha256:63d92a87482d4eaa41a72f9de6ea7f476e1fb4c722700fa0b981cc204f7d3a14
+        protoc-34.2-linux-x86_64.zip: sha256:b52e803fad2f63232f75351c0ff735e891f40262de791bade78a3636831a522a
+        protoc-34.2-osx-aarch_64.zip: sha256:90ced886e57a96a1ec98bf1f23bef2532bb1636ca8b27bb5eb34fea89cd6ef8b
+        protoc-34.2-osx-x86_64.zip: sha256:8538ec43139ce2759ffd0840954cc0415796934b20c2a86fe493c9af2277cbea
+        protoc-34.2-win64.zip: sha256:b6dbc741897760694630ca9ee6a22fda589647b573fd6843d6943b72ceb05c15
+    - version: "34.1"
+      assets:
+        protoc-34.1-linux-aarch_64.zip: sha256:31c5e9e3c7bf013cf41fb97765ee255c140024a6b175b6cc9b64beddd7c23ba7
+        protoc-34.1-linux-x86_64.zip: sha256:af27ea66cd26938fe48587804ca7d4817457a08350021a1c6e23a27ccc8c6904
+        protoc-34.1-osx-aarch_64.zip: sha256:2c7e92b8b578916937df132b3032e2e8e6c170862ecf7a8333094a6f3d03650c
+        protoc-34.1-osx-x86_64.zip: sha256:ab124429c1f49951f03b6c0c0e911fec04e2c7c20de5c935e0cde7353bbd016c
+        protoc-34.1-win64.zip: sha256:6d7ebdc75e9c1f0026d4fb28f17ef1d0aae77d36744d83a9e052d79ba493724f
+    - version: "34.0"
+      assets:
+        protoc-34.0-linux-aarch_64.zip: sha256:f0b8aad28be5ea6150c082f96ac57e028154afb9ee29f4ce092b5a39df8ae6c8
+        protoc-34.0-linux-x86_64.zip: sha256:e9a91b6fcfe4177ec2cd35fc8f15c1e811fa0ecdef9372755cd6d3513d5faaab
+        protoc-34.0-osx-aarch_64.zip: sha256:3ef35187a3c8aed81ee57e792227e483e558fa56c93fce525e569bff55794c1a
+        protoc-34.0-osx-x86_64.zip: sha256:d58fcd413a9ed458283d54023e409fd5cf767da4ed225d1ffaffd83cf2764f53
+        protoc-34.0-win64.zip: sha256:76ddeb5ae7a31c8f9f7759d3b843a4cadda2150ac037ad0c1794665d6cf31fce
+    - version: "33.6"
+      assets:
+        protoc-33.6-linux-aarch_64.zip: sha256:4016cd2ad24c6a2405332a2ef7e04b719240e40d811587c6a1c4bbe514cd668c
+        protoc-33.6-linux-x86_64.zip: sha256:9c49962391ff8b5754342509efc3885db91dfe11a358e1e98c9a71518f0ad199
+        protoc-33.6-osx-aarch_64.zip: sha256:606aca137976af9090847025dcc8fc0daceb5cbbc5a46819296118fc53f0b870
+        protoc-33.6-osx-x86_64.zip: sha256:13a2c245613ed7eca4a8c1a779545f0f2762f2735b2f7d7f7d6fe2618440ae2d
+        protoc-33.6-win64.zip: sha256:96a83b8ee942f1046f079c43657cc09fd41f37a4e349ddb0e8ba5064c48bb5ff
+    - version: "33.5"
+      assets:
+        protoc-33.5-linux-aarch_64.zip: sha256:2b0fcf9b2c32cbadccc0eb7a88b841fffecd4a06fc80acdba2b5be45e815c38a
+        protoc-33.5-linux-x86_64.zip: sha256:24e58fb231d50306ee28491f33a170301e99540f7e29ca461e0e80fd1239f8d1
+        protoc-33.5-osx-aarch_64.zip: sha256:7084c6482e3bb416a33fe2162ba566711773b842e6953bf6cb181647b9ef57c0
+        protoc-33.5-osx-x86_64.zip: sha256:7f31625f8bec4929082ae9209e101c1c03692624457cc6332f83736db495ee92
+        protoc-33.5-win64.zip: sha256:7e3468cd1fbd1ae9361a5304d4ac28fbd593aa1a425b5464bd9d4da5fca224b4
+    - version: "33.4"
+      assets:
+        protoc-33.4-linux-aarch_64.zip: sha256:15aa988f4a6090636525ec236a8e4b3aab41eef402751bd5bb2df6afd9b7b5a5
+        protoc-33.4-linux-x86_64.zip: sha256:c0040ea9aef08fdeb2c74ca609b18d5fdbfc44ea0042fcfbfb38860d35f7dd66
+        protoc-33.4-osx-aarch_64.zip: sha256:726297dcfed58592fd35620a5a6246ae020c39e88f3fd4cb1827df7bcf3dfcf1
+        protoc-33.4-osx-x86_64.zip: sha256:a49bec10d039e902d3b43e49938c42526f90011467609864fa6386ac4014da58
+        protoc-33.4-win64.zip: sha256:0b31be019b9fe45a388e93bf1f16d70afdf9ce5caf958ea47892fbc868b5a1b3
+    - version: "33.3"
+      assets:
+        protoc-33.3-linux-aarch_64.zip: sha256:56652fe893d8588b80754d94132d0575abe6666a9fe52cde4154f47ee1482a46
+        protoc-33.3-linux-x86_64.zip: sha256:2dbe6e2165f7721a58c2dc9e40fb47c5e3c2d63fb420c1f497db4ad3eb310ff8
+        protoc-33.3-osx-aarch_64.zip: sha256:8e5a38ecdc94b92e98a0e29c8ad4451d035e8226d466c3b2ebc60813629bb3bc
+        protoc-33.3-osx-x86_64.zip: sha256:0bb4e36daf61facb76abd1d6e075b59c3dcfaf47bfbde254b13fb10beb734fdd
+        protoc-33.3-win64.zip: sha256:1b845f9c78080033064509325e191670e09fbc74f966587f8e752557374d56ad
+    - version: "33.2"
+      assets:
+        protoc-33.2-linux-aarch_64.zip: sha256:706662a332683aa2fffe1c4ea61588279d31679cd42d91c7d60a69651768edb8
+        protoc-33.2-linux-x86_64.zip: sha256:b24b53f87c151bfd48b112fe4c3a6e6574e5198874f38036aff41df3456b8caf
+        protoc-33.2-osx-aarch_64.zip: sha256:5be1427127788c9f7dd7d606c3e69843dd3587327dea993917ffcb77e7234b44
+        protoc-33.2-osx-x86_64.zip: sha256:dba51cfcc85076d56e7de01a647865c5a7f995c3dce427d5215b53e50b7be43f
+        protoc-33.2-win64.zip: sha256:376770cd4073beb63db56fdd339260edb9957b3c4472e05a75f5f9ec8f98d8f5
+    - version: "33.1"
+      assets:
+        protoc-33.1-linux-aarch_64.zip: sha256:6018147740548e0e0f764408c87f4cd040e6e1c1203e13aeacaf811892b604f3
+        protoc-33.1-linux-x86_64.zip: sha256:f3340e28a83d1c637d8bafdeed92b9f7db6a384c26bca880a6e5217b40a4328b
+        protoc-33.1-osx-aarch_64.zip: sha256:db7e66ff7f9080614d0f5505a6b0ac488cf89a15621b6a361672d1332ec2e14e
+        protoc-33.1-osx-x86_64.zip: sha256:e20b5f930e886da85e7402776a4959efb1ed60c57e72794bcade765e67abaa82
+        protoc-33.1-win64.zip: sha256:d7a207fb6eec0e4b1b6613be3b7d11905375b6fd1147a071116eb8e9f24ac53b
+    - version: "33.0"
+      assets:
+        protoc-33.0-linux-aarch_64.zip: sha256:4b96bc91f8b54d829b8c3ca2207ff1ceb774843321e4fa5a68502faece584272
+        protoc-33.0-linux-x86_64.zip: sha256:d99c011b799e9e412064244f0be417e5d76c9b6ace13a2ac735330fa7d57ad8f
+        protoc-33.0-osx-aarch_64.zip: sha256:3cf55dd47118bd2efda9cd26b74f8bbbfcf5beb1bf606bc56ad4c001b543f6d3
+        protoc-33.0-osx-x86_64.zip: sha256:e4e50a703147a92d1a5a2d3a34c9e41717f67ade67d4be72b9a466eb8f22fe87
+        protoc-33.0-win64.zip: sha256:3742cd49c8b6bd78b6760540367eb0ff62fa70a1032e15dafe131bfaf296986a
+    - version: "32.1"
+      assets:
+        protoc-32.1-linux-aarch_64.zip: sha256:4a802ed23d70f7bad7eb19e5a3e724b3aa967250d572cadfd537c1ba939aee6a
+        protoc-32.1-linux-x86_64.zip: sha256:e9c129c176bb7df02546c4cd6185126ca53c89e7d2f09511e209319704b5dd7e
+        protoc-32.1-osx-aarch_64.zip: sha256:a7b51b2113862690fa52c62f8891a6037bafb9db88d4f9924c486de9d9bb89d5
+        protoc-32.1-osx-x86_64.zip: sha256:f9caa5b4d0b537acffb0ffd7d53225511a5574ef903fca550ea9e7600987f13b
+        protoc-32.1-win64.zip: sha256:69569cbc178cd5785ecb7d93569913110677eafeb4b8f82970c361fad4c7cd66
+    - version: "32.0"
+      assets:
+        protoc-32.0-linux-aarch_64.zip: sha256:56af3fc2e43a0230802e6fadb621d890ba506c5c17a1ae1070f685fe79ba12d0
+        protoc-32.0-linux-x86_64.zip: sha256:7ca037bfe5e5cabd4255ccd21dd265f79eb82d3c010117994f5dc81d2140ee88
+        protoc-32.0-osx-aarch_64.zip: sha256:09a2c729cc821215cc0d4c564b761760961fe338c52f24b302fd7e18e7b675d1
+        protoc-32.0-osx-x86_64.zip: sha256:63eeba15ddc12ab11b0a8bce81fb2d46cc69022c3e6ad21fecde90d52139bff6
+        protoc-32.0-win64.zip: sha256:89c178e9f878cb6dd561f677688e1eb2e757cb9ac84ae30b64436bac19646996
+    - version: "29.6"
+      assets:
+        protoc-29.6-linux-aarch_64.zip: sha256:2594ff4fcae8cb57310d394d0961b236190ad9c5efbfdf1f597ea471d424fe79
+        protoc-29.6-linux-x86_64.zip: sha256:48785a926e73ffa3f68e2f22b14e7b849620c7a1d36809ac9249a5495e280323
+        protoc-29.6-osx-aarch_64.zip: sha256:b9576b5fa1a1ef3fe13a8c91d9d8204b46545759bea5ae155cd6ba2ea4cdaeed
+        protoc-29.6-osx-x86_64.zip: sha256:312f04713946921cc0187ef34df80241ddca1bab6f564c636885fd2cc90d3f88
+        protoc-29.6-win64.zip: sha256:1ebd7c87baffb9f1c47169b640872bf5fb1e4408079c691af527be9561d8f6f7
+    - version: "25.9"
+      assets:
+        protoc-25.9-linux-aarch_64.zip: sha256:16dcc7d435b8a117c31470e8dd85d82bdace5e5d485d2b901573854e4330e006
+        protoc-25.9-linux-x86_64.zip: sha256:88f2d0c78a1072c4f84c59e9f9785b74849953e882a573188bc2d0518915b03e
+        protoc-25.9-osx-aarch_64.zip: sha256:11e91bb16fc52f5691970a3fb57c6eb26e13065a2eff1eea226b0dcd698ddb6d
+        protoc-25.9-osx-x86_64.zip: sha256:387ad924f98fee962285ff3c5d63e1c6c666ea76ba339fb506afa56d74372c60
+        protoc-25.9-win64.zip: sha256:5abb0d741dea2d3df034e1cae5bad4fe014fb5fe3b982b55109bf783fded0d83
+plugins:
+    protoc-gen-go: v1.36.12
+    protoc-gen-go-grpc: v1.6.2

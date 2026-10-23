@@ -26,11 +26,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
-	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"k8s.io/klog/v2"
@@ -59,9 +56,19 @@ var (
 	protocMu sync.Mutex
 	pluginMu sync.Mutex
 
+	HTTPClient = http.DefaultClient
 	httpClient = http.DefaultClient
-	timeNow    = time.Now
 )
+
+func getHTTPClient() *http.Client {
+	if HTTPClient != nil && HTTPClient != http.DefaultClient {
+		return HTTPClient
+	}
+	if httpClient != nil {
+		return httpClient
+	}
+	return http.DefaultClient
+}
 
 // CacheDir returns the root cache directory for ap tools.
 func CacheDir() (string, error) {
@@ -117,8 +124,10 @@ func ResolveProtocAsset(version, goos, goarch string) (string, error) {
 }
 
 type githubRelease struct {
-	TagName string        `json:"tag_name"`
-	Assets  []githubAsset `json:"assets"`
+	TagName    string        `json:"tag_name"`
+	Draft      bool          `json:"draft"`
+	Prerelease bool          `json:"prerelease"`
+	Assets     []githubAsset `json:"assets"`
 }
 
 type githubAsset struct {
@@ -127,15 +136,11 @@ type githubAsset struct {
 	Digest             string `json:"digest"`
 }
 
-type latestMemo struct {
-	ResolvedAt time.Time      `json:"resolved_at"`
-	Release    *githubRelease `json:"release"`
-}
-
 // EnsureProtoc ensures that protoc is downloaded, verified against the release digest (if available),
 // extracted into the cache directory, and executable.
-// If version is "latest" or empty, it queries the GitHub releases API (memoized for 24 hours in tools/protoc/latest.json).
-// If the API is unreachable, it falls back to the newest version already in the cache with a warning.
+// If version is "latest" or empty, it resolves from versions.yaml without network round-trips.
+// If version is found in versions.yaml, it uses the embedded digest without network round-trips.
+// If version is not in versions.yaml, it logs a warning and falls back to querying the GitHub API.
 func EnsureProtoc(ctx context.Context, version string) (protocBin string, includeDir string, err error) {
 	protocMu.Lock()
 	defer protocMu.Unlock()
@@ -162,9 +167,20 @@ func EnsureProtoc(ctx context.Context, version string) (protocBin string, includ
 	}
 
 	// 1. Resolve release metadata and download URL
-	resolvedVer, downloadURL, expectedDigest, err := resolveProtocRelease(ctx, version, cacheRoot, binName)
+	resolvedVer, downloadURL, expectedDigest, err := resolveProtocRelease(ctx, version)
 	if err != nil {
 		return "", "", err
+	}
+
+	if envDigest := os.Getenv("PROTOC_DOWNLOAD_DIGEST"); envDigest != "" {
+		expectedDigest = envDigest
+	}
+	if baseURL := os.Getenv("PROTOC_DOWNLOAD_BASE_URL"); baseURL != "" {
+		assetName, assetErr := ResolveProtocAsset(resolvedVer, runtime.GOOS, runtime.GOARCH)
+		if assetErr != nil {
+			return "", "", assetErr
+		}
+		downloadURL = fmt.Sprintf("%s/%s", strings.TrimRight(baseURL, "/"), assetName)
 	}
 
 	installDir := filepath.Join(cacheRoot, "tools", "protoc", resolvedVer)
@@ -189,76 +205,49 @@ func EnsureProtoc(ctx context.Context, version string) (protocBin string, includ
 	return installProtocZip(tmpZip, installDir, binName, resolvedVer)
 }
 
-func resolveProtocRelease(ctx context.Context, version, cacheRoot, binName string) (resolvedVer, downloadURL, expectedDigest string, err error) {
-	if version == "" || version == "latest" {
-		return resolveLatestProtocRelease(ctx, cacheRoot, binName)
-	}
-	return resolvePinnedProtocRelease(ctx, version)
-}
-
-func resolveLatestProtocRelease(ctx context.Context, cacheRoot, binName string) (resolvedVer, downloadURL, expectedDigest string, err error) {
-	var rel *githubRelease
-	memoPath := filepath.Join(cacheRoot, "tools", "protoc", "latest.json")
-
-	// Check if we have a valid memo within 24 hours
-	memo, readErr := readMemo(memoPath)
-	if readErr != nil {
-		if !os.IsNotExist(readErr) {
-			klog.V(2).Infof("failed to read latest.json: %v", readErr)
+func resolveProtocRelease(ctx context.Context, version string) (resolvedVer, downloadURL, expectedDigest string, err error) {
+	requestedVer := strings.TrimSpace(version)
+	if requestedVer == "" || requestedVer == "latest" {
+		rel := Latest()
+		if rel == nil {
+			return "", "", "", fmt.Errorf("no protoc releases found in versions.yaml")
 		}
-	} else {
-		age := timeNow().Sub(memo.ResolvedAt)
-		if age >= 0 && age < 24*time.Hour {
-			rel = memo.Release
+		resolvedVer = rel.Version
+		assetName, err := ResolveProtocAsset(resolvedVer, runtime.GOOS, runtime.GOARCH)
+		if err != nil {
+			return "", "", "", err
 		}
-	}
-
-	if rel == nil {
+		digest, ok := rel.Assets[assetName]
+		if !ok || digest == "" {
+			return "", "", "", fmt.Errorf("protoc %s has no asset %s in versions.yaml", resolvedVer, assetName)
+		}
 		baseURL := os.Getenv("PROTOC_DOWNLOAD_BASE_URL")
-		apiURL := "https://api.github.com/repos/protocolbuffers/protobuf/releases/latest"
-		if baseURL != "" {
-			apiURL = fmt.Sprintf("%s/releases/latest", strings.TrimRight(baseURL, "/"))
+		if baseURL == "" {
+			baseURL = fmt.Sprintf("https://github.com/protocolbuffers/protobuf/releases/download/v%s", resolvedVer)
 		}
+		return resolvedVer, fmt.Sprintf("%s/%s", strings.TrimRight(baseURL, "/"), assetName), digest, nil
+	}
 
-		var apiErr error
-		rel, apiErr = fetchGitHubRelease(ctx, apiURL)
-		if apiErr != nil {
-			// Fallback to expired memo if available
-			if memo != nil {
-				klog.Warningf("failed to resolve latest protoc from GitHub API: %v; falling back to memoized release from %s", apiErr, memo.ResolvedAt.Format(time.RFC3339))
-				rel = memo.Release
-			} else {
-				// Fall back to newest version in cache
-				cachedVer := findNewestCachedProtoc(cacheRoot, binName)
-				if cachedVer != "" {
-					klog.Warningf("failed to resolve latest protoc from GitHub API: %v; falling back to cached %s", apiErr, cachedVer)
-					return cachedVer, "", "", nil
-				}
-				return "", "", "", fmt.Errorf("failed to resolve latest protoc from GitHub and no cached version found: %w", apiErr)
-			}
-		} else {
-			// Memoize successful latest resolution
-			newMemo := latestMemo{
-				ResolvedAt: timeNow(),
-				Release:    rel,
-			}
-			if writeErr := writeMemo(memoPath, newMemo); writeErr != nil {
-				klog.V(2).Infof("failed to write latest.json: %v", writeErr)
-			}
+	if rel, ok := Lookup(requestedVer); ok {
+		resolvedVer = rel.Version
+		assetName, err := ResolveProtocAsset(resolvedVer, runtime.GOOS, runtime.GOARCH)
+		if err != nil {
+			return "", "", "", err
 		}
+		digest, ok := rel.Assets[assetName]
+		if !ok || digest == "" {
+			return "", "", "", fmt.Errorf("protoc %s has no asset %s in versions.yaml", resolvedVer, assetName)
+		}
+		baseURL := os.Getenv("PROTOC_DOWNLOAD_BASE_URL")
+		if baseURL == "" {
+			baseURL = fmt.Sprintf("https://github.com/protocolbuffers/protobuf/releases/download/v%s", resolvedVer)
+		}
+		return resolvedVer, fmt.Sprintf("%s/%s", strings.TrimRight(baseURL, "/"), assetName), digest, nil
 	}
 
-	resolvedVer = strings.TrimPrefix(rel.TagName, "v")
-	assetName, err := ResolveProtocAsset(resolvedVer, runtime.GOOS, runtime.GOARCH)
-	if err != nil {
-		return "", "", "", err
-	}
-	asset, found := findAsset(rel.Assets, assetName)
-	if !found {
-		return "", "", "", fmt.Errorf("release %s has no asset %s", resolvedVer, assetName)
-	}
-
-	return resolvedVer, asset.BrowserDownloadURL, asset.Digest, nil
+	// On a miss: warn and resolve from GitHub API
+	klog.Warningf("protoc %s is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-protoc-versions' to add it", requestedVer)
+	return resolvePinnedProtocRelease(ctx, requestedVer)
 }
 
 func resolvePinnedProtocRelease(ctx context.Context, version string) (resolvedVer, downloadURL, expectedDigest string, err error) {
@@ -273,10 +262,15 @@ func resolvePinnedProtocRelease(ctx context.Context, version string) (resolvedVe
 		return resolvedVer, fmt.Sprintf("%s/%s", strings.TrimRight(baseURL, "/"), assetName), os.Getenv("PROTOC_DOWNLOAD_DIGEST"), nil
 	}
 
-	tagURL := fmt.Sprintf("https://api.github.com/repos/protocolbuffers/protobuf/releases/tags/v%s", resolvedVer)
+	apiBase := os.Getenv("PROTOC_GITHUB_API_BASE_URL")
+	if apiBase == "" {
+		apiBase = "https://api.github.com"
+	}
+
+	tagURL := fmt.Sprintf("%s/repos/protocolbuffers/protobuf/releases/tags/v%s", strings.TrimRight(apiBase, "/"), resolvedVer)
 	rel, apiErr := fetchGitHubRelease(ctx, tagURL)
 	if apiErr != nil {
-		tagURL = fmt.Sprintf("https://api.github.com/repos/protocolbuffers/protobuf/releases/tags/%s", resolvedVer)
+		tagURL = fmt.Sprintf("%s/repos/protocolbuffers/protobuf/releases/tags/%s", strings.TrimRight(apiBase, "/"), resolvedVer)
 		var retryErr error
 		rel, retryErr = fetchGitHubRelease(ctx, tagURL)
 		if retryErr != nil {
@@ -309,7 +303,7 @@ func downloadProtocZip(ctx context.Context, downloadURL, expectedDigest, cacheRo
 		return "", fmt.Errorf("failed to create request for %s: %w", downloadURL, err)
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := getHTTPClient().Do(req)
 	if err != nil {
 		return "", fmt.Errorf("failed to download protoc from %s: %w", downloadURL, err)
 	}
@@ -364,8 +358,8 @@ func installProtocZip(zipPath, installDir, binName, resolvedVer string) (protocB
 }
 
 // EnsurePlugin ensures that the specified Go plugin is installed and cached under its exact module version.
-// If requestedVer is "latest" or empty, it runs `go install <module>@latest`, reads the version with `go version -m`,
-// and caches it under that version. If the install fails, it falls back to the newest cached version with a warning.
+// If requestedVer is "latest" or empty, it checks versions.yaml.
+// If not found in versions.yaml or config, it warns and runs `go install <module>@latest`.
 func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugins map[string]string) (string, error) {
 	pluginMu.Lock()
 	defer pluginMu.Unlock()
@@ -408,12 +402,20 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 		binName += ".exe"
 	}
 
-	isLatest := requestedVer == "" || requestedVer == "latest"
+	var targetVer string
+	if requestedVer != "" && requestedVer != "latest" {
+		targetVer = requestedVer
+	} else if yamlVer, ok := PluginVersion(normalizedName); ok {
+		targetVer = yamlVer
+	} else {
+		klog.Warningf("plugin %s is not in versions.yaml; resolving @latest via go install; run 'ap tool update-protoc-versions' to pin it", normalizedName)
+		targetVer = "latest"
+	}
 
 	// If a specific version is requested, check if it's already cached
-	if !isLatest {
-		ver := requestedVer
-		if !strings.HasPrefix(ver, "v") {
+	if targetVer != "latest" {
+		ver := targetVer
+		if !strings.HasPrefix(ver, "v") && !strings.Contains(ver, "/") {
 			ver = "v" + ver
 		}
 		targetBinDir := filepath.Join(cacheRoot, "tools", "plugins", normalizedName, ver, "bin")
@@ -465,14 +467,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 	cmd.Env = append(os.Environ(), "GOBIN="+stagingBinDir, "GOTOOLCHAIN=auto")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// Fallback to newest cached version if install fails (e.g. offline)
-		cachedVer := findNewestCachedPlugin(cacheRoot, normalizedName, binName)
-		if cachedVer != "" {
-			klog.Warningf("failed to install %s@latest: %v; falling back to cached %s", normalizedName, err, cachedVer)
-			klog.Infof("Using %s %s", normalizedName, cachedVer)
-			return filepath.Join(cacheRoot, "tools", "plugins", normalizedName, cachedVer, "bin"), nil
-		}
-		return "", fmt.Errorf("failed to install %s@latest and no cached version found: %w\n%s", normalizedName, err, strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("failed to install %s@latest: %w\n%s", normalizedName, err, strings.TrimSpace(string(output)))
 	}
 
 	resolvedVer, err := readPluginVersion(ctx, stagingBin)
@@ -540,7 +535,7 @@ func fetchGitHubRelease(ctx context.Context, url string) (*githubRelease, error)
 		return nil, err
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := getHTTPClient().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -579,96 +574,4 @@ func isExecutable(path string) bool {
 		return true
 	}
 	return fi.Mode()&0111 != 0
-}
-
-func findNewestCachedProtoc(cacheRoot, binName string) string {
-	protocDir := filepath.Join(cacheRoot, "tools", "protoc")
-	entries, err := os.ReadDir(protocDir)
-	if err != nil {
-		return ""
-	}
-
-	var versions []string
-	for _, e := range entries {
-		if e.IsDir() && isExecutable(filepath.Join(protocDir, e.Name(), "bin", binName)) {
-			versions = append(versions, e.Name())
-		}
-	}
-	if len(versions) == 0 {
-		return ""
-	}
-	sort.Slice(versions, func(i, j int) bool {
-		return compareVersions(versions[i], versions[j]) > 0
-	})
-	return versions[0]
-}
-
-func findNewestCachedPlugin(cacheRoot, pluginName, binName string) string {
-	pluginDir := filepath.Join(cacheRoot, "tools", "plugins", pluginName)
-	entries, err := os.ReadDir(pluginDir)
-	if err != nil {
-		return ""
-	}
-
-	var versions []string
-	for _, e := range entries {
-		if e.IsDir() && e.Name() != ".staging" && isExecutable(filepath.Join(pluginDir, e.Name(), "bin", binName)) {
-			versions = append(versions, e.Name())
-		}
-	}
-	if len(versions) == 0 {
-		return ""
-	}
-	sort.Slice(versions, func(i, j int) bool {
-		return compareVersions(versions[i], versions[j]) > 0
-	})
-	return versions[0]
-}
-
-func compareVersions(v1, v2 string) int {
-	parts1 := strings.Split(strings.TrimPrefix(v1, "v"), ".")
-	parts2 := strings.Split(strings.TrimPrefix(v2, "v"), ".")
-	for i := 0; i < len(parts1) && i < len(parts2); i++ {
-		var n1, n2 int
-		if val, err := strconv.Atoi(parts1[i]); err != nil {
-			n1 = 0
-		} else {
-			n1 = val
-		}
-		if val, err := strconv.Atoi(parts2[i]); err != nil {
-			n2 = 0
-		} else {
-			n2 = val
-		}
-		if n1 != n2 {
-			return n1 - n2
-		}
-	}
-	return len(parts1) - len(parts2)
-}
-
-func readMemo(memoPath string) (*latestMemo, error) {
-	data, err := os.ReadFile(memoPath)
-	if err != nil {
-		return nil, err
-	}
-	var memo latestMemo
-	if err := json.Unmarshal(data, &memo); err != nil {
-		return nil, err
-	}
-	if memo.Release == nil {
-		return nil, fmt.Errorf("memo has nil release")
-	}
-	return &memo, nil
-}
-
-func writeMemo(memoPath string, memo latestMemo) error {
-	memoBytes, err := json.MarshalIndent(memo, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(memoPath), 0755); err != nil {
-		return err
-	}
-	return os.WriteFile(memoPath, memoBytes, 0644)
 }

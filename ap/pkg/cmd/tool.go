@@ -15,6 +15,7 @@
 package cmd
 
 import (
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/protoc"
 	"github.com/spf13/cobra"
 )
 
@@ -26,6 +27,30 @@ func BuildToolCommand(rootOpt *RootOptions) *cobra.Command {
 	}
 
 	cmd.AddCommand(BuildToolProtocCommand(rootOpt))
+	cmd.AddCommand(BuildToolUpdateProtocVersionsCommand(rootOpt))
 
 	return cmd
+}
+
+// BuildToolUpdateProtocVersionsCommand constructs the cobra command for "tool update-protoc-versions".
+func BuildToolUpdateProtocVersionsCommand(rootOpt *RootOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "update-protoc-versions",
+		Short: "Update well-known protoc releases and plugin versions in versions.yaml",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			repoRoot := rootOpt.RepoRoot
+			if repoRoot == "" {
+				repoRoot = rootOpt.APRoot
+			}
+			if repoRoot == "" {
+				var err error
+				repoRoot, _, err = findRoots()
+				if err != nil {
+					return err
+				}
+			}
+			return protoc.UpdateVersionsFile(cmd.Context(), repoRoot, nil)
+		},
+	}
 }

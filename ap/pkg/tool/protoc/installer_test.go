@@ -15,6 +15,7 @@
 package protoc
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -25,7 +26,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
+
+	"k8s.io/klog/v2"
 )
 
 func TestResolveProtocAsset(t *testing.T) {
@@ -54,6 +56,70 @@ func TestResolveProtocAsset(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("ResolveProtocAsset(%s, %s, %s) = %s, want %s", tt.version, tt.goos, tt.goarch, got, tt.want)
 		}
+	}
+}
+
+type failTransport struct{}
+
+func (f *failTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return nil, fmt.Errorf("network is disabled: %s", req.URL)
+}
+
+func TestEnsureProtoc_Resolution(t *testing.T) {
+	oldClient := HTTPClient
+	HTTPClient = &http.Client{Transport: &failTransport{}}
+	defer func() { HTTPClient = oldClient }()
+
+	// 1. "latest" resolves to table entry (36.2) with no network
+	ver, downloadURL, digest, err := resolveProtocRelease(t.Context(), "latest")
+	if err != nil {
+		t.Fatalf("resolveProtocRelease(latest) failed: %v", err)
+	}
+	if ver != "36.2" {
+		t.Errorf("expected version 36.2, got %s", ver)
+	}
+	if !strings.Contains(downloadURL, "36.2") {
+		t.Errorf("expected download URL to contain 36.2, got %s", downloadURL)
+	}
+	if !strings.HasPrefix(digest, "sha256:") {
+		t.Errorf("expected digest with sha256: prefix, got %s", digest)
+	}
+
+	// 2. Listed version (35.1) resolves to table entry with no network
+	ver, downloadURL, digest, err = resolveProtocRelease(t.Context(), "35.1")
+	if err != nil {
+		t.Fatalf("resolveProtocRelease(35.1) failed: %v", err)
+	}
+	if ver != "35.1" {
+		t.Errorf("expected version 35.1, got %s", ver)
+	}
+	if !strings.Contains(downloadURL, "35.1") {
+		t.Errorf("expected download URL to contain 35.1, got %s", downloadURL)
+	}
+	if !strings.HasPrefix(digest, "sha256:") {
+		t.Errorf("expected digest with sha256: prefix, got %s", digest)
+	}
+
+	// 3. Unlisted version (24.4) warns and falls back to GitHub API (which fails via failing client)
+	var logBuf bytes.Buffer
+	klog.SetOutput(&logBuf)
+	klog.LogToStderr(false)
+	defer func() {
+		klog.SetOutput(os.Stderr)
+		klog.LogToStderr(true)
+	}()
+
+	_, _, _, err = resolveProtocRelease(t.Context(), "24.4")
+	if err == nil {
+		t.Fatal("expected error from failed network request on unlisted version, got nil")
+	}
+	if !strings.Contains(err.Error(), "network is disabled") {
+		t.Errorf("expected error to mention disabled network, got: %v", err)
+	}
+
+	wantWarn := "protoc 24.4 is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-protoc-versions' to add it"
+	if !strings.Contains(logBuf.String(), wantWarn) {
+		t.Errorf("expected warning %q in log output, got: %s", wantWarn, logBuf.String())
 	}
 }
 
@@ -91,44 +157,13 @@ func TestEnsureProtoc_Cached(t *testing.T) {
 	}
 }
 
-func TestEnsureProtoc_OfflineFallback(t *testing.T) {
-	tempCache := t.TempDir()
-	t.Setenv("AP_CACHE_DIR", tempCache)
-
-	// Pre-populate cache with version 35.1 and 36.2
-	for _, v := range []string{"35.1", "36.2"} {
-		binDir := filepath.Join(tempCache, "tools", "protoc", v, "bin")
-		_ = os.MkdirAll(binDir, 0755)
-		fakeBin := filepath.Join(binDir, "protoc")
-		if runtime.GOOS == "windows" {
-			fakeBin += ".exe"
-		}
-		_ = os.WriteFile(fakeBin, []byte("#!/bin/sh\n"), 0755)
-	}
-
-	// Broken server for GitHub API
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "offline", http.StatusServiceUnavailable)
-	}))
-	defer server.Close()
-
-	// Calling with "latest" when offline should fall back to newest cached (36.2)
-	bin, _, err := EnsureProtoc(t.Context(), "latest")
-	if err != nil {
-		t.Fatalf("unexpected error during offline fallback: %v", err)
-	}
-	if !strings.Contains(bin, "36.2") {
-		t.Errorf("expected fallback to 36.2, got: %s", bin)
-	}
-}
-
 func TestEnsureProtoc_ChecksumMismatch(t *testing.T) {
 	tempCache := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", tempCache)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("corrupt zip file"))
+		_, _ = w.Write([]byte("corrupt zip file"))
 	}))
 	defer server.Close()
 
@@ -165,15 +200,12 @@ func TestDetectRequiredPlugins(t *testing.T) {
 }
 
 func TestEnsurePlugin_Unknown(t *testing.T) {
-	tempCache := t.TempDir()
-	t.Setenv("AP_CACHE_DIR", tempCache)
-
 	_, err := EnsurePlugin(t.Context(), "protoc-gen-unknown", "latest", nil)
 	if err == nil {
 		t.Fatal("expected error for unknown plugin, got nil")
 	}
-	if !strings.Contains(err.Error(), "unknown protoc plugin") || !strings.Contains(err.Error(), ".ap/proto.yaml") {
-		t.Errorf("expected helpful declaration error, got: %v", err)
+	if !strings.Contains(err.Error(), "unknown protoc plugin") {
+		t.Errorf("expected error to mention unknown protoc plugin, got: %v", err)
 	}
 }
 
@@ -181,39 +213,42 @@ func TestEnsurePlugin_Cached(t *testing.T) {
 	tempCache := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", tempCache)
 
-	pluginDir := filepath.Join(tempCache, "tools", "plugins", "protoc-gen-go", "v1.36.12", "bin")
-	if err := os.MkdirAll(pluginDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	binPath := filepath.Join(pluginDir, "protoc-gen-go")
-	if runtime.GOOS == "windows" {
-		binPath += ".exe"
-	}
-	if err := os.WriteFile(binPath, []byte("#!/bin/sh\n"), 0755); err != nil {
+	pluginName := "protoc-gen-go"
+	version := "v1.36.12"
+	binDir := filepath.Join(tempCache, "tools", "plugins", pluginName, version, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	dir, err := EnsurePlugin(t.Context(), "protoc-gen-go", "v1.36.12", nil)
+	fakeBin := filepath.Join(binDir, pluginName)
+	if runtime.GOOS == "windows" {
+		fakeBin += ".exe"
+	}
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\necho fake\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	dir, err := EnsurePlugin(t.Context(), pluginName, version, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if dir != pluginDir {
-		t.Errorf("expected dir %s, got %s", pluginDir, dir)
+	if dir != binDir {
+		t.Errorf("expected binDir %s, got %s", binDir, dir)
 	}
 }
 
 func TestEnsureProtoc_RealDownloadAndExecute(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping download test in short mode")
+		t.Skip("skipping real download and execution in short mode")
 	}
 
 	tempCache := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", tempCache)
 
 	ctx := t.Context()
-	protocBin, includeDir, err := EnsureProtoc(ctx, "latest")
+	protocBin, includeDir, err := EnsureProtoc(ctx, "36.2")
 	if err != nil {
-		t.Fatalf("EnsureProtoc failed: %v", err)
+		t.Fatalf("failed to ensure protoc: %v", err)
 	}
 
 	if fi, err := os.Stat(protocBin); err != nil || fi.IsDir() {
@@ -245,10 +280,10 @@ func TestFetchGitHubRelease_AuthorizationHeader(t *testing.T) {
 	}))
 	defer server.Close()
 
-	origClient := httpClient
-	httpClient = server.Client()
+	origClient := HTTPClient
+	HTTPClient = server.Client()
 	defer func() {
-		httpClient = origClient
+		HTTPClient = origClient
 	}()
 
 	t.Setenv("GITHUB_TOKEN", "test-bearer-token")
@@ -260,105 +295,5 @@ func TestFetchGitHubRelease_AuthorizationHeader(t *testing.T) {
 	wantAuth := "Bearer test-bearer-token"
 	if gotAuthHeader != wantAuth {
 		t.Errorf("got Authorization %q, want %q", gotAuthHeader, wantAuth)
-	}
-}
-
-func TestEnsureProtoc_MemoizeLatest(t *testing.T) {
-	tempCache := t.TempDir()
-	t.Setenv("AP_CACHE_DIR", tempCache)
-
-	// Pre-create the binary for version 36.2 so it doesn't need to download the asset
-	binDir := filepath.Join(tempCache, "tools", "protoc", "36.2", "bin")
-	if err := os.MkdirAll(binDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	binName := "protoc"
-	if runtime.GOOS == "windows" {
-		binName = "protoc.exe"
-	}
-	if err := os.WriteFile(filepath.Join(binDir, binName), []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	assetName, err := ResolveProtocAsset("36.2", runtime.GOOS, runtime.GOARCH)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var requestCount int
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestCount++
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		respJSON := fmt.Sprintf(`{
-			"tag_name": "v36.2",
-			"assets": [
-				{"name": %q, "browser_download_url": "http://example.com/asset.zip", "digest": "sha256:1234"}
-			]
-		}`, assetName)
-		if _, err := w.Write([]byte(respJSON)); err != nil {
-			return
-		}
-	}))
-	defer server.Close()
-
-	origClient := httpClient
-	httpClient = server.Client()
-	defer func() {
-		httpClient = origClient
-	}()
-
-	t.Setenv("PROTOC_DOWNLOAD_BASE_URL", server.URL)
-
-	origNow := timeNow
-	curTime := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
-	timeNow = func() time.Time {
-		return curTime
-	}
-	defer func() {
-		timeNow = origNow
-	}()
-
-	// 1. First call: memo does not exist, so it should fetch release (requestCount = 1)
-	bin, _, err := EnsureProtoc(t.Context(), "latest")
-	if err != nil {
-		t.Fatalf("EnsureProtoc failed: %v", err)
-	}
-	if !strings.Contains(bin, "36.2") {
-		t.Errorf("expected 36.2 binary, got %s", bin)
-	}
-	if requestCount != 1 {
-		t.Fatalf("expected 1 request, got %d", requestCount)
-	}
-
-	memoPath := filepath.Join(tempCache, "tools", "protoc", "latest.json")
-	if _, err := os.Stat(memoPath); err != nil {
-		t.Fatalf("expected latest.json to exist at %s: %v", memoPath, err)
-	}
-
-	// 2. Second call 1 hour later: memo is within 24h, EnsureProtoc should use memo without network
-	curTime = curTime.Add(1 * time.Hour)
-	bin, _, err = EnsureProtoc(t.Context(), "latest")
-	if err != nil {
-		t.Fatalf("EnsureProtoc second call failed: %v", err)
-	}
-	if !strings.Contains(bin, "36.2") {
-		t.Errorf("expected 36.2 binary, got %s", bin)
-	}
-	if requestCount != 1 {
-		t.Errorf("expected still 1 request (memoized), got %d", requestCount)
-	}
-
-	// 3. Third call 25 hours later: memo has expired (> 24h), EnsureProtoc should re-fetch from network
-	curTime = curTime.Add(25 * time.Hour)
-	bin, _, err = EnsureProtoc(t.Context(), "latest")
-	if err != nil {
-		t.Fatalf("EnsureProtoc third call failed: %v", err)
-	}
-	if !strings.Contains(bin, "36.2") {
-		t.Errorf("expected 36.2 binary, got %s", bin)
-	}
-	if requestCount != 2 {
-		t.Errorf("expected 2 requests after memo expiration, got %d", requestCount)
 	}
 }
