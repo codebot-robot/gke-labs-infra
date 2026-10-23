@@ -22,7 +22,9 @@ import (
 
 // GenerateConfig represents generation and verification configuration.
 type GenerateConfig struct {
-	IgnoreOrphans []string `json:"ignoreOrphans"`
+	IgnoreOrphans  []string `json:"ignoreOrphans"`
+	AuditPaths     []string `json:"auditPaths"`
+	AuditGenerated bool     `json:"auditGenerated"`
 }
 
 // PresubmitConfig represents presubmit configuration in ap.yaml.

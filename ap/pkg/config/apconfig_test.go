@@ -33,6 +33,10 @@ version: "!self"
 generate:
   ignoreOrphans:
     - "pkg/sandbox/*.pb.go"
+  auditPaths:
+    - "pkg/**"
+    - "dev/**"
+  auditGenerated: true
 `
 	if err := os.WriteFile(filepath.Join(apDir, "ap.yaml"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
@@ -56,6 +60,14 @@ generate:
 
 	if len(cfg.Generate.IgnoreOrphans) != 1 || cfg.Generate.IgnoreOrphans[0] != "pkg/sandbox/*.pb.go" {
 		t.Errorf("unexpected ignoreOrphans: %+v", cfg.Generate.IgnoreOrphans)
+	}
+
+	if !cfg.Generate.AuditGenerated {
+		t.Errorf("expected AuditGenerated=true, got false")
+	}
+
+	if len(cfg.Generate.AuditPaths) != 2 || cfg.Generate.AuditPaths[0] != "pkg/**" || cfg.Generate.AuditPaths[1] != "dev/**" {
+		t.Errorf("unexpected auditPaths: %+v", cfg.Generate.AuditPaths)
 	}
 }
 
