@@ -243,7 +243,15 @@ func resolveProtocRelease(ctx context.Context, version string) (resolvedVer, dow
 	return resolvePinnedProtocRelease(ctx, requestedVer)
 }
 
+const gitHubAPITimeout = 5 * time.Minute
+
 func resolvePinnedProtocRelease(ctx context.Context, version string) (resolvedVer, downloadURL, expectedDigest string, err error) {
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, gitHubAPITimeout)
+		defer cancel()
+	}
+
 	resolvedVer = strings.TrimPrefix(version, "v")
 	assetName, err := ResolveProtocAsset(resolvedVer, runtime.GOOS, runtime.GOARCH)
 	if err != nil {
@@ -571,9 +579,52 @@ func isRateLimitedResponse(resp *http.Response) bool {
 	return false
 }
 
-func buildRateLimitError(resp *http.Response) error {
-	var resetInfo string
+func computeRateLimitWait(resp *http.Response) (wait time.Duration, resetIn time.Duration, resetTime time.Time) {
+	now := nowFunc()
+	if dateStr := resp.Header.Get("Date"); dateStr != "" {
+		serverTime, err := http.ParseTime(dateStr)
+		if err != nil {
+			klog.V(2).Infof("failed to parse Date header %q: %v", dateStr, err)
+		} else {
+			now = serverTime.UTC()
+		}
+	}
+
 	if resetStr := resp.Header.Get("X-RateLimit-Reset"); resetStr != "" {
+		if resetUnix, err := strconv.ParseInt(strings.TrimSpace(resetStr), 10, 64); err == nil && resetUnix > 0 {
+			resetTime = time.Unix(resetUnix, 0).UTC()
+		}
+	}
+
+	if retryAfterStr := strings.TrimSpace(resp.Header.Get("Retry-After")); retryAfterStr != "" {
+		if secs, err := strconv.Atoi(retryAfterStr); err == nil && secs >= 0 {
+			wait = time.Duration(secs) * time.Second
+			resetIn = wait
+			if resetTime.IsZero() {
+				resetTime = nowFunc().Add(wait)
+			}
+			return wait, resetIn, resetTime
+		}
+	}
+
+	if !resetTime.IsZero() {
+		diff := resetTime.Sub(now)
+		if diff < 0 {
+			diff = 0
+		}
+		resetIn = diff
+		wait = diff + 1*time.Second
+		return wait, resetIn, resetTime
+	}
+
+	return 0, 0, resetTime
+}
+
+func buildRateLimitError(resp *http.Response, reason string) error {
+	var resetInfo string
+	if reason != "" {
+		resetInfo = fmt.Sprintf(" (%s)", reason)
+	} else if resetStr := resp.Header.Get("X-RateLimit-Reset"); resetStr != "" {
 		if resetUnix, err := strconv.ParseInt(strings.TrimSpace(resetStr), 10, 64); err == nil && resetUnix > 0 {
 			resetTime := time.Unix(resetUnix, 0).UTC()
 			now := nowFunc()
@@ -680,12 +731,11 @@ func doGitHubRequest(ctx context.Context, req *http.Request) (*http.Response, er
 	client := scoped.HTTPClient(ctx)
 	for attempt := 0; ; attempt++ {
 		resp, err := client.Do(reqClone.Clone(ctx))
-		if err == nil && isRateLimitedResponse(resp) {
-			closeResponseBody(resp)
-			return nil, buildRateLimitError(resp)
-		}
-		retryable := err != nil || resp.StatusCode >= 500
-		if !retryable || attempt == len(gitHubRetryBackoffs) {
+
+		rateLimited := err == nil && isRateLimitedResponse(resp)
+		transient := err != nil || (resp != nil && resp.StatusCode >= 500)
+
+		if !rateLimited && !transient {
 			if err != nil {
 				return nil, err
 			}
@@ -716,11 +766,47 @@ func doGitHubRequest(ctx context.Context, req *http.Request) (*http.Response, er
 			}
 			return resp, nil
 		}
+
+		if attempt == len(gitHubRetryBackoffs) {
+			if rateLimited {
+				closeResponseBody(resp)
+				return nil, buildRateLimitError(resp, "")
+			}
+			return resp, err
+		}
+
+		var wait time.Duration
+		if rateLimited {
+			var resetIn time.Duration
+			var resetTime time.Time
+			wait, resetIn, resetTime = computeRateLimitWait(resp)
+			if wait == 0 {
+				closeResponseBody(resp)
+				return nil, buildRateLimitError(resp, "")
+			}
+			if deadline, hasDeadline := ctx.Deadline(); hasDeadline && time.Now().Add(wait).After(deadline) {
+				closeResponseBody(resp)
+				remain := time.Until(deadline)
+				if remain < 0 {
+					remain = 0
+				}
+				remainStr := remain.Round(time.Second).String()
+				if remain < time.Second {
+					remainStr = remain.Round(time.Millisecond).String()
+				}
+				reason := fmt.Sprintf("resets in %s, but only %s remain before the deadline", resetIn.Round(time.Second), remainStr)
+				return nil, buildRateLimitError(resp, reason)
+			}
+			klog.Warningf("GitHub API rate limited; waiting %s until %s before retrying", wait, resetTime)
+		} else {
+			wait = gitHubRetryBackoffs[attempt]
+		}
+
 		closeResponseBody(resp)
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(gitHubRetryBackoffs[attempt]):
+		case <-time.After(wait):
 		}
 	}
 }
