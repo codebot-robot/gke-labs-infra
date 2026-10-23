@@ -163,6 +163,16 @@ lint:
 			wantKey:    `"lint.closeWriter.typess"`,
 			wantDidYou: `"types"`,
 		},
+		{
+			name: "typo in lint.deferInLoop key",
+			yaml: `
+lint:
+  deferInLop:
+    mode: error
+`,
+			wantKey:    `"lint.deferInLop"`,
+			wantDidYou: `"deferInLoop"`,
+		},
 	}
 
 	for _, tc := range tests {

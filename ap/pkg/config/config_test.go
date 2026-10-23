@@ -295,6 +295,7 @@ func TestConfig_Linter_KnownDefaults(t *testing.T) {
 		"droppedErrors",
 		"testOnlyImports",
 		"closeWriter",
+		"deferInLoop",
 	}
 	var cfg *Config
 	for _, name := range known {
@@ -322,6 +323,7 @@ func TestConfig_InvalidLinterModes(t *testing.T) {
 		"droppedErrors",
 		"testOnlyImports",
 		"closeWriter",
+		"deferInLoop",
 	}
 	for _, linter := range linters {
 		t.Run(linter, func(t *testing.T) {
