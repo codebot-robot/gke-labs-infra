@@ -46,35 +46,13 @@ func UpdateVersionsFile(ctx context.Context, repoRoot string, client *http.Clien
 	var releases []Release
 	seenVersions := make(map[string]bool)
 
-	for page := 1; ; page++ {
-		apiURL := fmt.Sprintf("%s/repos/protocolbuffers/protobuf/releases?per_page=100&page=%d", strings.TrimRight(apiBase, "/"), page)
-		req, err := newGitHubRequest(ctx, apiURL)
+	nextURL := fmt.Sprintf("%s/repos/protocolbuffers/protobuf/releases?per_page=100", strings.TrimRight(apiBase, "/"))
+	for nextURL != "" {
+		pageReleases, next, err := fetchReleasesPage(ctx, client, nextURL)
 		if err != nil {
-			return fmt.Errorf("failed to create request for %s: %w", apiURL, err)
+			return err
 		}
-
-		resp, err := client.Do(req)
-		if err != nil {
-			return fmt.Errorf("failed to query GitHub releases API: %w", err)
-		}
-		defer func() {
-			if closeErr := resp.Body.Close(); closeErr != nil {
-				klog.V(2).Infof("failed to close response body: %v", closeErr)
-			}
-		}()
-
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("GitHub releases API returned status %s for %s", resp.Status, apiURL)
-		}
-
-		var pageReleases []githubRelease
-		if err := json.NewDecoder(resp.Body).Decode(&pageReleases); err != nil {
-			return fmt.Errorf("failed to decode GitHub releases: %w", err)
-		}
-
-		if len(pageReleases) == 0 {
-			break
-		}
+		nextURL = next
 
 		for _, rel := range pageReleases {
 			if rel.Draft || rel.Prerelease {
@@ -102,10 +80,6 @@ func UpdateVersionsFile(ctx context.Context, repoRoot string, client *http.Clien
 				})
 				seenVersions[ver] = true
 			}
-		}
-
-		if len(pageReleases) < 100 {
-			break
 		}
 	}
 
@@ -210,4 +184,77 @@ func parseVersionParts(v string) []int {
 		parts = append(parts, n)
 	}
 	return parts
+}
+
+func fetchReleasesPage(ctx context.Context, client *http.Client, url string) ([]githubRelease, string, error) {
+	if client == nil {
+		client = getHTTPClient()
+	}
+
+	req, err := newGitHubRequest(ctx, url)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create request for %s: %w", url, err)
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to query GitHub releases API: %w", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			klog.V(2).Infof("failed to close response body: %v", closeErr)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("GitHub releases API returned status %s for %s", resp.Status, url)
+	}
+
+	var pageReleases []githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&pageReleases); err != nil {
+		return nil, "", fmt.Errorf("failed to decode GitHub releases: %w", err)
+	}
+
+	nextURL := parseNextLink(strings.Join(resp.Header["Link"], ","))
+	return pageReleases, nextURL, nil
+}
+
+// parseNextLink parses the next page URL from a Link header (<url>; rel="next").
+// It handles single or comma-separated link values without regex.
+func parseNextLink(linkHeader string) string {
+	if linkHeader == "" {
+		return ""
+	}
+	for _, part := range strings.Split(linkHeader, ",") {
+		part = strings.TrimSpace(part)
+		pieces := strings.Split(part, ";")
+		if len(pieces) < 2 {
+			continue
+		}
+		rawURL := strings.TrimSpace(pieces[0])
+		if !strings.HasPrefix(rawURL, "<") || !strings.HasSuffix(rawURL, ">") {
+			continue
+		}
+		targetURL := rawURL[1 : len(rawURL)-1]
+		if targetURL == "" {
+			continue
+		}
+
+		for _, param := range pieces[1:] {
+			param = strings.TrimSpace(param)
+			k, v, ok := strings.Cut(param, "=")
+			if !ok {
+				continue
+			}
+			if strings.TrimSpace(k) == "rel" {
+				relVal := strings.Trim(strings.TrimSpace(v), `"`)
+				for _, r := range strings.Fields(relVal) {
+					if r == "next" {
+						return targetURL
+					}
+				}
+			}
+		}
+	}
+	return ""
 }

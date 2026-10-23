@@ -67,9 +67,10 @@ func TestVersionsTableIntegrity(t *testing.T) {
 	}
 }
 
-// TestUpdateVersionsFile tests that update-protoc-versions rewrites versions.yaml against a mock GitHub API.
+// TestUpdateVersionsFile tests that update-protoc-versions rewrites versions.yaml against a mock GitHub API
+// and follows Link headers across multiple pages.
 func TestUpdateVersionsFile(t *testing.T) {
-	mockReleases := []githubRelease{
+	page1Releases := []githubRelease{
 		{
 			TagName: "v37.0",
 			Assets: []githubAsset{
@@ -81,10 +82,31 @@ func TestUpdateVersionsFile(t *testing.T) {
 			},
 		},
 	}
+	page2Releases := []githubRelease{
+		{
+			TagName: "v36.9",
+			Assets: []githubAsset{
+				{Name: "protoc-36.9-linux-x86_64.zip", Digest: "sha256:6666666666666666666666666666666666666666666666666666666666666666"},
+				{Name: "protoc-36.9-linux-aarch_64.zip", Digest: "sha256:7777777777777777777777777777777777777777777777777777777777777777"},
+				{Name: "protoc-36.9-osx-x86_64.zip", Digest: "sha256:8888888888888888888888888888888888888888888888888888888888888888"},
+				{Name: "protoc-36.9-osx-aarch_64.zip", Digest: "sha256:9999999999999999999999999999999999999999999999999999999999999999"},
+				{Name: "protoc-36.9-win64.zip", Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			},
+		},
+	}
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var page1Requested, page2Requested bool
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(mockReleases)
+		if r.URL.Query().Get("page") == "2" {
+			page2Requested = true
+			_ = json.NewEncoder(w).Encode(page2Releases)
+			return
+		}
+		page1Requested = true
+		w.Header().Set("Link", fmt.Sprintf("<%s/repos/protocolbuffers/protobuf/releases?per_page=100&page=2>; rel=\"next\"", server.URL))
+		_ = json.NewEncoder(w).Encode(page1Releases)
 	}))
 	defer server.Close()
 
@@ -101,6 +123,13 @@ func TestUpdateVersionsFile(t *testing.T) {
 		t.Fatalf("UpdateVersionsFile failed: %v", err)
 	}
 
+	if !page1Requested {
+		t.Errorf("expected page 1 to be requested")
+	}
+	if !page2Requested {
+		t.Errorf("expected page 2 to be requested via Link header")
+	}
+
 	written, err := os.ReadFile(filepath.Join(yamlDir, "versions.yaml"))
 	if err != nil {
 		t.Fatalf("failed to read written versions.yaml: %v", err)
@@ -111,11 +140,65 @@ func TestUpdateVersionsFile(t *testing.T) {
 		t.Fatalf("failed to parse rewritten versions.yaml: %v", err)
 	}
 
-	if len(parsed.Protoc) != 1 || parsed.Protoc[0].Version != "37.0" {
-		t.Errorf("expected 1 protoc release version 37.0, got: %v", parsed.Protoc)
+	if len(parsed.Protoc) != 2 {
+		t.Fatalf("expected 2 protoc releases across both pages, got: %d", len(parsed.Protoc))
+	}
+	if parsed.Protoc[0].Version != "37.0" {
+		t.Errorf("expected parsed.Protoc[0].Version to be 37.0, got: %s", parsed.Protoc[0].Version)
+	}
+	if parsed.Protoc[1].Version != "36.9" {
+		t.Errorf("expected parsed.Protoc[1].Version to be 36.9, got: %s", parsed.Protoc[1].Version)
 	}
 	if parsed.Plugins["protoc-gen-go"] == "" {
 		t.Errorf("expected protoc-gen-go plugin version, got empty")
+	}
+}
+
+func TestParseNextLink(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+		want   string
+	}{
+		{
+			name:   "empty",
+			header: "",
+			want:   "",
+		},
+		{
+			name:   "single next link",
+			header: `<https://api.github.com/releases?page=2>; rel="next"`,
+			want:   "https://api.github.com/releases?page=2",
+		},
+		{
+			name:   "next and last links",
+			header: `<https://api.github.com/releases?page=2>; rel="next", <https://api.github.com/releases?page=5>; rel="last"`,
+			want:   "https://api.github.com/releases?page=2",
+		},
+		{
+			name:   "prev and first without next",
+			header: `<https://api.github.com/releases?page=1>; rel="prev", <https://api.github.com/releases?page=1>; rel="first"`,
+			want:   "",
+		},
+		{
+			name:   "unquoted rel",
+			header: `<https://api.github.com/releases?page=3>; rel=next`,
+			want:   "https://api.github.com/releases?page=3",
+		},
+		{
+			name:   "whitespace and extra parameters",
+			header: ` <https://api.github.com/releases?page=4> ; title="Next" ; rel = "next" `,
+			want:   "https://api.github.com/releases?page=4",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseNextLink(tc.header)
+			if got != tc.want {
+				t.Errorf("parseNextLink(%q) = %q, want %q", tc.header, got, tc.want)
+			}
+		})
 	}
 }
 
