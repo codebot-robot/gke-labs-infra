@@ -606,7 +606,7 @@ func isErrorHandled(call *ast.CallExpr, fnNode ast.Node, parentMap map[ast.Node]
 					}
 					// Check uses of the local variable
 					if v := lookupVar(id, info); v != nil {
-						if isVarHandled(v, fnNode, parentMap, namedReturns, info) {
+						if isVarHandled(v, fnNode, parentMap, namedReturns, info, nil) {
 							return true
 						}
 					}
@@ -624,7 +624,7 @@ func isErrorHandled(call *ast.CallExpr, fnNode ast.Node, parentMap map[ast.Node]
 					return true
 				}
 				if v := lookupVar(name, info); v != nil {
-					if isVarHandled(v, fnNode, parentMap, namedReturns, info) {
+					if isVarHandled(v, fnNode, parentMap, namedReturns, info, nil) {
 						return true
 					}
 				}
@@ -657,7 +657,16 @@ func isSinkHandled(node ast.Node, namedReturns map[*types.Var]bool, parentMap ma
 	return false
 }
 
-func isVarHandled(v *types.Var, fnNode ast.Node, parentMap map[ast.Node]ast.Node, namedReturns map[*types.Var]bool, info *types.Info) bool {
+type varUseKey struct {
+	v *types.Var
+	u *ast.Ident
+}
+
+func isVarHandled(v *types.Var, fnNode ast.Node, parentMap map[ast.Node]ast.Node, namedReturns map[*types.Var]bool, info *types.Info, visited map[varUseKey]bool) bool {
+	if visited == nil {
+		visited = make(map[varUseKey]bool)
+	}
+
 	// Find all uses of v within fnNode
 	var uses []*ast.Ident
 	ast.Inspect(fnNode, func(n ast.Node) bool {
@@ -676,14 +685,19 @@ func isVarHandled(v *types.Var, fnNode ast.Node, parentMap map[ast.Node]ast.Node
 	}
 
 	for _, u := range uses {
-		if isUseReachingCaller(u, fnNode, parentMap, namedReturns, info) {
+		key := varUseKey{v: v, u: u}
+		if visited[key] {
+			continue
+		}
+		visited[key] = true
+		if isUseReachingCaller(u, fnNode, parentMap, namedReturns, info, visited) {
 			return true
 		}
 	}
 	return false
 }
 
-func isUseReachingCaller(id *ast.Ident, fnNode ast.Node, parentMap map[ast.Node]ast.Node, namedReturns map[*types.Var]bool, info *types.Info) bool {
+func isUseReachingCaller(id *ast.Ident, fnNode ast.Node, parentMap map[ast.Node]ast.Node, namedReturns map[*types.Var]bool, info *types.Info, visited map[varUseKey]bool) bool {
 	parent := parentMap[id]
 	if parent == nil {
 		return false
@@ -713,11 +727,28 @@ func isUseReachingCaller(id *ast.Ident, fnNode ast.Node, parentMap map[ast.Node]
 			}
 			// What if call is assigned to another local var: wrappedErr := fmt.Errorf(...); return wrappedErr
 			if assign, ok := callParent.(*ast.AssignStmt); ok {
-				for _, lhs := range assign.Lhs {
-					if lhsId, ok := unwrapIdent(lhs); ok {
-						if v2 := lookupVar(lhsId, info); v2 != nil {
-							if isVarHandled(v2, fnNode, parentMap, namedReturns, info) {
-								return true
+				for i, rhs := range assign.Rhs {
+					if unwrapParen(rhs) == call {
+						if i < len(assign.Lhs) {
+							if lhsId, ok := unwrapIdent(assign.Lhs[i]); ok {
+								if v2 := lookupVar(lhsId, info); v2 != nil {
+									if isVarHandled(v2, fnNode, parentMap, namedReturns, info, visited) {
+										return true
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+			if valSpec, ok := callParent.(*ast.ValueSpec); ok {
+				for i, val := range valSpec.Values {
+					if unwrapParen(val) == call {
+						if i < len(valSpec.Names) {
+							if v2 := lookupVar(valSpec.Names[i], info); v2 != nil {
+								if isVarHandled(v2, fnNode, parentMap, namedReturns, info, visited) {
+									return true
+								}
 							}
 						}
 					}
@@ -728,16 +759,38 @@ func isUseReachingCaller(id *ast.Ident, fnNode ast.Node, parentMap map[ast.Node]
 
 	// In an AssignStmt: retErr = cerr or err = errors.Join(err, cerr)
 	if assign, ok := parent.(*ast.AssignStmt); ok {
-		for _, lhs := range assign.Lhs {
-			if lhsId, ok := unwrapIdent(lhs); ok {
-				if v := lookupVar(lhsId, info); v != nil && namedReturns[v] {
-					return true
+		for i, rhs := range assign.Rhs {
+			if unwrapParen(rhs) == id {
+				if i < len(assign.Lhs) {
+					if lhsId, ok := unwrapIdent(assign.Lhs[i]); ok {
+						if v := lookupVar(lhsId, info); v != nil && namedReturns[v] {
+							return true
+						}
+						// Also if assigned to local error variable that is later returned:
+						// err = cerr; return err
+						if v := lookupVar(lhsId, info); v != nil {
+							if isVarHandled(v, fnNode, parentMap, namedReturns, info, visited) {
+								return true
+							}
+						}
+					}
 				}
-				// Also if assigned to local error variable that is later returned:
-				// err = cerr; return err
-				if v := lookupVar(lhsId, info); v != nil {
-					if isVarHandled(v, fnNode, parentMap, namedReturns, info) {
+			}
+		}
+	}
+
+	// In a ValueSpec: var retErr = cerr
+	if valSpec, ok := parent.(*ast.ValueSpec); ok {
+		for i, val := range valSpec.Values {
+			if unwrapParen(val) == id {
+				if i < len(valSpec.Names) {
+					if v := lookupVar(valSpec.Names[i], info); v != nil && namedReturns[v] {
 						return true
+					}
+					if v := lookupVar(valSpec.Names[i], info); v != nil {
+						if isVarHandled(v, fnNode, parentMap, namedReturns, info, visited) {
+							return true
+						}
 					}
 				}
 			}

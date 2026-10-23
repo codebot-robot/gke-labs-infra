@@ -260,6 +260,21 @@ func testNonDeferredLog(dst string) error {
 	return f.Close()
 }
 
+func testLocalVarErrorsJoinOnlyLogged(dst string) error {
+	out, createErr := os.Create(dst)
+	if createErr != nil {
+		return createErr
+	}
+	var err error
+	defer func() {
+		if cerr := out.Close(); cerr != nil { // want `error from Close\(\) on a writer is only logged in testLocalVarErrorsJoinOnlyLogged; return it so write failures are not silent`
+			klog.Errorf("failed to close: %v", cerr)
+			err = errors.Join(err, cerr)
+		}
+	}()
+	return nil
+}
+
 // --- OK Cases ---
 
 func testDirectReturn(dst string) error {
@@ -329,6 +344,65 @@ func testNamedReturnWrapped(dst string) (err error) {
 		}
 	}()
 	return nil
+}
+
+func testLocalVarErrorsJoin(dst string) error {
+	out, createErr := os.Create(dst)
+	if createErr != nil {
+		return createErr
+	}
+	var err error
+	defer func() {
+		if cerr := out.Close(); cerr != nil {
+			err = errors.Join(err, cerr)
+		}
+	}()
+	return err
+}
+
+func testLocalVarAssignedDirect(dst string) error {
+	out, createErr := os.Create(dst)
+	if createErr != nil {
+		return createErr
+	}
+	var err error
+	defer func() {
+		if cerr := out.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+	return err
+}
+
+func testLocalVarWrapped(dst string) error {
+	out, createErr := os.Create(dst)
+	if createErr != nil {
+		return createErr
+	}
+	var err error
+	defer func() {
+		if cerr := out.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("failed to close: %w", cerr)
+		}
+	}()
+	return err
+}
+
+func testDefUseCycle(dst string) error {
+	out, createErr := os.Create(dst)
+	if createErr != nil {
+		return createErr
+	}
+	var err error
+	var lastErr error
+	defer func() {
+		if cerr := out.Close(); cerr != nil {
+			lastErr = cerr
+			err = lastErr
+			lastErr = err
+		}
+	}()
+	return err
 }
 
 func testPanicDirect(dst string) {
