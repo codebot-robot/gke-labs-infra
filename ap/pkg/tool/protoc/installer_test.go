@@ -24,12 +24,18 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"k8s.io/klog/v2"
 )
+
+func init() {
+	gitHubRetryBackoffs = []time.Duration{time.Millisecond, 2 * time.Millisecond, 4 * time.Millisecond}
+}
 
 func TestResolveProtocAsset(t *testing.T) {
 	tests := []struct {
@@ -290,5 +296,157 @@ func TestFetchGitHubRelease_AuthorizationHeader(t *testing.T) {
 	wantAuth := "Bearer test-bearer-token"
 	if gotAuthHeader != wantAuth {
 		t.Errorf("got Authorization %q, want %q", gotAuthHeader, wantAuth)
+	}
+}
+
+func TestDoGitHubRequest(t *testing.T) {
+	fixedNow := time.Date(2026, 10, 23, 13, 51, 0, 0, time.UTC)
+	oldNow := nowFunc
+	nowFunc = func() time.Time { return fixedNow }
+	defer func() { nowFunc = oldNow }()
+
+	tests := []struct {
+		name         string
+		handler      func(reqCount *int) http.HandlerFunc
+		clientNow    time.Time
+		wantStatus   int
+		wantErrMsg   string
+		wantRequests int
+	}{
+		{
+			name: "503 then 200 succeeds on the second attempt",
+			handler: func(reqCount *int) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					*reqCount++
+					if *reqCount == 1 {
+						w.WriteHeader(http.StatusServiceUnavailable)
+						return
+					}
+					w.WriteHeader(http.StatusOK)
+				}
+			},
+			wantStatus:   http.StatusOK,
+			wantRequests: 2,
+		},
+		{
+			name: "403 with X-RateLimit-Remaining 0 and X-RateLimit-Reset returns rate-limit message without retrying",
+			handler: func(reqCount *int) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					*reqCount++
+					resetTime := fixedNow.Add(41 * time.Minute)
+					w.Header().Set("Date", fixedNow.Format(http.TimeFormat))
+					w.Header().Set("X-RateLimit-Remaining", "0")
+					w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
+					w.WriteHeader(http.StatusForbidden)
+				}
+			},
+			wantErrMsg:   "GitHub API rate limit exceeded (resets at 14:32 UTC, in 41m); pin a protoc version listed in ap/pkg/tool/protoc/versions.yaml, or set GITHUB_TOKEN for this one command",
+			wantRequests: 1,
+		},
+		{
+			name: "403 uses server Date header to compute remaining time when local clock is skewed",
+			handler: func(reqCount *int) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					*reqCount++
+					serverTime := fixedNow
+					resetTime := serverTime.Add(25 * time.Minute)
+					w.Header().Set("Date", serverTime.Format(http.TimeFormat))
+					w.Header().Set("X-RateLimit-Remaining", "0")
+					w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
+					w.WriteHeader(http.StatusForbidden)
+				}
+			},
+			clientNow:    fixedNow.Add(-2 * time.Hour),
+			wantErrMsg:   "GitHub API rate limit exceeded (resets at 14:16 UTC, in 25m); pin a protoc version listed in ap/pkg/tool/protoc/versions.yaml, or set GITHUB_TOKEN for this one command",
+			wantRequests: 1,
+		},
+		{
+			name: "403 falls back to local clock when Date header is unparseable",
+			handler: func(reqCount *int) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					*reqCount++
+					resetTime := fixedNow.Add(15 * time.Minute)
+					w.Header().Set("Date", "invalid-date")
+					w.Header().Set("X-RateLimit-Remaining", "0")
+					w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetTime.Unix(), 10))
+					w.WriteHeader(http.StatusForbidden)
+				}
+			},
+			wantErrMsg:   "GitHub API rate limit exceeded (resets at 14:06 UTC, in 15m); pin a protoc version listed in ap/pkg/tool/protoc/versions.yaml, or set GITHUB_TOKEN for this one command",
+			wantRequests: 1,
+		},
+		{
+			name: "plain 404 returns immediately",
+			handler: func(reqCount *int) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					*reqCount++
+					w.WriteHeader(http.StatusNotFound)
+				}
+			},
+			wantStatus:   http.StatusNotFound,
+			wantRequests: 1,
+		},
+		{
+			name: "persistent 502 exhausts retries and returns final response",
+			handler: func(reqCount *int) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					*reqCount++
+					w.WriteHeader(http.StatusBadGateway)
+				}
+			},
+			wantStatus:   http.StatusBadGateway,
+			wantRequests: len(gitHubRetryBackoffs) + 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !tt.clientNow.IsZero() {
+				subNow := tt.clientNow
+				nowFunc = func() time.Time { return subNow }
+				defer func() { nowFunc = func() time.Time { return fixedNow } }()
+			}
+
+			var reqCount int
+			server := httptest.NewServer(tt.handler(&reqCount))
+			defer server.Close()
+
+			ctx := scoped.WithHTTPClient(t.Context(), server.Client())
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+			if err != nil {
+				t.Fatalf("failed to create request: %v", err)
+			}
+
+			resp, err := doGitHubRequest(ctx, req)
+			if resp != nil {
+				defer closeResponseBody(resp)
+			}
+
+			if reqCount != tt.wantRequests {
+				t.Errorf("got %d requests, want %d", reqCount, tt.wantRequests)
+			}
+
+			if tt.wantErrMsg != "" {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tt.wantErrMsg)
+				}
+				if err.Error() != tt.wantErrMsg {
+					t.Errorf("got error %q, want %q", err.Error(), tt.wantErrMsg)
+				}
+				if !isRateLimitError(err) {
+					t.Errorf("expected isRateLimitError(err) == true, got false")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if resp == nil {
+					t.Fatal("expected non-nil response, got nil")
+				}
+				if resp.StatusCode != tt.wantStatus {
+					t.Errorf("got status %d, want %d", resp.StatusCode, tt.wantStatus)
+				}
+			}
+		})
 	}
 }
