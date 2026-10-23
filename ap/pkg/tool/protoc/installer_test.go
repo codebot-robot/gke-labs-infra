@@ -386,6 +386,17 @@ func TestDoGitHubRequest(t *testing.T) {
 			wantStatus:   http.StatusNotFound,
 			wantRequests: 1,
 		},
+		{
+			name: "persistent 502 exhausts retries and returns final response",
+			handler: func(reqCount *int) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					*reqCount++
+					w.WriteHeader(http.StatusBadGateway)
+				}
+			},
+			wantStatus:   http.StatusBadGateway,
+			wantRequests: len(gitHubRetryBackoffs) + 1,
+		},
 	}
 
 	for _, tt := range tests {

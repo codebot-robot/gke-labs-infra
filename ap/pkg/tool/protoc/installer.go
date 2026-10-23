@@ -557,8 +557,6 @@ var (
 	nowFunc             = time.Now
 )
 
-const gitHubMaxAttempts = 3
-
 func isRateLimitedResponse(resp *http.Response) bool {
 	if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusTooManyRequests {
 		return false
@@ -601,52 +599,23 @@ func buildRateLimitError(resp *http.Response) error {
 
 func doGitHubRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
 	client := scoped.HTTPClient(ctx)
-	var lastErr error
-
-	for attempt := 0; attempt < gitHubMaxAttempts; attempt++ {
-		if attempt > 0 {
-			backoff := 1 * time.Second
-			if attempt-1 < len(gitHubRetryBackoffs) {
-				backoff = gitHubRetryBackoffs[attempt-1]
-			}
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(backoff):
-			}
-		}
-
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		reqClone := req.Clone(ctx)
-		resp, err := client.Do(reqClone)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			lastErr = err
-			continue
-		}
-
-		if isRateLimitedResponse(resp) {
+	for attempt := 0; ; attempt++ {
+		resp, err := client.Do(req.Clone(ctx))
+		if err == nil && isRateLimitedResponse(resp) {
 			closeResponseBody(resp)
 			return nil, buildRateLimitError(resp)
 		}
-
-		if resp.StatusCode >= 500 && resp.StatusCode <= 599 {
-			if attempt < gitHubMaxAttempts-1 {
-				closeResponseBody(resp)
-				continue
-			}
-			return resp, nil
+		retryable := err != nil || resp.StatusCode >= 500
+		if !retryable || attempt == len(gitHubRetryBackoffs) {
+			return resp, err
 		}
-
-		return resp, nil
+		closeResponseBody(resp)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(gitHubRetryBackoffs[attempt]):
+		}
 	}
-
-	return nil, lastErr
 }
 
 func fetchGitHubRelease(ctx context.Context, url string) (*githubRelease, error) {
