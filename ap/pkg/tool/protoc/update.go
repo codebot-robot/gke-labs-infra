@@ -33,6 +33,12 @@ import (
 // UpdateVersionsFile fetches protoc releases from the GitHub API and plugin versions
 // using 'go list -m -versions', then rewrites ap/pkg/tool/protoc/versions.yaml atomically.
 func UpdateVersionsFile(ctx context.Context, repoRoot string) error {
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, gitHubAPITimeout)
+		defer cancel()
+	}
+
 	apiBase := os.Getenv("PROTOC_GITHUB_API_BASE_URL")
 	if apiBase == "" {
 		apiBase = "https://api.github.com"

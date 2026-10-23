@@ -16,6 +16,7 @@ package protoc
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -310,12 +311,14 @@ func TestDoGitHubRequest(t *testing.T) {
 	defer func() { nowFunc = oldNow }()
 
 	tests := []struct {
-		name         string
-		handler      func(reqCount *int) http.HandlerFunc
-		clientNow    time.Time
-		wantStatus   int
-		wantErrMsg   string
-		wantRequests int
+		name            string
+		handler         func(reqCount *int) http.HandlerFunc
+		clientNow       time.Time
+		timeout         time.Duration
+		wantStatus      int
+		wantErrMsg      string
+		wantErrContains string
+		wantRequests    int
 	}{
 		{
 			name: "503 then 200 succeeds on the second attempt",
@@ -333,7 +336,40 @@ func TestDoGitHubRequest(t *testing.T) {
 			wantRequests: 2,
 		},
 		{
-			name: "403 with X-RateLimit-Remaining 0 and X-RateLimit-Reset returns rate-limit message without retrying",
+			name: "403 with Retry-After 1 then 200 succeeds on the second attempt after wait",
+			handler: func(reqCount *int) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					*reqCount++
+					if *reqCount == 1 {
+						w.Header().Set("Retry-After", "1")
+						w.WriteHeader(http.StatusForbidden)
+						return
+					}
+					w.WriteHeader(http.StatusOK)
+				}
+			},
+			wantStatus:   http.StatusOK,
+			wantRequests: 2,
+		},
+		{
+			name: "403 with Retry-After 1 and 500ms context deadline fails immediately mentioning deadline",
+			handler: func(reqCount *int) http.HandlerFunc {
+				return func(w http.ResponseWriter, r *http.Request) {
+					*reqCount++
+					if *reqCount == 1 {
+						w.Header().Set("Retry-After", "1")
+						w.WriteHeader(http.StatusForbidden)
+						return
+					}
+					w.WriteHeader(http.StatusOK)
+				}
+			},
+			timeout:         500 * time.Millisecond,
+			wantErrContains: "resets in 1s, but only ",
+			wantRequests:    1,
+		},
+		{
+			name: "403 with X-RateLimit-Remaining 0 and X-RateLimit-Reset under default timeout fails fast mentioning deadline",
 			handler: func(reqCount *int) http.HandlerFunc {
 				return func(w http.ResponseWriter, r *http.Request) {
 					*reqCount++
@@ -344,8 +380,9 @@ func TestDoGitHubRequest(t *testing.T) {
 					w.WriteHeader(http.StatusForbidden)
 				}
 			},
-			wantErrMsg:   "GitHub API rate limit exceeded (resets at 14:32 UTC, in 41m); pin a protoc version listed in ap/pkg/tool/protoc/versions.yaml, or set GITHUB_TOKEN for this one command",
-			wantRequests: 1,
+			timeout:         gitHubAPITimeout,
+			wantErrContains: "resets in 41m0s, but only ",
+			wantRequests:    1,
 		},
 		{
 			name: "403 uses server Date header to compute remaining time when local clock is skewed",
@@ -360,9 +397,10 @@ func TestDoGitHubRequest(t *testing.T) {
 					w.WriteHeader(http.StatusForbidden)
 				}
 			},
-			clientNow:    fixedNow.Add(-2 * time.Hour),
-			wantErrMsg:   "GitHub API rate limit exceeded (resets at 14:16 UTC, in 25m); pin a protoc version listed in ap/pkg/tool/protoc/versions.yaml, or set GITHUB_TOKEN for this one command",
-			wantRequests: 1,
+			clientNow:       fixedNow.Add(-2 * time.Hour),
+			timeout:         gitHubAPITimeout,
+			wantErrContains: "resets in 25m0s, but only ",
+			wantRequests:    1,
 		},
 		{
 			name: "403 falls back to local clock when Date header is unparseable",
@@ -376,8 +414,9 @@ func TestDoGitHubRequest(t *testing.T) {
 					w.WriteHeader(http.StatusForbidden)
 				}
 			},
-			wantErrMsg:   "GitHub API rate limit exceeded (resets at 14:06 UTC, in 15m); pin a protoc version listed in ap/pkg/tool/protoc/versions.yaml, or set GITHUB_TOKEN for this one command",
-			wantRequests: 1,
+			timeout:         gitHubAPITimeout,
+			wantErrContains: "resets in 15m0s, but only ",
+			wantRequests:    1,
 		},
 		{
 			name: "plain 404 returns immediately",
@@ -416,6 +455,11 @@ func TestDoGitHubRequest(t *testing.T) {
 			defer server.Close()
 
 			ctx := scoped.WithHTTPClient(t.Context(), server.Client())
+			if tt.timeout != 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, tt.timeout)
+				defer cancel()
+			}
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
 			if err != nil {
 				t.Fatalf("failed to create request: %v", err)
@@ -436,6 +480,19 @@ func TestDoGitHubRequest(t *testing.T) {
 				}
 				if err.Error() != tt.wantErrMsg {
 					t.Errorf("got error %q, want %q", err.Error(), tt.wantErrMsg)
+				}
+				if !isRateLimitError(err) {
+					t.Errorf("expected isRateLimitError(err) == true, got false")
+				}
+			} else if tt.wantErrContains != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantErrContains)
+				}
+				if !strings.Contains(err.Error(), tt.wantErrContains) {
+					t.Errorf("got error %q, want containing %q", err.Error(), tt.wantErrContains)
+				}
+				if !strings.Contains(err.Error(), "remain before the deadline") {
+					t.Errorf("got error %q, want containing %q", err.Error(), "remain before the deadline")
 				}
 				if !isRateLimitError(err) {
 					t.Errorf("expected isRateLimitError(err) == true, got false")
