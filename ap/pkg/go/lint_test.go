@@ -685,6 +685,120 @@ lint:
 	})
 }
 
+func TestLintTasks_DeferInLoop(t *testing.T) {
+	setupModule := func(t *testing.T, yamlContent string) (string, *repo.Repo) {
+		t.Helper()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		var skips []string
+		if yamlContent != "" {
+			apDir := filepath.Join(dir, ".ap")
+			if err := os.Mkdir(apDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := config.Load(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			skips = cfg.Skip
+		}
+		r, err := repo.Open(dir, repo.WithSkip(skips...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return dir, r
+	}
+
+	findDeferInLoopTask := func(taskGroup tasks.Task) *DeferInLoopCheckTask {
+		group, ok := taskGroup.(*tasks.Group)
+		if !ok {
+			return nil
+		}
+		for _, t := range group.Tasks {
+			if modGroup, ok := t.(*tasks.Group); ok {
+				for _, sub := range modGroup.Tasks {
+					if dil, ok := sub.(*DeferInLoopCheckTask); ok {
+						return dil
+					}
+				}
+			}
+		}
+		return nil
+	}
+
+	t.Run("default_enabled_with_error_mode", func(t *testing.T) {
+		dir, r := setupModule(t, "")
+		taskGroup, err := LintTasks(r, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		task := findDeferInLoopTask(taskGroup)
+		if task == nil {
+			t.Fatalf("expected DeferInLoopCheckTask to be created by default")
+		}
+		if !task.IsError {
+			t.Errorf("expected IsError to be true by default")
+		}
+		if task.SkipGenerated {
+			t.Errorf("expected SkipGenerated to be false by default")
+		}
+		if task.SkipTests {
+			t.Errorf("expected SkipTests to be false by default")
+		}
+	})
+
+	t.Run("warn_mode_and_skips", func(t *testing.T) {
+		dir, r := setupModule(t, `
+lint:
+  deferInLoop:
+    mode: warn
+    skipGenerated: true
+    skipTests: true
+`)
+		taskGroup, err := LintTasks(r, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		task := findDeferInLoopTask(taskGroup)
+		if task == nil {
+			t.Fatalf("expected DeferInLoopCheckTask to be created")
+		}
+		if task.IsError {
+			t.Errorf("expected IsError to be false in warn mode")
+		}
+		if !task.SkipGenerated {
+			t.Errorf("expected SkipGenerated to be true")
+		}
+		if !task.SkipTests {
+			t.Errorf("expected SkipTests to be true")
+		}
+	})
+
+	t.Run("mode_ignore_disables_task", func(t *testing.T) {
+		dir, r := setupModule(t, `
+lint:
+  deferInLoop:
+    mode: ignore
+`)
+		taskGroup, err := LintTasks(r, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		task := findDeferInLoopTask(taskGroup)
+		if task != nil {
+			t.Fatalf("expected DeferInLoopCheckTask to not be created when mode is ignore")
+		}
+	})
+}
+
 func TestLintTasks_ContinueOnError(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {

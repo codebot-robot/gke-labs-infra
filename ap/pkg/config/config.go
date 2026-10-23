@@ -53,6 +53,7 @@ type LintConfig struct {
 	DroppedErrors                *DroppedErrorsConfig                `json:"droppedErrors"`
 	TestOnlyImports              *TestOnlyImportsConfig              `json:"testOnlyImports"`
 	CloseWriter                  *CloseWriterConfig                  `json:"closeWriter"`
+	DeferInLoop                  *DeferInLoopConfig                  `json:"deferInLoop"`
 }
 
 // LinterConfig represents common configuration options for a linter.
@@ -109,6 +110,12 @@ var linters = map[string]func(*LintConfig) *CommonLinterConfig{
 		}
 		return &l.CloseWriter.CommonLinterConfig
 	},
+	"deferInLoop": func(l *LintConfig) *CommonLinterConfig {
+		if l.DeferInLoop == nil {
+			return nil
+		}
+		return &l.DeferInLoop.CommonLinterConfig
+	},
 }
 
 type UnusedConfig struct {
@@ -120,6 +127,10 @@ type ReplaceEmptyInterfaceWithAnyConfig struct {
 }
 
 type TestContextConfig struct {
+	CommonLinterConfig
+}
+
+type DeferInLoopConfig struct {
 	CommonLinterConfig
 }
 
@@ -350,6 +361,14 @@ func (c *Config) TestOnlyImports() *TestOnlyImportsConfig {
 func (c *Config) CloseWriter() *CloseWriterConfig {
 	if c != nil && c.Lint != nil {
 		return c.Lint.CloseWriter
+	}
+	return nil
+}
+
+// DeferInLoop returns the configuration for deferInLoop, or nil if not configured.
+func (c *Config) DeferInLoop() *DeferInLoopConfig {
+	if c != nil && c.Lint != nil {
+		return c.Lint.DeferInLoop
 	}
 	return nil
 }

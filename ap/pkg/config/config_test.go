@@ -126,6 +126,61 @@ func TestLoadDefault(t *testing.T) {
 	if cfg.CloseWriter() != nil {
 		t.Errorf("expected default closeWriter config to be nil, got %v", cfg.CloseWriter())
 	}
+	dil := cfg.Linter("deferInLoop")
+	if !dil.IsEnabled() {
+		t.Errorf("expected default deferInLoop enabled to be true")
+	}
+	if !dil.IsError() {
+		t.Errorf("expected default deferInLoop error to be true (error mode)")
+	}
+	if cfg.DeferInLoop() != nil {
+		t.Errorf("expected default deferInLoop config to be nil, got %v", cfg.DeferInLoop())
+	}
+}
+
+func TestDeferInLoopConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  deferInLoop:
+    mode: warn
+    skipGenerated: true
+    skipTests: true
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	dil := cfg.Linter("deferInLoop")
+	if !dil.IsEnabled() {
+		t.Errorf("expected deferInLoop to be enabled")
+	}
+	if dil.IsError() {
+		t.Errorf("expected deferInLoop not to be error mode (warn)")
+	}
+	dilc := cfg.DeferInLoop()
+	if dilc == nil {
+		t.Fatalf("expected DeferInLoop to not be nil")
+	}
+	if dilc.Mode != "warn" {
+		t.Errorf("expected mode warn, got %q", dilc.Mode)
+	}
+	if dil.SkipGeneratedOverride() == nil || *dil.SkipGeneratedOverride() != true {
+		t.Errorf("expected skipGenerated to be true")
+	}
+	if dil.SkipTestsOverride() == nil || *dil.SkipTestsOverride() != true {
+		t.Errorf("expected skipTests to be true")
+	}
 }
 
 func TestCloseWriterConfig(t *testing.T) {
@@ -295,6 +350,7 @@ func TestConfig_Linter_KnownDefaults(t *testing.T) {
 		"droppedErrors",
 		"testOnlyImports",
 		"closeWriter",
+		"deferInLoop",
 	}
 	var cfg *Config
 	for _, name := range known {
@@ -322,6 +378,7 @@ func TestConfig_InvalidLinterModes(t *testing.T) {
 		"droppedErrors",
 		"testOnlyImports",
 		"closeWriter",
+		"deferInLoop",
 	}
 	for _, linter := range linters {
 		t.Run(linter, func(t *testing.T) {

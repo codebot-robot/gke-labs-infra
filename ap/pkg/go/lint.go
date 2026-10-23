@@ -359,6 +359,53 @@ func (t *CloseWriterCheckTask) GetChildren() []tasks.Task {
 	return nil
 }
 
+// DeferInLoopCheckTask represents a task to run deferinloop check.
+type DeferInLoopCheckTask struct {
+	Dir           string
+	RepoRoot      string
+	IsError       bool
+	SkipGenerated bool
+	SkipTests     bool
+	SkipGlobs     []string
+}
+
+func (t *DeferInLoopCheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
+	klog.Infof("Running deferinloop check in %s", t.Dir)
+	apPath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("could not find ap executable: %w", err)
+	}
+	args := []string{"lint", "deferinloop"}
+	args = append(args, fmt.Sprintf("-deferinloop.skip-generated=%t", t.SkipGenerated))
+	args = append(args, fmt.Sprintf("-deferinloop.skip-tests=%t", t.SkipTests))
+	if t.RepoRoot != "" {
+		args = append(args, "-deferinloop.repo-root="+t.RepoRoot)
+	}
+	for _, g := range t.SkipGlobs {
+		args = append(args, "-deferinloop.skip-glob="+g)
+	}
+	args = append(args, "./...")
+	cmd := exec.CommandContext(ctx, apPath, args...)
+	cmd.Dir = t.Dir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		if t.IsError {
+			return fmt.Errorf("deferinloop check failed in %s: %w", t.Dir, err)
+		}
+		klog.Warningf("deferinloop check failed in %s: %v", t.Dir, err)
+	}
+	return nil
+}
+
+func (t *DeferInLoopCheckTask) GetName() string {
+	return "deferinloop-check"
+}
+
+func (t *DeferInLoopCheckTask) GetChildren() []tasks.Task {
+	return nil
+}
+
 // LintTasks returns a task group for running go linting in discovered modules.
 func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
@@ -460,6 +507,17 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 				Types:         types,
 				SkipGenerated: cfg.ResolveSkipGenerated(cw, false),
 				SkipTests:     cfg.ResolveSkipTests(cw, false),
+				SkipGlobs:     cfg.Skip,
+			})
+		}
+		dil := cfg.Linter("deferInLoop")
+		if dil.IsEnabled() {
+			modGroup.Tasks = append(modGroup.Tasks, &DeferInLoopCheckTask{
+				Dir:           dir,
+				RepoRoot:      root,
+				IsError:       dil.IsError(),
+				SkipGenerated: cfg.ResolveSkipGenerated(dil, false),
+				SkipTests:     cfg.ResolveSkipTests(dil, false),
 				SkipGlobs:     cfg.Skip,
 			})
 		}

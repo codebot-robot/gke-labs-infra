@@ -52,6 +52,7 @@ func BuildLintCommand(rootOpt *RootOptions) *cobra.Command {
 	cmd.AddCommand(BuildDroppedErrorsCommand(rootOpt))
 	cmd.AddCommand(BuildTestOnlyImportsCommand())
 	cmd.AddCommand(BuildCloseWriterCommand())
+	cmd.AddCommand(BuildDeferInLoopCommand())
 
 	return cmd
 }
