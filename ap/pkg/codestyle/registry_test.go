@@ -167,3 +167,69 @@ func TestRegistry_ResolveWithConfig(t *testing.T) {
 		t.Errorf("expected unused skipGenerated false (from override)")
 	}
 }
+
+func TestRegistry_ExtraFlags(t *testing.T) {
+	for _, name := range []string{"testcontext", "replaceEmptyInterfaceWithAny", "droppederrors", "deferinloop"} {
+		r := Find(name)
+		if r == nil {
+			t.Fatalf("Find(%q) returned nil", name)
+		}
+		if r.ExtraFlags != nil {
+			t.Errorf("expected %s to have nil ExtraFlags", name)
+		}
+	}
+
+	u := Find("unused")
+	if u == nil || u.ExtraFlags == nil {
+		t.Fatalf("expected unused to have non-nil ExtraFlags")
+	}
+	if got := u.ExtraFlags(nil); len(got) != 1 || got[0] != "-check-parameters=false" {
+		t.Errorf("unused ExtraFlags(nil) = %v, want [-check-parameters=false]", got)
+	}
+	cfgUnused := &config.Config{
+		Lint: &config.LintConfig{
+			UnusedParameters: &config.UnusedParametersConfig{
+				Mode: "check",
+			},
+		},
+	}
+	if got := u.ExtraFlags(cfgUnused); len(got) != 1 || got[0] != "-check-parameters=true" {
+		t.Errorf("unused ExtraFlags(check) = %v, want [-check-parameters=true]", got)
+	}
+
+	toi := Find("testonlyimports")
+	if toi == nil || toi.ExtraFlags == nil {
+		t.Fatalf("expected testonlyimports to have non-nil ExtraFlags")
+	}
+	if got := toi.ExtraFlags(nil); len(got) != 0 {
+		t.Errorf("testonlyimports ExtraFlags(nil) = %v, want empty", got)
+	}
+	cfgTOI := &config.Config{
+		Lint: &config.LintConfig{
+			TestOnlyImports: &config.TestOnlyImportsConfig{
+				Packages: []string{"pkgA", "pkgB"},
+			},
+		},
+	}
+	if got := toi.ExtraFlags(cfgTOI); len(got) != 2 || got[0] != "-package=pkgA" || got[1] != "-package=pkgB" {
+		t.Errorf("testonlyimports ExtraFlags = %v, want [-package=pkgA, -package=pkgB]", got)
+	}
+
+	cw := Find("closewriter")
+	if cw == nil || cw.ExtraFlags == nil {
+		t.Fatalf("expected closewriter to have non-nil ExtraFlags")
+	}
+	if got := cw.ExtraFlags(nil); len(got) != 0 {
+		t.Errorf("closewriter ExtraFlags(nil) = %v, want empty", got)
+	}
+	cfgCW := &config.Config{
+		Lint: &config.LintConfig{
+			CloseWriter: &config.CloseWriterConfig{
+				Types: []string{"*bufio.Writer", "*os.File"},
+			},
+		},
+	}
+	if got := cw.ExtraFlags(cfgCW); len(got) != 2 || got[0] != "-type=*bufio.Writer" || got[1] != "-type=*os.File" {
+		t.Errorf("closewriter ExtraFlags = %v, want [-type=*bufio.Writer, -type=*os.File]", got)
+	}
+}

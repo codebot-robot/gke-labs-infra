@@ -47,6 +47,7 @@ type Registered struct {
 	DefaultSkipGenerated bool
 	DefaultSkipTests     bool
 	CustomTask           bool
+	ExtraFlags           func(cfg *config.Config) []string
 }
 
 // ConfigKey returns the configuration key used in Config.Linter.
@@ -112,6 +113,12 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: true,
 		DefaultSkipTests:     false,
+		ExtraFlags: func(cfg *config.Config) []string {
+			if cfg != nil && cfg.IsUnusedParametersEnabled() {
+				return []string{"-check-parameters=true"}
+			}
+			return []string{"-check-parameters=false"}
+		},
 	},
 	{
 		Analyzer:             testcontext.Analyzer,
@@ -138,6 +145,18 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
+		ExtraFlags: func(cfg *config.Config) []string {
+			if cfg == nil {
+				return nil
+			}
+			var flags []string
+			if c := cfg.TestOnlyImports(); c != nil {
+				for _, pkg := range c.Packages {
+					flags = append(flags, "-package="+pkg)
+				}
+			}
+			return flags
+		},
 	},
 	{
 		Analyzer:             droppederrors.Analyzer,
@@ -157,6 +176,18 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
+		ExtraFlags: func(cfg *config.Config) []string {
+			if cfg == nil {
+				return nil
+			}
+			var flags []string
+			if c := cfg.CloseWriter(); c != nil {
+				for _, typ := range c.Types {
+					flags = append(flags, "-type="+typ)
+				}
+			}
+			return flags
+		},
 	},
 	{
 		Analyzer:             deferinloop.Analyzer,
