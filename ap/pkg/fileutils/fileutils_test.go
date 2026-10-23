@@ -77,3 +77,61 @@ func TestFileExists(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteFileAtomic(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "sub", "test.sh")
+
+	// 1. Initial atomic write
+	initialData := []byte("#!/bin/bash\necho initial\n")
+	if err := WriteFileAtomic(targetPath, initialData, 0755); err != nil {
+		t.Fatalf("WriteFileAtomic failed: %v", err)
+	}
+
+	read, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("failed to read written file: %v", err)
+	}
+	if string(read) != string(initialData) {
+		t.Errorf("expected %q, got %q", string(initialData), string(read))
+	}
+	fi, err := os.Stat(targetPath)
+	if err != nil {
+		t.Fatalf("stat failed: %v", err)
+	}
+	if fi.Mode().Perm() != 0755 {
+		t.Errorf("expected mode 0755, got %v", fi.Mode().Perm())
+	}
+
+	// 2. Open file descriptor before overwrite
+	f, err := os.Open(targetPath)
+	if err != nil {
+		t.Fatalf("failed to open file: %v", err)
+	}
+	defer f.Close()
+
+	// 3. Overwrite with new content
+	newData := []byte("#!/bin/bash\necho new\n")
+	if err := WriteFileAtomic(targetPath, newData, 0755); err != nil {
+		t.Fatalf("WriteFileAtomic overwrite failed: %v", err)
+	}
+
+	// The target file now has new data
+	afterRead, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("failed to read updated file: %v", err)
+	}
+	if string(afterRead) != string(newData) {
+		t.Errorf("expected %q, got %q", string(newData), string(afterRead))
+	}
+
+	// Open file descriptor still sees initial data (inode preserved for open fd)
+	buf := make([]byte, len(initialData))
+	n, err := f.Read(buf)
+	if err != nil {
+		t.Fatalf("failed to read from open fd: %v", err)
+	}
+	if string(buf[:n]) != string(initialData) {
+		t.Errorf("expected open fd to see original data %q, got %q", string(initialData), string(buf[:n]))
+	}
+}

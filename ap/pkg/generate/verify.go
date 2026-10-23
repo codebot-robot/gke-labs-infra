@@ -396,7 +396,11 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 	if curGitErr != nil {
 		findings = append(findings, fmt.Sprintf("failed to get git status after generation: %v", curGitErr))
 	} else if currentGitStatus != initialGitStatus {
-		findings = append(findings, fmt.Sprintf("working tree was dirtied by generation:\n%s", currentGitStatus))
+		apCmd, err := GetApCommand(repoRoot, repoRoot)
+		if err != nil || apCmd == "" {
+			apCmd = "ap"
+		}
+		findings = append(findings, fmt.Sprintf("working tree was dirtied by generation:\n%s\nTo fix, run: %s generate //... and commit the changes", currentGitStatus, apCmd))
 	}
 
 	if len(findings) > 0 {

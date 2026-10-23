@@ -112,3 +112,49 @@ func CopyFile(src, dst string, perm os.FileMode) error {
 	}
 	return nil
 }
+
+// WriteFileAtomic writes data to path atomically by writing to a temporary file in the target's
+// directory, applying perm, closing the file, and renaming it over path.
+// This ensures that processes holding open file descriptors (such as a running bash script rewriting itself)
+// continue executing against the old inode uninterrupted.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	tmpFile, err := os.CreateTemp(dir, ".atomic-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmpFile.Name()
+	var closed bool
+	defer func() {
+		if !closed {
+			if closeErr := tmpFile.Close(); closeErr != nil {
+				klog.V(2).Infof("failed to close temporary file %s: %v", tmpName, closeErr)
+			}
+		}
+		if rmErr := os.Remove(tmpName); rmErr != nil && !os.IsNotExist(rmErr) {
+			klog.V(2).Infof("failed to remove temporary file %s: %v", tmpName, rmErr)
+		}
+	}()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		return err
+	}
+
+	if err := tmpFile.Chmod(perm); err != nil {
+		return err
+	}
+
+	closed = true
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close output file %s: %w", tmpName, err)
+	}
+
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	return nil
+}
