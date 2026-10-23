@@ -483,3 +483,55 @@ func TestGenerateIdempotence(t *testing.T) {
 		}
 	}
 }
+
+func TestAuditGeneratedGeneratorOptIn(t *testing.T) {
+	root := t.TempDir()
+	writeTestHeadersConfig(t, root)
+
+	scriptPath := filepath.Join(root, "dev", "ci", "presubmits", "ap-audit-generated")
+
+	// 1. Without auditGenerated configured: script should not exist
+	if err := runAuditGeneratedGenerator(t.Context(), root); err != nil {
+		t.Fatalf("runAuditGeneratedGenerator failed: %v", err)
+	}
+	if _, err := os.Stat(scriptPath); err == nil {
+		t.Fatalf("expected ap-audit-generated NOT to exist when not configured")
+	}
+
+	// 2. With auditGenerated: true: script should be generated
+	apYAML := `version: "!self"
+generate:
+  auditGenerated: true
+`
+	if err := os.WriteFile(filepath.Join(root, ".ap", "ap.yaml"), []byte(apYAML), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runAuditGeneratedGenerator(t.Context(), root); err != nil {
+		t.Fatalf("runAuditGeneratedGenerator with auditGenerated=true failed: %v", err)
+	}
+
+	b, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("expected ap-audit-generated to be generated: %v", err)
+	}
+	content := string(b)
+	if !strings.Contains(content, "ap generate --audit-generated --strict //...") {
+		t.Errorf("expected script to run ap generate --audit-generated --strict //..., got:\n%s", content)
+	}
+
+	// 3. When auditGenerated is disabled, script is cleaned up
+	apYAMLDisabled := `version: "!self"
+generate:
+  auditGenerated: false
+`
+	if err := os.WriteFile(filepath.Join(root, ".ap", "ap.yaml"), []byte(apYAMLDisabled), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runAuditGeneratedGenerator(t.Context(), root); err != nil {
+		t.Fatalf("runAuditGeneratedGenerator with auditGenerated=false failed: %v", err)
+	}
+	if _, err := os.Stat(scriptPath); err == nil {
+		t.Fatalf("expected ap-audit-generated to be removed when disabled")
+	}
+}

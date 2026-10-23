@@ -26,7 +26,9 @@ import (
 // GenerateOptions holds the configuration for the "generate" command.
 type GenerateOptions struct {
 	*RootOptions
-	Verify bool
+	Verify         bool
+	AuditGenerated bool
+	Strict         bool
 }
 
 // BuildGenerateCommand constructs the cobra command for "generate".
@@ -48,6 +50,8 @@ func BuildGenerateCommand(rootOpt *RootOptions) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&opt.Verify, "verify", false, "Verify generator coverage by perturbing outputs and verifying restoration")
+	cmd.Flags().BoolVar(&opt.AuditGenerated, "audit-generated", false, "Audit repository for generated files that lack a generated header (runs against HEAD in a scratch worktree; uncommitted changes are not audited)")
+	cmd.Flags().BoolVar(&opt.Strict, "strict", false, "Exit non-zero if audit mode detects generated files lacking a header")
 
 	return cmd
 }
@@ -109,6 +113,13 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 
 	if opt.Verify {
 		return generate.RunVerify(ctx, opt.RepoRoot, scopes, allTasks, opt.DryRun)
+	}
+
+	if opt.AuditGenerated {
+		return generate.RunAudit(ctx, opt.RepoRoot, scopes, generate.AuditOptions{
+			Strict: opt.Strict,
+			DryRun: opt.DryRun,
+		})
 	}
 
 	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})

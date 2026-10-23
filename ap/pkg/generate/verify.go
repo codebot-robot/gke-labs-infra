@@ -125,49 +125,66 @@ func FindGeneratedFiles(repoRoot string, scopes []*tasks.APScope) ([]*repo.File,
 	return generatedFiles, nil
 }
 
+// CommentSyntax returns the comment prefix and suffix for a file based on its
+// path, extension, base name, or shebang. ok is true if the file format supports
+// comments; false for binary files, uncommentable text (e.g. JSON, go.sum), or unknown formats.
+func CommentSyntax(path string, data []byte) (prefix, suffix string, ok bool) {
+	checkLen := len(data)
+	if checkLen > 8000 {
+		checkLen = 8000
+	}
+	if bytes.IndexByte(data[:checkLen], 0) != -1 {
+		return "", "", false
+	}
+
+	ext := strings.ToLower(filepath.Ext(path))
+	base := strings.ToLower(filepath.Base(path))
+
+	if bytes.HasPrefix(data, []byte("#!")) {
+		return "#", "", true
+	}
+
+	switch ext {
+	case ".go", ".proto", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".cs", ".java", ".js", ".jsx", ".ts", ".tsx", ".rs":
+		return "//", "", true
+	case ".yaml", ".yml", ".sh", ".bash", ".py", ".dockerfile", ".toml", ".rb":
+		return "#", "", true
+	case ".md", ".markdown", ".html", ".htm", ".xml", ".svg":
+		return "<!--", " -->", true
+	case ".sql", ".lua":
+		return "--", "", true
+	default:
+		if base == "dockerfile" || strings.HasPrefix(base, "dockerfile.") || strings.HasSuffix(base, ".dockerfile") {
+			return "#", "", true
+		}
+		if base == "makefile" || base == "gnumakefile" || strings.HasSuffix(base, ".mk") {
+			return "#", "", true
+		}
+		if base == "go.mod" {
+			return "//", "", true
+		}
+		return "", "", false
+	}
+}
+
 // Perturb appends an undoable marker line to a text file, or flips the trailing byte of a binary file.
 func Perturb(path string, data []byte, nonce string) (perturbed []byte, marker string, isBinary bool, wasEmpty bool) {
 	if len(data) == 0 {
 		return []byte{0x00}, "", true, true
 	}
 
-	checkLen := len(data)
-	if checkLen > 8000 {
-		checkLen = 8000
-	}
-	if bytes.IndexByte(data[:checkLen], 0) != -1 {
-		// Binary file: flip last byte
+	prefix, suffix, ok := CommentSyntax(path, data)
+	if !ok {
+		// Binary file or uncommentable format: flip last byte
 		perturbed = bytes.Clone(data)
 		perturbed[len(perturbed)-1] ^= 0x01
 		return perturbed, "", true, false
 	}
 
-	ext := strings.ToLower(filepath.Ext(path))
-	base := strings.ToLower(filepath.Base(path))
-
-	var commentPrefix, commentSuffix string
-	switch ext {
-	case ".go", ".proto", ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".java", ".js", ".jsx", ".ts", ".tsx", ".rs":
-		commentPrefix = "//"
-	case ".yaml", ".yml", ".sh", ".bash", ".py", ".dockerfile", ".toml", ".rb":
-		commentPrefix = "#"
-	case ".md", ".markdown", ".html", ".xml", ".svg":
-		commentPrefix = "<!--"
-		commentSuffix = " -->"
-	case ".sql", ".lua":
-		commentPrefix = "--"
-	default:
-		if base == "dockerfile" || strings.HasPrefix(base, "dockerfile.") {
-			commentPrefix = "#"
-		} else {
-			commentPrefix = "#"
-		}
-	}
-
-	if commentSuffix != "" {
-		marker = fmt.Sprintf("\n%s ap-verify %s%s\n", commentPrefix, nonce, commentSuffix)
+	if suffix != "" {
+		marker = fmt.Sprintf("\n%s ap-verify %s%s\n", prefix, nonce, suffix)
 	} else {
-		marker = fmt.Sprintf("\n%s ap-verify %s\n", commentPrefix, nonce)
+		marker = fmt.Sprintf("\n%s ap-verify %s\n", prefix, nonce)
 	}
 
 	perturbed = append(bytes.Clone(data), []byte(marker)...)
