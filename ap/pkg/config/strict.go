@@ -52,6 +52,24 @@ func validateUnknownKeys(rawMap map[string]any, targetType reflect.Type, parentP
 
 	fields, names := getStructFields(targetType)
 
+	if targetType == reflect.TypeOf(LintConfig{}) {
+		linterMu.RLock()
+		for name, newFn := range linterRegistry {
+			if _, exists := fields[name]; !exists {
+				cfg := newFn()
+				fields[name] = structFieldInfo{
+					field: reflect.StructField{
+						Name: name,
+						Type: reflect.TypeOf(cfg),
+					},
+					name: name,
+				}
+				names = append(names, name)
+			}
+		}
+		linterMu.RUnlock()
+	}
+
 	var rawKeys []string
 	for k := range rawMap {
 		rawKeys = append(rawKeys, k)

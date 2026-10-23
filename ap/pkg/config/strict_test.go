@@ -303,14 +303,12 @@ lint:
 	if cfg.Linter("replaceEmptyInterfaceWithAny").SkipTestsOverride() == nil || *cfg.Linter("replaceEmptyInterfaceWithAny").SkipTestsOverride() != false {
 		t.Errorf("expected ReplaceEmptyInterfaceWithAnySkipTests to be false")
 	}
-	if !cfg.DroppedErrorsSkipTests() {
-		t.Errorf("expected DroppedErrorsSkipTests to be true")
+	de := cfg.Linter("droppedErrors")
+	if de.SkipTestsOverride() == nil || *de.SkipTestsOverride() != true {
+		t.Errorf("expected DroppedErrors.SkipTests to be true")
 	}
-	if cfg.DroppedErrorsSkipGenerated() {
-		t.Errorf("expected DroppedErrorsSkipGenerated to be false")
-	}
-	if cfg.DroppedErrorsBaseline() != ".ap/droppederrors-baseline.txt" {
-		t.Errorf("expected baseline .ap/droppederrors-baseline.txt, got %q", cfg.DroppedErrorsBaseline())
+	if de.SkipGeneratedOverride() == nil || *de.SkipGeneratedOverride() != false {
+		t.Errorf("expected DroppedErrors.SkipGenerated to be false")
 	}
 	toi := cfg.Linter("testOnlyImports")
 	if !toi.IsEnabled() {
@@ -318,13 +316,6 @@ lint:
 	}
 	if !toi.IsError() {
 		t.Errorf("expected IsError to be true")
-	}
-	toic := cfg.TestOnlyImports()
-	if toic == nil {
-		t.Fatalf("expected TestOnlyImports to not be nil")
-	}
-	if len(toic.Packages) != 1 || toic.Packages[0] != "github.com/google/go-cmp" {
-		t.Errorf("expected TestOnlyImports packages [github.com/google/go-cmp], got %v", toic.Packages)
 	}
 	if toi.SkipGeneratedOverride() == nil || *toi.SkipGeneratedOverride() != true {
 		t.Errorf("expected TestOnlyImports.SkipGenerated to be true")
@@ -339,13 +330,6 @@ lint:
 	}
 	if !cw.IsError() {
 		t.Errorf("expected CloseWriter.IsError to be true")
-	}
-	cwc := cfg.CloseWriter()
-	if cwc == nil {
-		t.Fatalf("expected CloseWriter to not be nil")
-	}
-	if len(cwc.Types) != 1 || cwc.Types[0] != "*bufio.Writer" {
-		t.Errorf("expected CloseWriter types [*bufio.Writer], got %v", cwc.Types)
 	}
 	if cw.SkipGeneratedOverride() == nil || *cw.SkipGeneratedOverride() != false {
 		t.Errorf("expected CloseWriter.SkipGenerated to be false")

@@ -47,7 +47,8 @@ type Registered struct {
 	DefaultSkipGenerated bool
 	DefaultSkipTests     bool
 	CustomTask           bool
-	ExtraFlags           func(cfg *config.Config) []string
+	NewConfig            func() config.LinterConfig
+	ExtraFlags           func(cfg config.LinterConfig) []string
 }
 
 // ConfigKey returns the configuration key used in Config.Linter.
@@ -113,12 +114,10 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: true,
 		DefaultSkipTests:     false,
-		ExtraFlags: func(cfg *config.Config) []string {
-			if cfg.IsUnusedParametersEnabled() {
-				return []string{"-check-parameters=true"}
-			}
-			return []string{"-check-parameters=false"}
+		NewConfig: func() config.LinterConfig {
+			return &unused.Config{}
 		},
+		ExtraFlags: unused.ExtraFlags,
 	},
 	{
 		Analyzer:             testcontext.Analyzer,
@@ -127,6 +126,9 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeWarn,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
+		NewConfig: func() config.LinterConfig {
+			return &config.CommonLinterConfig{}
+		},
 	},
 	{
 		Analyzer:             any.Analyzer,
@@ -136,6 +138,9 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeWarn,
 		DefaultSkipGenerated: true,
 		DefaultSkipTests:     false,
+		NewConfig: func() config.LinterConfig {
+			return &config.CommonLinterConfig{}
+		},
 	},
 	{
 		Analyzer:             testonlyimports.Analyzer,
@@ -145,16 +150,10 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
-		ExtraFlags: func(cfg *config.Config) []string {
-			if c := cfg.TestOnlyImports(); c != nil {
-				var flags []string
-				for _, pkg := range c.Packages {
-					flags = append(flags, "-package="+pkg)
-				}
-				return flags
-			}
-			return nil
+		NewConfig: func() config.LinterConfig {
+			return &testonlyimports.Config{}
 		},
+		ExtraFlags: testonlyimports.ExtraFlags,
 	},
 	{
 		Analyzer:             droppederrors.Analyzer,
@@ -165,6 +164,9 @@ var Analyzers = []Registered{
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     true,
 		CustomTask:           true,
+		NewConfig: func() config.LinterConfig {
+			return &droppederrors.Config{}
+		},
 	},
 	{
 		Analyzer:             closewriter.Analyzer,
@@ -174,16 +176,10 @@ var Analyzers = []Registered{
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
-		ExtraFlags: func(cfg *config.Config) []string {
-			if c := cfg.CloseWriter(); c != nil {
-				var flags []string
-				for _, typ := range c.Types {
-					flags = append(flags, "-type="+typ)
-				}
-				return flags
-			}
-			return nil
+		NewConfig: func() config.LinterConfig {
+			return &closewriter.Config{}
 		},
+		ExtraFlags: closewriter.ExtraFlags,
 	},
 	{
 		Analyzer:    deferinloop.Analyzer,
@@ -191,7 +187,23 @@ var Analyzers = []Registered{
 		ConfigName:  "deferInLoop",
 		Aliases:     []string{"deferInLoop"},
 		DefaultMode: ModeError,
+		NewConfig: func() config.LinterConfig {
+			return &config.CommonLinterConfig{}
+		},
 	},
+}
+
+func init() {
+	for _, a := range Analyzers {
+		newCfg := a.NewConfig
+		if newCfg == nil {
+			newCfg = func() config.LinterConfig { return &config.CommonLinterConfig{} }
+		}
+		config.RegisterLinter(a.ConfigKey(), newCfg)
+		for _, alias := range a.Aliases {
+			config.RegisterLinter(alias, newCfg)
+		}
+	}
 }
 
 // Find finds a registered analyzer by name or alias.

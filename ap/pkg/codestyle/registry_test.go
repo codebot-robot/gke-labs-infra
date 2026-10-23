@@ -128,42 +128,40 @@ func TestRegistry_PlainAnalyzers(t *testing.T) {
 }
 
 func TestRegistry_ResolveWithConfig(t *testing.T) {
-	trueVal := true
-	falseVal := false
-	cfg := &config.Config{
-		Lint: &config.LintConfig{
-			SkipGenerated: &trueVal,
-			TestContext: &config.TestContextConfig{
-				CommonLinterConfig: config.CommonLinterConfig{
-					Mode:      "error",
-					SkipTests: &trueVal,
-				},
-			},
-			Unused: &config.UnusedConfig{
-				CommonLinterConfig: config.CommonLinterConfig{
-					Mode:          "ignore",
-					SkipGenerated: &falseVal,
-				},
-			},
-		},
+	yamlContent := `
+lint:
+  skipGenerated: true
+  testcontext:
+    mode: error
+    skipTests: true
+  unused:
+    mode: ignore
+    skipGenerated: false
+`
+	var cfg config.Config
+	if err := config.UnmarshalStrict([]byte(yamlContent), &cfg); err != nil {
+		t.Fatalf("UnmarshalStrict failed: %v", err)
 	}
 
 	tc := Find("testcontext")
-	if tc.ResolveMode(cfg) != ModeError {
-		t.Errorf("expected testcontext mode error, got %v", tc.ResolveMode(cfg))
+	if tc.ResolveMode(&cfg) != ModeError {
+		t.Errorf("expected testcontext mode error, got %v", tc.ResolveMode(&cfg))
 	}
-	if !tc.ResolveSkipGenerated(cfg) {
+	if !tc.ResolveSkipGenerated(&cfg) {
 		t.Errorf("expected testcontext skipGenerated true (from shared)")
 	}
-	if !tc.ResolveSkipTests(cfg) {
+	if !tc.ResolveSkipTests(&cfg) {
 		t.Errorf("expected testcontext skipTests true (from override)")
 	}
 
 	u := Find("unused")
-	if u.ResolveMode(cfg) != ModeIgnore {
-		t.Errorf("expected unused mode ignore, got %v", u.ResolveMode(cfg))
+	if u.ResolveMode(&cfg) != ModeIgnore {
+		t.Errorf("expected unused mode ignore, got %v", u.ResolveMode(&cfg))
 	}
-	if u.ResolveSkipGenerated(cfg) {
+	if u.ResolveSkipGenerated(&cfg) {
 		t.Errorf("expected unused skipGenerated false (from override)")
+	}
+	if u.ResolveSkipTests(&cfg) {
+		t.Errorf("expected unused skipTests false (from default)")
 	}
 }

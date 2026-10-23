@@ -18,6 +18,7 @@ import (
 	"go/ast"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/ast/inspector"
@@ -37,6 +38,7 @@ var policyFlags *fileset.PolicyFlags
 
 func init() {
 	policyFlags = fileset.RegisterFlags(Analyzer, false, false)
+	config.RegisterLinter("deferInLoop", func() config.LinterConfig { return &config.CommonLinterConfig{} })
 }
 
 func run(pass *analysis.Pass) (any, error) {

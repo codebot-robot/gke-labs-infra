@@ -18,6 +18,7 @@ import (
 	"go/ast"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"golang.org/x/tools/go/analysis"
 )
 
@@ -31,6 +32,7 @@ var policyFlags *fileset.PolicyFlags
 
 func init() {
 	policyFlags = fileset.RegisterFlags(Analyzer, true, false)
+	config.RegisterLinter("replaceEmptyInterfaceWithAny", func() config.LinterConfig { return &config.CommonLinterConfig{} })
 }
 
 func run(pass *analysis.Pass) (any, error) {

@@ -850,7 +850,7 @@ func TestLintTasks_GovulncheckAndDroppedErrorsBothReport(t *testing.T) {
 		Tasks:           []tasks.Task{modGroup},
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	scope := &tasks.APScope{}
 	err := outerGroup.Run(ctx, scope)
 	if err == nil {

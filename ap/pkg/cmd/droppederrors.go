@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/droppederrors"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
@@ -124,10 +125,17 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		cfg = c
 	}
 
+	var dec *droppederrors.Config
+	var lc config.LinterConfig
+	if cfg != nil {
+		lc = cfg.Linter("droppedErrors")
+		dec, _ = lc.(*droppederrors.Config)
+	}
+
 	mode := opt.Mode
 	if mode == "" {
-		if cfg != nil {
-			mode = cfg.DroppedErrorsMode()
+		if lc != nil && lc.GetMode() != "" {
+			mode = lc.GetMode()
 		} else {
 			mode = "error"
 		}
@@ -137,8 +145,8 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 	}
 
 	baseline := opt.Baseline
-	if baseline == "" && cfg != nil {
-		baseline = cfg.DroppedErrorsBaseline()
+	if baseline == "" && dec != nil {
+		baseline = dec.Baseline
 	}
 	if baseline == "" {
 		defaultBaseline := filepath.Join(apRoot, ".ap", "droppederrors-baseline.txt")
@@ -167,29 +175,41 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 	}
 
 	var exclude []string
-	if cfg != nil {
-		exclude = append(exclude, cfg.DroppedErrorsExclude()...)
+	if dec != nil {
+		exclude = append(exclude, dec.Exclude...)
 	}
 	exclude = append(exclude, opt.Exclude...)
 
 	skipTests := opt.SkipTests
 	if cmd != nil && !cmd.Flags().Changed("skip-tests") && cfg != nil {
-		skipTests = cfg.DroppedErrorsSkipTests()
+		skipTests = cfg.ResolveSkipTests(lc, true)
 	}
 
 	skipGenerated := opt.SkipGenerated
 	if cmd != nil && !cmd.Flags().Changed("skip-generated") && cfg != nil {
-		skipGenerated = cfg.DroppedErrorsSkipGenerated()
+		skipGenerated = cfg.ResolveSkipGenerated(lc, false)
 	}
 
 	useDefaultExcludes := opt.UseDefaultExcludes
-	if cmd != nil && !cmd.Flags().Changed("use-default-excludes") && cfg != nil {
-		useDefaultExcludes = cfg.DroppedErrorsUseDefaultExcludes()
+	if cmd != nil && !cmd.Flags().Changed("use-default-excludes") {
+		if dec != nil && dec.UseDefaultExcludes != nil {
+			useDefaultExcludes = *dec.UseDefaultExcludes
+		} else {
+			useDefaultExcludes = true
+		}
 	}
 
 	goosList := opt.GOOS
-	if len(goosList) == 0 && cfg != nil {
-		goosList = cfg.DroppedErrorsGOOS()
+	if len(goosList) == 0 && dec != nil && len(dec.GOOS) > 0 {
+		goosList = dec.GOOS
+	}
+	if len(goosList) == 0 {
+		host := runtime.GOOS
+		if host == "linux" {
+			goosList = []string{"linux"}
+		} else {
+			goosList = []string{host, "linux"}
+		}
 	}
 
 	if mode == "ignore" && !opt.WriteBaseline {

@@ -428,7 +428,8 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 			flags = append(flags, fmt.Sprintf("-skip-tests=%t", skipTests))
 
 			if reg.ExtraFlags != nil {
-				flags = append(flags, reg.ExtraFlags(cfg)...)
+				lc := cfg.Linter(reg.ConfigKey())
+				flags = append(flags, reg.ExtraFlags(lc)...)
 			}
 			analyzersTask.PerAnalyzerFlags[reg.Name] = flags
 		}
