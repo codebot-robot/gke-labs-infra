@@ -27,6 +27,8 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/dockerfile"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"k8s.io/klog/v2"
 )
@@ -195,68 +197,46 @@ func bumpDockerfile(content string, version string) (string, bool) {
 	lines := strings.Split(content, "\n")
 	changed := false
 
-	for lineIdx, rawLine := range lines {
-		line := strings.TrimSuffix(rawLine, "\r")
-		fields := strings.Fields(line)
-		if len(fields) == 0 || !strings.EqualFold(fields[0], "FROM") {
+	froms := dockerfile.FromLines(content)
+	for _, from := range froms {
+		if from.Line <= 0 || from.Line > len(lines) {
+			continue
+		}
+		line := lines[from.Line-1]
+
+		ref, err := imageref.Parse(from.Image)
+		if err != nil {
+			continue
+		}
+		if ref.Name() != "golang" {
 			continue
 		}
 
-		imageFieldIdx := 1
-		for imageFieldIdx < len(fields) && strings.HasPrefix(fields[imageFieldIdx], "--") {
-			imageFieldIdx++
-		}
-		if imageFieldIdx >= len(fields) {
+		if ref.Digest != "" {
+			klog.Warningf("skipping digest-pinned image on line %d: %s", from.Line, line)
 			continue
 		}
 
-		imageField := fields[imageFieldIdx]
-		if !strings.HasPrefix(imageField, "golang:") {
-			continue
-		}
-
-		verAndSuffix := strings.TrimPrefix(imageField, "golang:")
 		i := 0
-		for i < len(verAndSuffix) && ((verAndSuffix[i] >= '0' && verAndSuffix[i] <= '9') || verAndSuffix[i] == '.') {
+		for i < len(ref.Tag) && ((ref.Tag[i] >= '0' && ref.Tag[i] <= '9') || ref.Tag[i] == '.') {
 			i++
 		}
-		verStr := verAndSuffix[:i]
+		verStr := ref.Tag[:i]
 		if !isValidVersion(verStr) {
 			continue
 		}
 
-		suffixStart := i
-		if i < len(verAndSuffix) && verAndSuffix[i] == '-' {
-			j := i + 1
-			for j < len(verAndSuffix) && ((verAndSuffix[j] >= 'a' && verAndSuffix[j] <= 'z') || (verAndSuffix[j] >= '0' && verAndSuffix[j] <= '9')) {
-				j++
-			}
-			if j > i+1 {
-				i = j
-			}
-		}
-		suffix := verAndSuffix[suffixStart:i]
-
-		newImage := "golang:" + version + suffix + verAndSuffix[i:]
-		if newImage == imageField {
+		ref.Tag = version + ref.Tag[i:]
+		newImage := ref.String()
+		if newImage == from.Image {
 			continue
 		}
 
-		fromIdx := strings.Index(rawLine, fields[0])
-		searchStart := fromIdx + len(fields[0])
-		for k := 1; k < imageFieldIdx; k++ {
-			flagIdx := strings.Index(rawLine[searchStart:], fields[k])
-			if flagIdx != -1 {
-				searchStart += flagIdx + len(fields[k])
-			}
+		newLine := strings.Replace(line, from.Image, newImage, 1)
+		if newLine != line {
+			lines[from.Line-1] = newLine
+			changed = true
 		}
-		fieldIdx := strings.Index(rawLine[searchStart:], imageField)
-		if fieldIdx == -1 {
-			continue
-		}
-		idx := searchStart + fieldIdx
-		lines[lineIdx] = rawLine[:idx] + newImage + rawLine[idx+len(imageField):]
-		changed = true
 	}
 
 	newContent := strings.Join(lines, "\n")

@@ -251,11 +251,18 @@ func TestBumpDockerfile(t *testing.T) {
 			wantChanged: true,
 		},
 		{
+			name:        "registry-qualified",
+			content:     "FROM docker.io/library/golang:1.25-alpine\n",
+			version:     "1.26.1",
+			wantContent: "FROM docker.io/library/golang:1.26.1-alpine\n",
+			wantChanged: true,
+		},
+		{
 			name:        "with image digest",
 			content:     "FROM golang:1.25.1-trixie@sha256:abcdef123456\n",
 			version:     "1.26.1",
-			wantContent: "FROM golang:1.26.1-trixie@sha256:abcdef123456\n",
-			wantChanged: true,
+			wantContent: "FROM golang:1.25.1-trixie@sha256:abcdef123456\n",
+			wantChanged: false,
 		},
 		{
 			name:        "without suffix",

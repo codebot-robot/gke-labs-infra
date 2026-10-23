@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"gopkg.in/yaml.v3"
@@ -299,39 +300,24 @@ func isPlaceholderImage(image string) (string, bool) {
 		return "", false
 	}
 
-	if strings.HasPrefix(image, "${") {
+	ref, err := imageref.Parse(image)
+	if err != nil {
 		return "", false
 	}
 
-	// Handle digest if any (we probably want to skip these too)
-	if strings.Contains(image, "@") {
+	if ref.Digest != "" {
 		return "", false
 	}
 
-	base := image
-	tag := ""
-	if i := strings.LastIndex(image, ":"); i != -1 {
-		lastPart := image[i+1:]
-		if !strings.Contains(lastPart, "/") {
-			base = image[:i]
-			tag = lastPart
-		}
-	}
-
-	if tag != "" && tag != "latest" {
+	if ref.Tag != "" && ref.Tag != "latest" {
 		return "", false
 	}
 
-	// Check for host
-	firstSlash := strings.Index(image, "/")
-	if firstSlash != -1 {
-		host := image[:firstSlash]
-		if strings.Contains(host, ".") || strings.Contains(host, ":") || host == "localhost" {
-			return "", false
-		}
+	if ref.Registry != "" {
+		return "", false
 	}
 
-	return base, true
+	return ref.Repository, true
 }
 
 func isImageField(path []string) bool {
