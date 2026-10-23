@@ -15,6 +15,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,25 +106,25 @@ func TestLoadDefault(t *testing.T) {
 	if cfg.DroppedErrorsUseDefaultExcludes() != true {
 		t.Errorf("expected default droppederrors useDefaultExcludes to be true")
 	}
-	toi := cfg.TestOnlyImports()
+	toi := cfg.Linter("testOnlyImports")
 	if !toi.IsEnabled() {
 		t.Errorf("expected default testOnlyImports enabled to be true")
 	}
 	if !toi.IsError() {
 		t.Errorf("expected default testOnlyImports error to be true (error mode)")
 	}
-	if len(toi.PackagesOrDefault()) != 4 {
-		t.Errorf("expected 4 default testOnlyImports packages, got %d", len(toi.PackagesOrDefault()))
+	if cfg.TestOnlyImports() != nil {
+		t.Errorf("expected default testOnlyImports config to be nil, got %v", cfg.TestOnlyImports())
 	}
-	cw := cfg.CloseWriter()
+	cw := cfg.Linter("closeWriter")
 	if !cw.IsEnabled() {
 		t.Errorf("expected default closeWriter enabled to be true")
 	}
 	if !cw.IsError() {
 		t.Errorf("expected default closeWriter error to be true (error mode)")
 	}
-	if len(cw.TypesOrDefault()) != len(DefaultCloseWriterTypes) {
-		t.Errorf("expected %d default closeWriter types, got %d", len(DefaultCloseWriterTypes), len(cw.TypesOrDefault()))
+	if cfg.CloseWriter() != nil {
+		t.Errorf("expected default closeWriter config to be nil, got %v", cfg.CloseWriter())
 	}
 }
 
@@ -158,27 +159,28 @@ lint:
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	cw := cfg.CloseWriter()
-	if cw == nil {
-		t.Fatalf("expected CloseWriter to not be nil")
-	}
+	cw := cfg.Linter("closeWriter")
 	if !cw.IsEnabled() {
 		t.Errorf("expected closeWriter to be enabled")
 	}
 	if cw.IsError() {
 		t.Errorf("expected closeWriter not to be error mode (warn)")
 	}
-	if cw.Mode != "warn" {
-		t.Errorf("expected mode warn, got %q", cw.Mode)
+	cwc := cfg.CloseWriter()
+	if cwc == nil {
+		t.Fatalf("expected CloseWriter to not be nil")
 	}
-	types := cw.TypesOrDefault()
+	if cwc.Mode != "warn" {
+		t.Errorf("expected mode warn, got %q", cwc.Mode)
+	}
+	types := cwc.Types
 	if len(types) != 2 || types[0] != "*bufio.Writer" || types[1] != "example.com/custom.MyWriter" {
 		t.Errorf("unexpected types list: %v", types)
 	}
-	if cw.SkipGenerated == nil || *cw.SkipGenerated != true {
+	if cw.SkipGeneratedOverride() == nil || *cw.SkipGeneratedOverride() != true {
 		t.Errorf("expected skipGenerated to be true")
 	}
-	if cw.SkipTests == nil || *cw.SkipTests != true {
+	if cw.SkipTestsOverride() == nil || *cw.SkipTestsOverride() != true {
 		t.Errorf("expected skipTests to be true")
 	}
 }
@@ -244,28 +246,103 @@ lint:
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	toi := cfg.TestOnlyImports()
-	if toi == nil {
-		t.Fatalf("expected TestOnlyImports to not be nil")
-	}
+	toi := cfg.Linter("testOnlyImports")
 	if !toi.IsEnabled() {
 		t.Errorf("expected testOnlyImports to be enabled")
 	}
 	if toi.IsError() {
 		t.Errorf("expected testOnlyImports not to be error mode (warn)")
 	}
-	if toi.Mode != "warn" {
-		t.Errorf("expected mode warn, got %q", toi.Mode)
+	toic := cfg.TestOnlyImports()
+	if toic == nil {
+		t.Fatalf("expected TestOnlyImports to not be nil")
 	}
-	pkgs := toi.PackagesOrDefault()
+	if toic.Mode != "warn" {
+		t.Errorf("expected mode warn, got %q", toic.Mode)
+	}
+	pkgs := toic.Packages
 	if len(pkgs) != 2 || pkgs[0] != "github.com/google/go-cmp" || pkgs[1] != "example.com/custom" {
 		t.Errorf("unexpected packages list: %v", pkgs)
 	}
-	if toi.SkipGenerated == nil || *toi.SkipGenerated != true {
+	if toi.SkipGeneratedOverride() == nil || *toi.SkipGeneratedOverride() != true {
 		t.Errorf("expected skipGenerated to be true")
 	}
-	if toi.SkipTests == nil || *toi.SkipTests != true {
+	if toi.SkipTestsOverride() == nil || *toi.SkipTestsOverride() != true {
 		t.Errorf("expected skipTests to be true")
+	}
+}
+
+func TestConfig_Linter_UnknownPanics(t *testing.T) {
+	var cfg Config
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic for unknown linter")
+		}
+		msg, ok := r.(string)
+		if !ok || !strings.Contains(msg, `unknown linter "tpyo"`) {
+			t.Errorf("expected panic message to mention unknown linter \"tpyo\", got: %v", r)
+		}
+	}()
+	cfg.Linter("tpyo")
+}
+
+func TestConfig_Linter_KnownDefaults(t *testing.T) {
+	known := []string{
+		"unused",
+		"testcontext",
+		"replaceEmptyInterfaceWithAny",
+		"droppedErrors",
+		"testOnlyImports",
+		"closeWriter",
+	}
+	var cfg *Config
+	for _, name := range known {
+		lc := cfg.Linter(name)
+		if !lc.IsEnabled() {
+			t.Errorf("%s: expected default IsEnabled to be true", name)
+		}
+		if !lc.IsError() {
+			t.Errorf("%s: expected default IsError to be true", name)
+		}
+		if lc.SkipGeneratedOverride() != nil {
+			t.Errorf("%s: expected default SkipGeneratedOverride to be nil", name)
+		}
+		if lc.SkipTestsOverride() != nil {
+			t.Errorf("%s: expected default SkipTestsOverride to be nil", name)
+		}
+	}
+}
+
+func TestConfig_InvalidLinterModes(t *testing.T) {
+	linters := []string{
+		"unused",
+		"testcontext",
+		"replaceEmptyInterfaceWithAny",
+		"droppedErrors",
+		"testOnlyImports",
+		"closeWriter",
+	}
+	for _, linter := range linters {
+		t.Run(linter, func(t *testing.T) {
+			tempDir := t.TempDir()
+			apDir := filepath.Join(tempDir, ".ap")
+			if err := os.Mkdir(apDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			yamlContent := fmt.Sprintf("lint:\n  %s:\n    mode: invalid\n", linter)
+			if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(tempDir)
+			if err == nil {
+				t.Fatalf("expected Load to fail on invalid %s mode", linter)
+			}
+			want := fmt.Sprintf("invalid %s mode \"invalid\"", linter)
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("expected error to contain %q, got: %v", want, err)
+			}
+		})
 	}
 }
 
