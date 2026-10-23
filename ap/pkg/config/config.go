@@ -15,11 +15,11 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 )
 
@@ -44,16 +44,49 @@ type GovulncheckConfig struct {
 }
 
 type LintConfig struct {
-	SkipGenerated                *bool                               `json:"skipGenerated"`
-	SkipTests                    *bool                               `json:"skipTests"`
-	Unused                       *UnusedConfig                       `json:"unused"`
-	TestContext                  *TestContextConfig                  `json:"testcontext"`
-	UnusedParameters             *UnusedParametersConfig             `json:"unusedparameters"`
-	ReplaceEmptyInterfaceWithAny *ReplaceEmptyInterfaceWithAnyConfig `json:"replaceEmptyInterfaceWithAny"`
-	DroppedErrors                *DroppedErrorsConfig                `json:"droppedErrors"`
-	TestOnlyImports              *TestOnlyImportsConfig              `json:"testOnlyImports"`
-	CloseWriter                  *CloseWriterConfig                  `json:"closeWriter"`
-	DeferInLoop                  *DeferInLoopConfig                  `json:"deferInLoop"`
+	SkipGenerated *bool `json:"skipGenerated"`
+	SkipTests     *bool `json:"skipTests"`
+
+	linters map[string]LinterConfig
+}
+
+// UnmarshalJSON unmarshals shared lint config and dynamic per-linter configurations.
+// Unknown keys under lint: are skipped here; strict.go validates them at load time.
+func (l *LintConfig) UnmarshalJSON(data []byte) error {
+	type plain LintConfig
+	var p plain
+	if err := json.Unmarshal(data, &p); err != nil {
+		return err
+	}
+	l.SkipGenerated = p.SkipGenerated
+	l.SkipTests = p.SkipTests
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	if l.linters == nil {
+		l.linters = make(map[string]LinterConfig)
+	}
+
+	for key, rawVal := range raw {
+		if key == "skipGenerated" || key == "skipTests" {
+			continue
+		}
+		newFn, ok := linterRegistry[key]
+		if !ok {
+			continue
+		}
+		cfg := newFn()
+		if len(rawVal) > 0 && string(rawVal) != "null" {
+			if err := json.Unmarshal(rawVal, cfg); err != nil {
+				return fmt.Errorf("error unmarshaling %s: %w", key, err)
+			}
+		}
+		l.linters[key] = cfg
+	}
+	return nil
 }
 
 // LinterConfig represents common configuration options for a linter.
@@ -74,71 +107,6 @@ type CommonLinterConfig struct {
 
 var _ LinterConfig = (*CommonLinterConfig)(nil)
 
-var linters = map[string]func(*LintConfig) *CommonLinterConfig{
-	"unused": func(l *LintConfig) *CommonLinterConfig {
-		if l.Unused == nil {
-			return nil
-		}
-		return &l.Unused.CommonLinterConfig
-	},
-	"testcontext": func(l *LintConfig) *CommonLinterConfig {
-		if l.TestContext == nil {
-			return nil
-		}
-		return &l.TestContext.CommonLinterConfig
-	},
-	"replaceEmptyInterfaceWithAny": func(l *LintConfig) *CommonLinterConfig {
-		if l.ReplaceEmptyInterfaceWithAny == nil {
-			return nil
-		}
-		return &l.ReplaceEmptyInterfaceWithAny.CommonLinterConfig
-	},
-	"droppedErrors": func(l *LintConfig) *CommonLinterConfig {
-		if l.DroppedErrors == nil {
-			return nil
-		}
-		return &l.DroppedErrors.CommonLinterConfig
-	},
-	"testOnlyImports": func(l *LintConfig) *CommonLinterConfig {
-		if l.TestOnlyImports == nil {
-			return nil
-		}
-		return &l.TestOnlyImports.CommonLinterConfig
-	},
-	"closeWriter": func(l *LintConfig) *CommonLinterConfig {
-		if l.CloseWriter == nil {
-			return nil
-		}
-		return &l.CloseWriter.CommonLinterConfig
-	},
-	"deferInLoop": func(l *LintConfig) *CommonLinterConfig {
-		if l.DeferInLoop == nil {
-			return nil
-		}
-		return &l.DeferInLoop.CommonLinterConfig
-	},
-}
-
-type UnusedConfig struct {
-	CommonLinterConfig
-}
-
-type ReplaceEmptyInterfaceWithAnyConfig struct {
-	CommonLinterConfig
-}
-
-type TestContextConfig struct {
-	CommonLinterConfig
-}
-
-type DeferInLoopConfig struct {
-	CommonLinterConfig
-}
-
-type UnusedParametersConfig struct {
-	Mode string `json:"mode"`
-}
-
 type DroppedErrorsConfig struct {
 	CommonLinterConfig
 	Exclude            []string `json:"exclude"`
@@ -147,32 +115,21 @@ type DroppedErrorsConfig struct {
 	GOOS               []string `json:"goos"`
 }
 
-type TestOnlyImportsConfig struct {
-	CommonLinterConfig
-	Packages []string `json:"packages"`
-}
-
-type CloseWriterConfig struct {
-	CommonLinterConfig
-	Types []string `json:"types"`
-}
-
 // Linter returns the LinterConfig for the named linter.
 // It panics if the linter name is not registered.
 // If the linter is not explicitly configured, it returns a nil-safe LinterConfig with defaults.
 func (c *Config) Linter(name string) LinterConfig {
-	getter, ok := linters[name]
+	_, ok := linterRegistry[name]
 	if !ok {
 		panic(fmt.Sprintf("unknown linter %q", name))
 	}
-	if c == nil || c.Lint == nil {
+	if c == nil || c.Lint == nil || c.Lint.linters == nil {
 		return (*CommonLinterConfig)(nil)
 	}
-	common := getter(c.Lint)
-	if common == nil {
-		return (*CommonLinterConfig)(nil)
+	if lc, ok := c.Lint.linters[name]; ok && lc != nil {
+		return lc
 	}
-	return common
+	return (*CommonLinterConfig)(nil)
 }
 
 // Load loads the configuration from .ap/go.yaml in the repository root.
@@ -209,14 +166,11 @@ func (c *Config) Validate() error {
 			}
 			return nil
 		}
-		names := make([]string, 0, len(linters))
-		for name := range linters {
-			names = append(names, name)
-		}
-		sort.Strings(names)
+		names := RegisteredLinters()
 		for _, name := range names {
-			if common := linters[name](c.Lint); common != nil {
-				if err := checkMode(name, common.Mode); err != nil {
+			lc := c.Linter(name)
+			if lc != nil {
+				if err := checkMode(name, lc.GetMode()); err != nil {
 					return err
 				}
 			}
@@ -249,39 +203,6 @@ func (c *Config) IsGovulncheckEnabled() bool {
 	return true
 }
 
-// IsUnusedEnabled returns true if unused detection is enabled in the config (defaulting to true, mode != "ignore").
-func (c *Config) IsUnusedEnabled() bool {
-	return c.Linter("unused").IsEnabled()
-}
-
-// IsUnusedParametersEnabled returns true if unused parameter detection is enabled.
-// Default is false.
-func (c *Config) IsUnusedParametersEnabled() bool {
-	if c.Lint != nil && c.Lint.UnusedParameters != nil {
-		return c.Lint.UnusedParameters.Mode != "skip"
-	}
-	return false
-}
-
-// IsTestContextEnabled returns true if testcontext detection is enabled in the config (defaulting to true, mode != "ignore").
-func (c *Config) IsTestContextEnabled() bool {
-	return c.Linter("testcontext").IsEnabled()
-}
-
-// IsTestContextError returns true if testcontext should be reported as an error.
-// Default is false (warning).
-func (c *Config) IsTestContextError() bool {
-	if c.Lint != nil && c.Lint.TestContext != nil {
-		return c.Lint.TestContext.Mode == "error"
-	}
-	return false
-}
-
-// IsReplaceEmptyInterfaceWithAnyEnabled returns true if the replace-empty-interface-with-any linter is enabled in the config (defaulting to true, mode != "ignore").
-func (c *Config) IsReplaceEmptyInterfaceWithAnyEnabled() bool {
-	return c.Linter("replaceEmptyInterfaceWithAny").IsEnabled()
-}
-
 // IsDroppedErrorsEnabled returns true if dropped error checking is enabled (defaulting to true, mode != "ignore").
 func (c *Config) IsDroppedErrorsEnabled() bool {
 	return c.Linter("droppedErrors").IsEnabled()
@@ -296,24 +217,37 @@ func (c *Config) IsDroppedErrorsError() bool {
 // DroppedErrorsMode returns the mode for dropped error checking: "ignore", "warn", or "error".
 // Default is "error".
 func (c *Config) DroppedErrorsMode() string {
-	if c.Lint != nil && c.Lint.DroppedErrors != nil && c.Lint.DroppedErrors.Mode != "" {
-		return c.Lint.DroppedErrors.Mode
+	m := c.Linter("droppedErrors").GetMode()
+	if m != "" {
+		return m
 	}
 	return "error"
 }
 
+// DroppedErrors returns the configuration for droppedErrors, or nil if not configured.
+func (c *Config) DroppedErrors() *DroppedErrorsConfig {
+	if c == nil || c.Lint == nil {
+		return nil
+	}
+	lc := c.Linter("droppedErrors")
+	if de, ok := lc.(*DroppedErrorsConfig); ok {
+		return de
+	}
+	return nil
+}
+
 // DroppedErrorsBaseline returns the configured baseline file path, or empty string.
 func (c *Config) DroppedErrorsBaseline() string {
-	if c.Lint != nil && c.Lint.DroppedErrors != nil {
-		return c.Lint.DroppedErrors.Baseline
+	if de := c.DroppedErrors(); de != nil {
+		return de.Baseline
 	}
 	return ""
 }
 
 // DroppedErrorsExclude returns the configured excluded symbols.
 func (c *Config) DroppedErrorsExclude() []string {
-	if c.Lint != nil && c.Lint.DroppedErrors != nil {
-		return c.Lint.DroppedErrors.Exclude
+	if de := c.DroppedErrors(); de != nil {
+		return de.Exclude
 	}
 	return nil
 }
@@ -356,22 +290,6 @@ func (c *CommonLinterConfig) SkipTestsOverride() *bool {
 		return nil
 	}
 	return c.SkipTests
-}
-
-// TestOnlyImports returns the configuration for testOnlyImports, or nil if not configured.
-func (c *Config) TestOnlyImports() *TestOnlyImportsConfig {
-	if c != nil && c.Lint != nil {
-		return c.Lint.TestOnlyImports
-	}
-	return nil
-}
-
-// CloseWriter returns the configuration for closeWriter, or nil if not configured.
-func (c *Config) CloseWriter() *CloseWriterConfig {
-	if c != nil && c.Lint != nil {
-		return c.Lint.CloseWriter
-	}
-	return nil
 }
 
 // IsLintSkipGenerated returns true if generated files should be skipped across lint checks (default false).
@@ -440,10 +358,8 @@ func (c *Config) DroppedErrorsSkipGenerated() bool {
 
 // DroppedErrorsUseDefaultExcludes returns true if default exclusions should be used (default true).
 func (c *Config) DroppedErrorsUseDefaultExcludes() bool {
-	if c.Lint != nil && c.Lint.DroppedErrors != nil {
-		if c.Lint.DroppedErrors.UseDefaultExcludes != nil {
-			return *c.Lint.DroppedErrors.UseDefaultExcludes
-		}
+	if de := c.DroppedErrors(); de != nil && de.UseDefaultExcludes != nil {
+		return *de.UseDefaultExcludes
 	}
 	return true
 }
@@ -451,8 +367,8 @@ func (c *Config) DroppedErrorsUseDefaultExcludes() bool {
 // DroppedErrorsGOOS returns the list of GOOS targets to check.
 // Default is host plus "linux" (or just "linux" if host is linux).
 func (c *Config) DroppedErrorsGOOS() []string {
-	if c.Lint != nil && c.Lint.DroppedErrors != nil && len(c.Lint.DroppedErrors.GOOS) > 0 {
-		return c.Lint.DroppedErrors.GOOS
+	if de := c.DroppedErrors(); de != nil && len(de.GOOS) > 0 {
+		return de.GOOS
 	}
 	host := runtime.GOOS
 	if host == "linux" {

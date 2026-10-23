@@ -22,7 +22,6 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
-	"golang.org/x/tools/go/analysis"
 )
 
 // IsGenerated reports whether the AST file represents generated code per https://go.dev/s/generatedcode.
@@ -68,8 +67,8 @@ type Policy struct {
 }
 
 // NewPolicy creates a Policy with eagerly compiled ignoreList to avoid data races.
-func NewPolicy(skipGenerated bool, skipTests bool, skipGlobs []string, repoRoot string) *Policy {
-	p := &Policy{
+func NewPolicy(skipGenerated bool, skipTests bool, skipGlobs []string, repoRoot string) Policy {
+	p := Policy{
 		SkipGenerated: skipGenerated,
 		SkipTests:     skipTests,
 		SkipVendored:  true,
@@ -82,7 +81,7 @@ func NewPolicy(skipGenerated bool, skipTests bool, skipGlobs []string, repoRoot 
 	return p
 }
 
-func (p *Policy) isVendored(filename string) bool {
+func (p Policy) isVendored(filename string) bool {
 	relPath := filename
 	if p.RepoRoot != "" {
 		if rel, err := filepath.Rel(p.RepoRoot, filename); err == nil && !strings.HasPrefix(rel, "..") {
@@ -93,10 +92,7 @@ func (p *Policy) isVendored(filename string) bool {
 }
 
 // ShouldSkip reports whether a file should be skipped.
-func (p *Policy) ShouldSkip(filename string, file *ast.File) bool {
-	if p == nil {
-		return false
-	}
+func (p Policy) ShouldSkip(filename string, file *ast.File) bool {
 	if p.SkipTests && IsTest(filename) {
 		return true
 	}
@@ -106,14 +102,18 @@ func (p *Policy) ShouldSkip(filename string, file *ast.File) bool {
 	if p.SkipGenerated && IsGenerated(file) {
 		return true
 	}
-	if p.ignoreList != nil && filename != "" {
+	ignoreList := p.ignoreList
+	if ignoreList == nil && len(p.SkipGlobs) > 0 {
+		ignoreList = walker.NewIgnoreList(p.SkipGlobs)
+	}
+	if ignoreList != nil && filename != "" {
 		relPath := filename
 		if p.RepoRoot != "" {
 			if rel, err := filepath.Rel(p.RepoRoot, filename); err == nil && !strings.HasPrefix(rel, "..") {
 				relPath = rel
 			}
 		}
-		if p.ignoreList.ShouldIgnore(relPath, false) {
+		if ignoreList.ShouldIgnore(relPath, false) {
 			return true
 		}
 	}
@@ -121,8 +121,8 @@ func (p *Policy) ShouldSkip(filename string, file *ast.File) bool {
 }
 
 // ShouldSkipAST reports whether an AST file in an analysis pass should be skipped.
-func (p *Policy) ShouldSkipAST(fset *token.FileSet, file *ast.File) bool {
-	if p == nil || file == nil {
+func (p Policy) ShouldSkipAST(fset *token.FileSet, file *ast.File) bool {
+	if file == nil {
 		return false
 	}
 	var filename string
@@ -130,60 +130,4 @@ func (p *Policy) ShouldSkipAST(fset *token.FileSet, file *ast.File) bool {
 		filename = fset.Position(file.Pos()).Filename
 	}
 	return p.ShouldSkip(filename, file)
-}
-
-// Resettable is implemented by flags that can be reset to their default state between runs.
-type Resettable interface {
-	Reset()
-}
-
-// StringListFlag implements flag.Value for repeated or comma-separated string flags.
-type StringListFlag []string
-
-func (s *StringListFlag) Reset() {
-	*s = nil
-}
-
-func (s *StringListFlag) String() string {
-	return strings.Join(*s, ",")
-}
-
-func (s *StringListFlag) Set(val string) error {
-	if val == "" {
-		*s = nil
-		return nil
-	}
-	for _, part := range strings.Split(val, ",") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			*s = append(*s, part)
-		}
-	}
-	return nil
-}
-
-// PolicyFlags holds flag values registered for an analyzer.
-type PolicyFlags struct {
-	SkipGenerated bool
-	SkipTests     bool
-	SkipGlobs     StringListFlag
-	RepoRoot      string
-}
-
-// NewPolicy constructs a Policy from the parsed PolicyFlags.
-func (pf *PolicyFlags) NewPolicy() *Policy {
-	return NewPolicy(pf.SkipGenerated, pf.SkipTests, pf.SkipGlobs, pf.RepoRoot)
-}
-
-// RegisterFlags registers the standard file filtering flags (-skip-generated, -skip-tests, -skip-glob, -repo-root) on an analyzer.
-func RegisterFlags(analyzer *analysis.Analyzer, defaultSkipGenerated bool, defaultSkipTests bool) *PolicyFlags {
-	pf := &PolicyFlags{
-		SkipGenerated: defaultSkipGenerated,
-		SkipTests:     defaultSkipTests,
-	}
-	analyzer.Flags.BoolVar(&pf.SkipGenerated, "skip-generated", defaultSkipGenerated, "skip generated files")
-	analyzer.Flags.BoolVar(&pf.SkipTests, "skip-tests", defaultSkipTests, "skip _test.go files")
-	analyzer.Flags.Var(&pf.SkipGlobs, "skip-glob", "glob pattern to skip (can be repeated or comma-separated)")
-	analyzer.Flags.StringVar(&pf.RepoRoot, "repo-root", "", "repository root directory for relativizing skip globs")
-	return pf
 }

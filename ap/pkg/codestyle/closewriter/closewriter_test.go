@@ -22,16 +22,10 @@ import (
 
 func TestAll(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, Analyzer, "a")
+	analysistest.Run(t, testdata, NewAnalyzer(Config{}), "a")
 }
 
 func TestConfiguredType(t *testing.T) {
 	testdata := analysistest.TestData()
-	if err := Analyzer.Flags.Set("type", "example.com/custom.MyWriter"); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = Analyzer.Flags.Set("type", "")
-	}()
-	analysistest.Run(t, testdata, Analyzer, "b")
+	analysistest.Run(t, testdata, NewAnalyzer(Config{Types: []string{"example.com/custom.MyWriter"}}), "b")
 }

@@ -17,30 +17,27 @@ package unused
 import (
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis/analysistest"
 )
 
 func TestUnused(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, Analyzer, "unused_test")
+	analysistest.Run(t, testdata, NewAnalyzer(Config{}), "unused_test")
 }
 
 func TestUnusedParameters(t *testing.T) {
 	testdata := analysistest.TestData()
-	Analyzer.Flags.Set("check-parameters", "true")
-	defer Analyzer.Flags.Set("check-parameters", "false")
-	analysistest.Run(t, testdata, Analyzer, "unused_params")
+	analysistest.Run(t, testdata, NewAnalyzer(Config{CheckParameters: true}), "unused_params")
 }
 
 func TestUnused_GeneratedDefault(t *testing.T) {
 	testdata := analysistest.TestData()
 	// unused defaults to skipping generated files
-	analysistest.Run(t, testdata, Analyzer, "generated_skip")
+	analysistest.Run(t, testdata, NewAnalyzer(Config{Policy: fileset.NewPolicy(true, false, nil, "")}), "generated_skip")
 }
 
 func TestUnused_GeneratedCheckWhenNotSkipped(t *testing.T) {
 	testdata := analysistest.TestData()
-	Analyzer.Flags.Set("skip-generated", "false")
-	defer Analyzer.Flags.Set("skip-generated", "true")
-	analysistest.Run(t, testdata, Analyzer, "generated_check")
+	analysistest.Run(t, testdata, NewAnalyzer(Config{Policy: fileset.NewPolicy(false, false, nil, "")}), "generated_check")
 }

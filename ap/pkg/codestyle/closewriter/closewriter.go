@@ -37,59 +37,31 @@ var DefaultTypes = []string{
 	"io.WriteCloser",
 }
 
-// TypeListFlag implements flag.Value for repeated or comma-separated type flags.
-type TypeListFlag []string
-
-func (t *TypeListFlag) Reset() {
-	*t = nil
+// Config holds configuration options for the closewriter analyzer.
+type Config struct {
+	fileset.Policy
+	Types []string
 }
 
-func (t *TypeListFlag) String() string {
-	return strings.Join(*t, ",")
-}
-
-func (t *TypeListFlag) Set(val string) error {
-	if val == "" {
-		*t = nil
-		return nil
+// NewAnalyzer creates a closewriter analyzer configured with cfg.
+func NewAnalyzer(cfg Config) *analysis.Analyzer {
+	return &analysis.Analyzer{
+		Name: "closewriter",
+		Doc:  "check for Close() errors on writers dropped or only logged",
+		Run: func(pass *analysis.Pass) (any, error) {
+			return run(pass, cfg)
+		},
 	}
-	for _, part := range strings.Split(val, ",") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			*t = append(*t, part)
-		}
-	}
-	return nil
 }
 
-var (
-	typesFlag   TypeListFlag
-	policyFlags *fileset.PolicyFlags
-)
-
-// Analyzer checks for Close() errors on writers that are dropped or only logged.
-var Analyzer = &analysis.Analyzer{
-	Name: "closewriter",
-	Doc:  "check for Close() errors on writers dropped or only logged",
-	Run:  run,
-}
-
-func init() {
-	Analyzer.Flags.Var(&typesFlag, "type", "writer type whose Close flushes (can be repeated or comma-separated; replaces default list)")
-	Analyzer.Flags.Var(&typesFlag, "types", "writer type whose Close flushes (can be repeated or comma-separated; replaces default list)")
-	policyFlags = fileset.RegisterFlags(Analyzer, false, false)
-}
-
-func run(pass *analysis.Pass) (any, error) {
-	policy := policyFlags.NewPolicy()
-
+func run(pass *analysis.Pass, cfg Config) (any, error) {
 	configuredTypes := DefaultTypes
-	if len(typesFlag) > 0 {
-		configuredTypes = typesFlag
+	if len(cfg.Types) > 0 {
+		configuredTypes = cfg.Types
 	}
 
 	for _, file := range pass.Files {
-		if policy.ShouldSkipAST(pass.Fset, file) {
+		if cfg.Policy.ShouldSkipAST(pass.Fset, file) {
 			continue
 		}
 

@@ -21,21 +21,18 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-var Analyzer = &analysis.Analyzer{
-	Name: "replaceEmptyInterfaceWithAny",
-	Doc:  "check for use of interface{} where any could be used",
-	Run:  run,
+// NewAnalyzer creates an any analyzer configured with policy.
+func NewAnalyzer(policy fileset.Policy) *analysis.Analyzer {
+	return &analysis.Analyzer{
+		Name: "replaceEmptyInterfaceWithAny",
+		Doc:  "check for use of interface{} where any could be used",
+		Run: func(pass *analysis.Pass) (any, error) {
+			return run(pass, policy)
+		},
+	}
 }
 
-var policyFlags *fileset.PolicyFlags
-
-func init() {
-	policyFlags = fileset.RegisterFlags(Analyzer, true, false)
-}
-
-func run(pass *analysis.Pass) (any, error) {
-	policy := policyFlags.NewPolicy()
-
+func run(pass *analysis.Pass, policy fileset.Policy) (any, error) {
 	for _, f := range pass.Files {
 		if policy.ShouldSkipAST(pass.Fset, f) {
 			continue

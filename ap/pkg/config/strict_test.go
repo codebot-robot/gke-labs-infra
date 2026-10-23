@@ -319,13 +319,6 @@ lint:
 	if !toi.IsError() {
 		t.Errorf("expected IsError to be true")
 	}
-	toic := cfg.TestOnlyImports()
-	if toic == nil {
-		t.Fatalf("expected TestOnlyImports to not be nil")
-	}
-	if len(toic.Packages) != 1 || toic.Packages[0] != "github.com/google/go-cmp" {
-		t.Errorf("expected TestOnlyImports packages [github.com/google/go-cmp], got %v", toic.Packages)
-	}
 	if toi.SkipGeneratedOverride() == nil || *toi.SkipGeneratedOverride() != true {
 		t.Errorf("expected TestOnlyImports.SkipGenerated to be true")
 	}
@@ -339,13 +332,6 @@ lint:
 	}
 	if !cw.IsError() {
 		t.Errorf("expected CloseWriter.IsError to be true")
-	}
-	cwc := cfg.CloseWriter()
-	if cwc == nil {
-		t.Fatalf("expected CloseWriter to not be nil")
-	}
-	if len(cwc.Types) != 1 || cwc.Types[0] != "*bufio.Writer" {
-		t.Errorf("expected CloseWriter types [*bufio.Writer], got %v", cwc.Types)
 	}
 	if cw.SkipGeneratedOverride() == nil || *cw.SkipGeneratedOverride() != false {
 		t.Errorf("expected CloseWriter.SkipGenerated to be false")

@@ -15,18 +15,15 @@
 package main
 
 import (
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/any"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/droppederrors"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/testcontext"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/unused"
+	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/multichecker"
 )
 
 func main() {
-	multichecker.Main(
-		unused.Analyzer,
-		any.Analyzer,
-		testcontext.Analyzer,
-		droppederrors.Analyzer,
-	)
+	var analyzers []*analysis.Analyzer
+	analyzers = append(analyzers, codestyle.PlainAnalyzers()...)
+	analyzers = append(analyzers, droppederrors.Analyzer)
+	multichecker.Main(analyzers...)
 }

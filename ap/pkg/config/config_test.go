@@ -113,18 +113,12 @@ func TestLoadDefault(t *testing.T) {
 	if !toi.IsError() {
 		t.Errorf("expected default testOnlyImports error to be true (error mode)")
 	}
-	if cfg.TestOnlyImports() != nil {
-		t.Errorf("expected default testOnlyImports config to be nil, got %v", cfg.TestOnlyImports())
-	}
 	cw := cfg.Linter("closeWriter")
 	if !cw.IsEnabled() {
 		t.Errorf("expected default closeWriter enabled to be true")
 	}
 	if !cw.IsError() {
 		t.Errorf("expected default closeWriter error to be true (error mode)")
-	}
-	if cfg.CloseWriter() != nil {
-		t.Errorf("expected default closeWriter config to be nil, got %v", cfg.CloseWriter())
 	}
 }
 
@@ -166,16 +160,8 @@ lint:
 	if cw.IsError() {
 		t.Errorf("expected closeWriter not to be error mode (warn)")
 	}
-	cwc := cfg.CloseWriter()
-	if cwc == nil {
-		t.Fatalf("expected CloseWriter to not be nil")
-	}
-	if cwc.Mode != "warn" {
-		t.Errorf("expected mode warn, got %q", cwc.Mode)
-	}
-	types := cwc.Types
-	if len(types) != 2 || types[0] != "*bufio.Writer" || types[1] != "example.com/custom.MyWriter" {
-		t.Errorf("unexpected types list: %v", types)
+	if cw.GetMode() != "warn" {
+		t.Errorf("expected mode warn, got %q", cw.GetMode())
 	}
 	if cw.SkipGeneratedOverride() == nil || *cw.SkipGeneratedOverride() != true {
 		t.Errorf("expected skipGenerated to be true")
@@ -253,16 +239,8 @@ lint:
 	if toi.IsError() {
 		t.Errorf("expected testOnlyImports not to be error mode (warn)")
 	}
-	toic := cfg.TestOnlyImports()
-	if toic == nil {
-		t.Fatalf("expected TestOnlyImports to not be nil")
-	}
-	if toic.Mode != "warn" {
-		t.Errorf("expected mode warn, got %q", toic.Mode)
-	}
-	pkgs := toic.Packages
-	if len(pkgs) != 2 || pkgs[0] != "github.com/google/go-cmp" || pkgs[1] != "example.com/custom" {
-		t.Errorf("unexpected packages list: %v", pkgs)
+	if toi.GetMode() != "warn" {
+		t.Errorf("expected mode warn, got %q", toi.GetMode())
 	}
 	if toi.SkipGeneratedOverride() == nil || *toi.SkipGeneratedOverride() != true {
 		t.Errorf("expected skipGenerated to be true")
@@ -401,10 +379,10 @@ lint:
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	if cfg.IsUnusedEnabled() {
+	if cfg.Linter("unused").IsEnabled() {
 		t.Errorf("expected unused to be disabled when mode is ignore")
 	}
-	if cfg.IsReplaceEmptyInterfaceWithAnyEnabled() {
+	if cfg.Linter("replaceEmptyInterfaceWithAny").IsEnabled() {
 		t.Errorf("expected replaceEmptyInterfaceWithAny to be disabled when mode is ignore")
 	}
 }

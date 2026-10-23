@@ -429,6 +429,73 @@ lint:
 			t.Errorf("expected replaceEmptyInterfaceWithAny SkipTests to be true")
 		}
 	})
+
+	t.Run("unusedparameters_mode_error_enables_parameter_checking", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module testmod\n\ngo 1.27\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc Foo(unusedParam int) {}\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		apDir := filepath.Join(dir, ".ap")
+		if err := os.Mkdir(apDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		yamlContent := `
+lint:
+  unusedparameters:
+    mode: error
+`
+		if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+			t.Fatal(err)
+		}
+		r, err := repo.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		taskGroup, err := LintTasks(r, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		at := findAnalyzersTask(taskGroup)
+		if at == nil {
+			t.Fatalf("expected AnalyzersTask to be found")
+		}
+		err = at.Run(t.Context(), &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r})
+		if err == nil {
+			t.Fatalf("expected unused parameter violation, got nil")
+		}
+		if !strings.Contains(err.Error(), "unused check failed") {
+			t.Errorf("expected error to mention unused check failed, got %v", err)
+		}
+	})
+
+	t.Run("unusedparameters_default_ignores_parameter_checking", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module testmod\n\ngo 1.27\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc Foo(unusedParam int) {}\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		r, err := repo.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		taskGroup, err := LintTasks(r, dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		at := findAnalyzersTask(taskGroup)
+		if at == nil {
+			t.Fatalf("expected AnalyzersTask to be found")
+		}
+		err = at.Run(t.Context(), &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r})
+		if err != nil {
+			t.Fatalf("expected no violation when unusedparameters is not enabled, got %v", err)
+		}
+	})
 }
 
 func TestLintTasks_TestOnlyImports(t *testing.T) {

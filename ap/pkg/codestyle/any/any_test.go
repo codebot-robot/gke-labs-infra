@@ -17,23 +17,22 @@ package any
 import (
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis/analysistest"
 )
 
 func TestAny(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, Analyzer, "any_test")
+	analysistest.Run(t, testdata, NewAnalyzer(fileset.Policy{}), "any_test")
 }
 
 func TestAny_GeneratedDefault(t *testing.T) {
 	testdata := analysistest.TestData()
 	// any defaults to skipping generated files
-	analysistest.Run(t, testdata, Analyzer, "generated_skip")
+	analysistest.Run(t, testdata, NewAnalyzer(fileset.NewPolicy(true, false, nil, "")), "generated_skip")
 }
 
 func TestAny_GeneratedCheckWhenNotSkipped(t *testing.T) {
 	testdata := analysistest.TestData()
-	Analyzer.Flags.Set("skip-generated", "false")
-	defer Analyzer.Flags.Set("skip-generated", "true")
-	analysistest.Run(t, testdata, Analyzer, "generated_check")
+	analysistest.Run(t, testdata, NewAnalyzer(fileset.NewPolicy(false, false, nil, "")), "generated_check")
 }

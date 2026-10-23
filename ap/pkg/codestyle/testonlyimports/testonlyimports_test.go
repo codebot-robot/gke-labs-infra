@@ -22,16 +22,10 @@ import (
 
 func TestAll(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, Analyzer, "a")
+	analysistest.Run(t, testdata, NewAnalyzer(Config{}), "a")
 }
 
 func TestConfiguredPackage(t *testing.T) {
 	testdata := analysistest.TestData()
-	if err := Analyzer.Flags.Set("package", "example.com/extra"); err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = Analyzer.Flags.Set("package", "")
-	}()
-	analysistest.Run(t, testdata, Analyzer, "b")
+	analysistest.Run(t, testdata, NewAnalyzer(Config{Packages: []string{"example.com/extra"}}), "b")
 }
