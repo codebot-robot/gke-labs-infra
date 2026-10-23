@@ -19,15 +19,19 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
@@ -258,10 +262,16 @@ func resolvePinnedProtocRelease(ctx context.Context, version string) (resolvedVe
 	tagURL := fmt.Sprintf("%s/repos/protocolbuffers/protobuf/releases/tags/v%s", strings.TrimRight(apiBase, "/"), resolvedVer)
 	rel, apiErr := fetchGitHubRelease(ctx, tagURL)
 	if apiErr != nil {
+		if isRateLimitError(apiErr) {
+			return "", "", "", apiErr
+		}
 		tagURL = fmt.Sprintf("%s/repos/protocolbuffers/protobuf/releases/tags/%s", strings.TrimRight(apiBase, "/"), resolvedVer)
 		var retryErr error
 		rel, retryErr = fetchGitHubRelease(ctx, tagURL)
 		if retryErr != nil {
+			if isRateLimitError(retryErr) {
+				return "", "", "", retryErr
+			}
 			return "", "", "", fmt.Errorf("failed to fetch release for protoc %s: %w", resolvedVer, apiErr)
 		}
 	}
@@ -517,21 +527,127 @@ func newGitHubRequest(ctx context.Context, url string) (*http.Request, error) {
 	return req, nil
 }
 
+// RateLimitError represents a rate limit failure from GitHub API.
+type RateLimitError struct {
+	msg string
+}
+
+func (e *RateLimitError) Error() string {
+	return e.msg
+}
+
+func isRateLimitError(err error) bool {
+	var rle *RateLimitError
+	return errors.As(err, &rle)
+}
+
+func closeResponseBody(resp *http.Response) {
+	if resp != nil && resp.Body != nil {
+		if err := resp.Body.Close(); err != nil {
+			klog.V(2).Infof("failed to close response body: %v", err)
+		}
+	}
+}
+
+var (
+	gitHubRetryBackoffs = []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}
+	nowFunc             = time.Now
+)
+
+const gitHubMaxAttempts = 3
+
+func isRateLimitedResponse(resp *http.Response) bool {
+	if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusTooManyRequests {
+		return false
+	}
+	if strings.TrimSpace(resp.Header.Get("X-RateLimit-Remaining")) == "0" {
+		return true
+	}
+	if strings.TrimSpace(resp.Header.Get("Retry-After")) != "" {
+		return true
+	}
+	return false
+}
+
+func buildRateLimitError(resp *http.Response) error {
+	var resetInfo string
+	if resetStr := resp.Header.Get("X-RateLimit-Reset"); resetStr != "" {
+		if resetUnix, err := strconv.ParseInt(strings.TrimSpace(resetStr), 10, 64); err == nil && resetUnix > 0 {
+			resetTime := time.Unix(resetUnix, 0).UTC()
+			diff := resetTime.Sub(nowFunc())
+			mins := int(math.Round(diff.Minutes()))
+			if mins < 0 {
+				mins = 0
+			}
+			resetInfo = fmt.Sprintf(" (resets at %s, in %dm)", resetTime.Format("15:04 UTC"), mins)
+		}
+	}
+	return &RateLimitError{
+		msg: fmt.Sprintf("GitHub API rate limit exceeded%s; pin a protoc version listed in ap/pkg/tool/protoc/versions.yaml, or set GITHUB_TOKEN for this one command", resetInfo),
+	}
+}
+
+func doGitHubRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
+	client := scoped.HTTPClient(ctx)
+	var lastErr error
+
+	for attempt := 0; attempt < gitHubMaxAttempts; attempt++ {
+		if attempt > 0 {
+			backoff := 1 * time.Second
+			if attempt-1 < len(gitHubRetryBackoffs) {
+				backoff = gitHubRetryBackoffs[attempt-1]
+			}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		reqClone := req.Clone(ctx)
+		resp, err := client.Do(reqClone)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			lastErr = err
+			continue
+		}
+
+		if isRateLimitedResponse(resp) {
+			closeResponseBody(resp)
+			return nil, buildRateLimitError(resp)
+		}
+
+		if resp.StatusCode >= 500 && resp.StatusCode <= 599 {
+			if attempt < gitHubMaxAttempts-1 {
+				closeResponseBody(resp)
+				continue
+			}
+			return resp, nil
+		}
+
+		return resp, nil
+	}
+
+	return nil, lastErr
+}
+
 func fetchGitHubRelease(ctx context.Context, url string) (*githubRelease, error) {
 	req, err := newGitHubRequest(ctx, url)
 	if err != nil {
 		return nil, err
 	}
 
-	resp, err := scoped.HTTPClient(ctx).Do(req)
+	resp, err := doGitHubRequest(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			klog.V(2).Infof("failed to close response body: %v", err)
-		}
-	}()
+	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GET %s returned status %s", url, resp.Status)

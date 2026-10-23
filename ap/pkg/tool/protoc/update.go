@@ -27,9 +27,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"gopkg.in/yaml.v3"
-	"k8s.io/klog/v2"
 )
 
 // UpdateVersionsFile fetches protoc releases from the GitHub API and plugin versions
@@ -189,15 +187,11 @@ func fetchReleasesPage(ctx context.Context, url string) ([]githubRelease, string
 		return nil, "", fmt.Errorf("failed to create request for %s: %w", url, err)
 	}
 
-	resp, err := scoped.HTTPClient(ctx).Do(req)
+	resp, err := doGitHubRequest(ctx, req)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to query GitHub releases API: %w", err)
+		return nil, "", err
 	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close response body: %v", closeErr)
-		}
-	}()
+	defer closeResponseBody(resp)
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("GitHub releases API returned status %s for %s", resp.Status, url)
