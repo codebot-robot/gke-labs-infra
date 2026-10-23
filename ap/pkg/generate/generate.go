@@ -288,12 +288,12 @@ cd "${REPO_ROOT}"
 
 # Check for changes
 if [[ -n $(git status --porcelain) ]]; then
-  echo "Changes detected after running 'ap generate'. Please commit these changes."
+  echo "Changes detected after running 'ap generate'. Run '%s generate //...' and commit the result."
   echo "<hint_for_agent>Run '%s generate //...' to fix failures</hint_for_agent>"
   git status
   exit 1
 fi
-`, headerBlock, skipGuard, apCmd, apCmd)
+`, headerBlock, skipGuard, apCmd, apCmd, apCmd)
 	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
@@ -868,5 +868,5 @@ func writeFileIfChanged(path string, content []byte, perm os.FileMode) error {
 	if err == nil && bytes.Equal(existing, content) {
 		return nil
 	}
-	return os.WriteFile(path, content, perm)
+	return fileutils.WriteFileAtomic(path, content, perm)
 }

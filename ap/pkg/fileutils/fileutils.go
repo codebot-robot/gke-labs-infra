@@ -51,6 +51,62 @@ func CacheDir() (string, error) {
 	return filepath.Join(userCache, "ap"), nil
 }
 
+// writeAtomic creates a temporary file in filepath.Dir(dst) with pattern ".<base>-*.tmp",
+// runs writeFn, sets permissions, closes the file, and renames it to dst.
+// On any error, the temporary file is removed.
+func writeAtomic(dst string, perm os.FileMode, writeFn func(w *os.File) error) error {
+	dstDir := filepath.Dir(dst)
+	if err := os.MkdirAll(dstDir, 0755); err != nil {
+		return err
+	}
+
+	pattern := fmt.Sprintf(".%s-*.tmp", filepath.Base(dst))
+	tmpFile, err := os.CreateTemp(dstDir, pattern)
+	if err != nil {
+		return err
+	}
+	tmpName := tmpFile.Name()
+	var closed bool
+	defer func() {
+		if !closed {
+			if closeErr := tmpFile.Close(); closeErr != nil {
+				klog.V(2).Infof("failed to close temporary file %s: %v", tmpName, closeErr)
+			}
+		}
+		if rmErr := os.Remove(tmpName); rmErr != nil && !os.IsNotExist(rmErr) {
+			klog.V(2).Infof("failed to remove temporary file %s: %v", tmpName, rmErr)
+		}
+	}()
+
+	if err := writeFn(tmpFile); err != nil {
+		return err
+	}
+
+	if err := tmpFile.Chmod(perm); err != nil {
+		return err
+	}
+
+	closed = true
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close output file %s: %w", tmpName, err)
+	}
+
+	if err := os.Rename(tmpName, dst); err != nil {
+		return err
+	}
+	return nil
+}
+
+// WriteFileAtomic writes data to path atomically: write to a temp file in the target's
+// directory, set the target mode, close (error checked), then rename over the target.
+// Any failure removes the temporary file.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	return writeAtomic(path, perm, func(w *os.File) error {
+		_, err := w.Write(data)
+		return err
+	})
+}
+
 // CopyFile copies a file from src to dst atomically via a temporary file, preserving permissions and mtime.
 func CopyFile(src, dst string, perm os.FileMode) error {
 	in, err := os.Open(src)
@@ -68,42 +124,10 @@ func CopyFile(src, dst string, perm os.FileMode) error {
 		return err
 	}
 
-	dstDir := filepath.Dir(dst)
-	if err := os.MkdirAll(dstDir, 0755); err != nil {
+	if err := writeAtomic(dst, perm, func(w *os.File) error {
+		_, err := io.Copy(w, in)
 		return err
-	}
-
-	tmpFile, err := os.CreateTemp(dstDir, ".copy-*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpName := tmpFile.Name()
-	var closed bool
-	defer func() {
-		if !closed {
-			if closeErr := tmpFile.Close(); closeErr != nil {
-				klog.V(2).Infof("failed to close temporary file %s: %v", tmpName, closeErr)
-			}
-		}
-		if rmErr := os.Remove(tmpName); rmErr != nil && !os.IsNotExist(rmErr) {
-			klog.V(2).Infof("failed to remove temporary file %s: %v", tmpName, rmErr)
-		}
-	}()
-
-	if _, err := io.Copy(tmpFile, in); err != nil {
-		return err
-	}
-
-	if err := tmpFile.Chmod(perm); err != nil {
-		return err
-	}
-
-	closed = true
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close output file %s: %w", tmpName, err)
-	}
-
-	if err := os.Rename(tmpName, dst); err != nil {
+	}); err != nil {
 		return err
 	}
 
