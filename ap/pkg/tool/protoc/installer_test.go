@@ -16,7 +16,11 @@ package protoc
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -446,6 +450,133 @@ func TestDoGitHubRequest(t *testing.T) {
 				if resp.StatusCode != tt.wantStatus {
 					t.Errorf("got status %d, want %d", resp.StatusCode, tt.wantStatus)
 				}
+			}
+		})
+	}
+}
+
+func TestDoGitHubRequest_Cache(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", cacheDir)
+
+	var (
+		serverETag     string
+		serverBody     string
+		gotIfNoneMatch string
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotIfNoneMatch = r.Header.Get("If-None-Match")
+		if serverETag != "" && gotIfNoneMatch == serverETag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+		if serverETag != "" {
+			w.Header().Set("ETag", serverETag)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(serverBody))
+	}))
+	defer server.Close()
+
+	ctx := scoped.WithHTTPClient(t.Context(), server.Client())
+	hash := sha256.Sum256([]byte(server.URL))
+	expectedCacheFile := filepath.Join(cacheDir, "github", hex.EncodeToString(hash[:])+".json")
+
+	tests := []struct {
+		name            string
+		setupServer     func()
+		wantIfNoneMatch string
+		wantBody        string
+		wantCacheETag   string
+	}{
+		{
+			name: "first GET without If-None-Match -> 200 + ETag, entry written",
+			setupServer: func() {
+				serverETag = "\"etag-1\""
+				serverBody = `{"version":"1.0"}`
+			},
+			wantIfNoneMatch: "",
+			wantBody:        `{"version":"1.0"}`,
+			wantCacheETag:   "\"etag-1\"",
+		},
+		{
+			name: "second GET sends If-None-Match -> server answers 304 -> caller receives cached body",
+			setupServer: func() {
+				// Server state unchanged, will respond with 304
+			},
+			wantIfNoneMatch: "\"etag-1\"",
+			wantBody:        `{"version":"1.0"}`,
+			wantCacheETag:   "\"etag-1\"",
+		},
+		{
+			name: "200 with new ETag replaces entry",
+			setupServer: func() {
+				serverETag = "\"etag-2\""
+				serverBody = `{"version":"2.0"}`
+			},
+			wantIfNoneMatch: "\"etag-1\"",
+			wantBody:        `{"version":"2.0"}`,
+			wantCacheETag:   "\"etag-2\"",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.setupServer()
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL, nil)
+			if err != nil {
+				t.Fatalf("failed to create request: %v", err)
+			}
+
+			resp, err := doGitHubRequest(ctx, req)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			defer closeResponseBody(resp)
+
+			if gotIfNoneMatch != tt.wantIfNoneMatch {
+				t.Errorf("got If-None-Match %q, want %q", gotIfNoneMatch, tt.wantIfNoneMatch)
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("got status %d, want %d", resp.StatusCode, http.StatusOK)
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("failed to read response body: %v", err)
+			}
+			if string(body) != tt.wantBody {
+				t.Errorf("got body %q, want %q", string(body), tt.wantBody)
+			}
+
+			data, err := os.ReadFile(expectedCacheFile)
+			if err != nil {
+				t.Fatalf("failed to read cache file %s: %v", expectedCacheFile, err)
+			}
+
+			var entry gitHubCacheEntry
+			if err := json.Unmarshal(data, &entry); err != nil {
+				t.Fatalf("failed to parse cache entry: %v", err)
+			}
+
+			if entry.ETag != tt.wantCacheETag {
+				t.Errorf("cached ETag = %q, want %q", entry.ETag, tt.wantCacheETag)
+			}
+			if entry.URL != server.URL {
+				t.Errorf("cached URL = %q, want %q", entry.URL, server.URL)
+			}
+			if entry.Status != http.StatusOK {
+				t.Errorf("cached Status = %d, want %d", entry.Status, http.StatusOK)
+			}
+			if string(entry.bodyBytes()) != tt.wantBody {
+				t.Errorf("cached body = %q, want %q", string(entry.bodyBytes()), tt.wantBody)
+			}
+			if entry.FetchedAt == "" {
+				t.Errorf("cached FetchedAt is empty")
 			}
 		})
 	}

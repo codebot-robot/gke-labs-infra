@@ -15,6 +15,7 @@
 package protoc
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -597,17 +598,123 @@ func buildRateLimitError(resp *http.Response) error {
 	}
 }
 
+type gitHubCacheEntry struct {
+	URL       string          `json:"url"`
+	ETag      string          `json:"etag"`
+	FetchedAt string          `json:"fetched_at"`
+	Status    int             `json:"status"`
+	Body      json.RawMessage `json:"body"`
+}
+
+func (e *gitHubCacheEntry) bodyBytes() []byte {
+	return []byte(e.Body)
+}
+
+func gitHubCachePath(rawURL string) (string, error) {
+	cacheDir, err := fileutils.CacheDir()
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256([]byte(rawURL))
+	key := hex.EncodeToString(hash[:])
+	return filepath.Join(cacheDir, "github", key+".json"), nil
+}
+
+func readGitHubCacheEntry(rawURL string) (*gitHubCacheEntry, string, error) {
+	cachePath, err := gitHubCachePath(rawURL)
+	if err != nil {
+		return nil, "", err
+	}
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		return nil, cachePath, err
+	}
+	var entry gitHubCacheEntry
+	if err := json.Unmarshal(data, &entry); err != nil {
+		return nil, cachePath, err
+	}
+	if entry.ETag == "" || entry.Status != http.StatusOK {
+		return nil, cachePath, nil
+	}
+	return &entry, cachePath, nil
+}
+
+func writeGitHubCacheEntry(cachePath, rawURL, etag string, body []byte) error {
+	entry := gitHubCacheEntry{
+		URL:       rawURL,
+		ETag:      etag,
+		FetchedAt: nowFunc().UTC().Format(time.RFC3339),
+		Status:    http.StatusOK,
+		Body:      json.RawMessage(body),
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("failed to marshal cache entry: %w", err)
+	}
+	if err := fileutils.WriteFileAtomic(cachePath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write cache file %s: %w", cachePath, err)
+	}
+	return nil
+}
+
 func doGitHubRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
+	isGet := req.Method == http.MethodGet || req.Method == ""
+	var cachePath string
+	var cachedEntry *gitHubCacheEntry
+
+	reqClone := req.Clone(ctx)
+
+	if isGet && req.URL != nil && req.URL.String() != "" {
+		entry, p, err := readGitHubCacheEntry(req.URL.String())
+		cachePath = p
+		if err != nil {
+			klog.V(2).Infof("cache lookup for %s: %v", req.URL.String(), err)
+		} else if entry != nil {
+			cachedEntry = entry
+			if reqClone.Header.Get("If-None-Match") == "" {
+				reqClone.Header.Set("If-None-Match", entry.ETag)
+			}
+		}
+	}
+
 	client := scoped.HTTPClient(ctx)
 	for attempt := 0; ; attempt++ {
-		resp, err := client.Do(req.Clone(ctx))
+		resp, err := client.Do(reqClone.Clone(ctx))
 		if err == nil && isRateLimitedResponse(resp) {
 			closeResponseBody(resp)
 			return nil, buildRateLimitError(resp)
 		}
 		retryable := err != nil || resp.StatusCode >= 500
 		if !retryable || attempt == len(gitHubRetryBackoffs) {
-			return resp, err
+			if err != nil {
+				return nil, err
+			}
+			if isGet && resp.StatusCode == http.StatusNotModified && cachedEntry != nil {
+				closeResponseBody(resp)
+				resp.StatusCode = http.StatusOK
+				resp.Status = "200 OK"
+				resp.Body = io.NopCloser(bytes.NewReader(cachedEntry.bodyBytes()))
+				if resp.Header.Get("Content-Type") == "" {
+					resp.Header.Set("Content-Type", "application/json")
+				}
+				return resp, nil
+			}
+			if isGet && cachePath != "" && resp.StatusCode == http.StatusOK {
+				etag := strings.TrimSpace(resp.Header.Get("ETag"))
+				if etag != "" {
+					body, readErr := io.ReadAll(resp.Body)
+					closeResponseBody(resp)
+					if readErr != nil {
+						return nil, fmt.Errorf("failed to read response body: %w", readErr)
+					}
+					resp.Body = io.NopCloser(bytes.NewReader(body))
+
+					if err := writeGitHubCacheEntry(cachePath, req.URL.String(), etag, body); err != nil {
+						klog.V(2).Infof("failed to write github cache: %v", err)
+					}
+				}
+			}
+			return resp, nil
 		}
 		closeResponseBody(resp)
 		select {
