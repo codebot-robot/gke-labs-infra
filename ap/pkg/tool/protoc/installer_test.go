@@ -27,6 +27,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"k8s.io/klog/v2"
 )
 
@@ -66,12 +67,10 @@ func (f *failTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 }
 
 func TestEnsureProtoc_Resolution(t *testing.T) {
-	oldClient := HTTPClient
-	HTTPClient = &http.Client{Transport: &failTransport{}}
-	defer func() { HTTPClient = oldClient }()
+	ctx := scoped.WithHTTPClient(t.Context(), &http.Client{Transport: &failTransport{}})
 
 	// 1. "latest" resolves to table entry (36.2) with no network
-	ver, downloadURL, digest, err := resolveProtocRelease(t.Context(), "latest")
+	ver, downloadURL, digest, err := resolveProtocRelease(ctx, "latest")
 	if err != nil {
 		t.Fatalf("resolveProtocRelease(latest) failed: %v", err)
 	}
@@ -86,7 +85,7 @@ func TestEnsureProtoc_Resolution(t *testing.T) {
 	}
 
 	// 2. Listed version (35.1) resolves to table entry with no network
-	ver, downloadURL, digest, err = resolveProtocRelease(t.Context(), "35.1")
+	ver, downloadURL, digest, err = resolveProtocRelease(ctx, "35.1")
 	if err != nil {
 		t.Fatalf("resolveProtocRelease(35.1) failed: %v", err)
 	}
@@ -109,7 +108,7 @@ func TestEnsureProtoc_Resolution(t *testing.T) {
 		klog.LogToStderr(true)
 	}()
 
-	_, _, _, err = resolveProtocRelease(t.Context(), "24.4")
+	_, _, _, err = resolveProtocRelease(ctx, "24.4")
 	if err == nil {
 		t.Fatal("expected error from failed network request on unlisted version, got nil")
 	}
@@ -280,14 +279,10 @@ func TestFetchGitHubRelease_AuthorizationHeader(t *testing.T) {
 	}))
 	defer server.Close()
 
-	origClient := HTTPClient
-	HTTPClient = server.Client()
-	defer func() {
-		HTTPClient = origClient
-	}()
+	ctx := scoped.WithHTTPClient(t.Context(), server.Client())
 
 	t.Setenv("GITHUB_TOKEN", "test-bearer-token")
-	_, err := fetchGitHubRelease(t.Context(), server.URL)
+	_, err := fetchGitHubRelease(ctx, server.URL)
 	if err != nil {
 		t.Fatalf("fetchGitHubRelease failed: %v", err)
 	}
