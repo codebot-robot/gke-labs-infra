@@ -16,6 +16,8 @@
     go run github.com/gke-labs/gke-labs-infra/ap@latest init --copyright-holder "Your Organization"
     ```
 
+    Note that `go run github.com/gke-labs/gke-labs-infra/ap@latest` is the intended invocation; pinning `version:` in `.ap/ap.yaml` is not expected yet.
+
     This command creates:
     *   `.ap/ap.yaml` configured with `version: latest`.
     *   `.ap/go.yaml` configuring Go formatting (`gofmt`) and `govet`.
@@ -33,7 +35,7 @@
     go run github.com/gke-labs/gke-labs-infra/ap@latest generate
     ```
 
-    Note: `ap generate` also runs code formatting and stamps license headers across your sources (equivalent to running `ap fmt`).
+    Note: `ap generate` also runs code formatting and stamps license headers across your sources (equivalent to running `ap format`).
 
     This command will:
     *   Create the `dev/ci/presubmits/` directory if it doesn't exist.
