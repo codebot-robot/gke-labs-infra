@@ -16,11 +16,28 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/protoc"
 )
+
+type blockTransport struct {
+	blockedHost string
+	called      bool
+}
+
+func (b *blockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if strings.Contains(req.URL.Host, b.blockedHost) {
+		b.called = true
+		return nil, fmt.Errorf("blocked request to %s: %s", b.blockedHost, req.URL)
+	}
+	return http.DefaultTransport.RoundTrip(req)
+}
 
 func TestToolProtoc_DryRun(t *testing.T) {
 	tempCache := t.TempDir()
@@ -76,6 +93,42 @@ func TestToolProtoc_DryRun(t *testing.T) {
 	}
 }
 
+func TestToolProtoc_ColdVersion_NoRequestToGitHubAPI(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping cold execution in short mode")
+	}
+
+	tempCache := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", tempCache)
+	tempRoot := t.TempDir()
+	t.Setenv("AP_ROOT", tempRoot)
+	t.Setenv("REPO_ROOT", tempRoot)
+
+	bt := &blockTransport{blockedHost: "api.github.com"}
+	oldClient := protoc.HTTPClient
+	protoc.HTTPClient = &http.Client{Transport: bt}
+	defer func() { protoc.HTTPClient = oldClient }()
+
+	rootCmd := BuildRootCommand()
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"tool", "protoc", "--", "--version"})
+
+	err := rootCmd.ExecuteContext(t.Context())
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error running ap tool protoc -- --version: %v", err)
+	}
+	if bt.called {
+		t.Fatal("cold ap tool protoc made a request to api.github.com")
+	}
+	if !strings.Contains(output, "36.2") {
+		t.Errorf("expected output to contain 36.2, got: %s", output)
+	}
+}
+
 func TestToolProtoc_RealExecution(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping real execution in short mode")
@@ -83,6 +136,9 @@ func TestToolProtoc_RealExecution(t *testing.T) {
 
 	tempCache := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", tempCache)
+	tempRoot := t.TempDir()
+	t.Setenv("AP_ROOT", tempRoot)
+	t.Setenv("REPO_ROOT", tempRoot)
 
 	rootCmd := BuildRootCommand()
 	buf := new(bytes.Buffer)
@@ -98,5 +154,21 @@ func TestToolProtoc_RealExecution(t *testing.T) {
 	}
 	if !strings.Contains(output, "libprotoc") && !strings.Contains(output, "protoc") {
 		t.Errorf("expected protoc version output, got: %s", output)
+	}
+}
+
+func TestToolUpdateProtocVersions_Command(t *testing.T) {
+	rootCmd := BuildRootCommand()
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"tool", "update-protoc-versions", "--help"})
+
+	err := rootCmd.ExecuteContext(t.Context())
+	if err != nil {
+		t.Fatalf("unexpected error running ap tool update-protoc-versions --help: %v", err)
+	}
+	if !strings.Contains(buf.String(), "update-protoc-versions") {
+		t.Errorf("expected help output to mention update-protoc-versions, got: %s", buf.String())
 	}
 }
