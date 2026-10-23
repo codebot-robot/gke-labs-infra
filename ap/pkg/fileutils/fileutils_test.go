@@ -16,9 +16,12 @@ package fileutils
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -75,5 +78,149 @@ func TestFileExists(t *testing.T) {
 		} else if errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("expected permission error, but error matched fs.ErrNotExist: %v", err)
 		}
+	}
+}
+
+func TestWriteFileAtomic(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(tmpDir, "file.txt")
+
+	// 1. Initial write: creates file, sets mode, leaves no temp files.
+	data1 := []byte("first content")
+	if err := WriteFileAtomic(targetPath, data1, 0640); err != nil {
+		t.Fatalf("WriteFileAtomic failed: %v", err)
+	}
+
+	gotData, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("failed to read file: %v", err)
+	}
+	if string(gotData) != string(data1) {
+		t.Errorf("got %q, want %q", string(gotData), string(data1))
+	}
+
+	info, err := os.Stat(targetPath)
+	if err != nil {
+		t.Fatalf("failed to stat file: %v", err)
+	}
+	if info.Mode().Perm() != 0640 {
+		t.Errorf("got perm %v, want %v", info.Mode().Perm(), os.FileMode(0640))
+	}
+	assertNoTempFiles(t, tmpDir)
+
+	// 2. Target replaced: replaces existing file, preserves new mode, leaves no temp files.
+	data2 := []byte("second replaced content")
+	if err := WriteFileAtomic(targetPath, data2, 0755); err != nil {
+		t.Fatalf("WriteFileAtomic replace failed: %v", err)
+	}
+
+	gotData, err = os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("failed to read replaced file: %v", err)
+	}
+	if string(gotData) != string(data2) {
+		t.Errorf("got %q, want %q", string(gotData), string(data2))
+	}
+
+	info, err = os.Stat(targetPath)
+	if err != nil {
+		t.Fatalf("failed to stat file: %v", err)
+	}
+	if info.Mode().Perm() != 0755 {
+		t.Errorf("got perm %v, want %v", info.Mode().Perm(), os.FileMode(0755))
+	}
+	assertNoTempFiles(t, tmpDir)
+
+	// 3. Failed write: renaming over a directory fails; verify no temp files left.
+	subDir := filepath.Join(tmpDir, "subDirTarget")
+	if err := os.Mkdir(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFileAtomic(subDir, []byte("data"), 0644); err == nil {
+		t.Fatalf("expected error when writing over a directory, got nil")
+	}
+	assertNoTempFiles(t, tmpDir)
+}
+
+func assertNoTempFiles(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("failed to read dir: %v", err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".tmp") {
+			t.Errorf("unexpected temp file found: %s", name)
+		}
+	}
+}
+
+func TestWriteFileAtomic_RunningScriptSelfRewrite(t *testing.T) {
+	if os.Getenv("TEST_HELPER_REWRITE") == "1" {
+		target := os.Getenv("TARGET_PATH")
+		newContent := []byte(os.Getenv("NEW_CONTENT"))
+		if err := WriteFileAtomic(target, newContent, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "WriteFileAtomic helper failed: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	bashPath, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash not found")
+	}
+
+	testBin, err := os.Executable()
+	if err != nil {
+		t.Fatalf("failed to determine test executable: %v", err)
+	}
+
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "self_rewriter.sh")
+	newContent := "#!/bin/bash\n# brand new generated script content\necho 'new output'\nexit 0\n"
+
+	// Initial script that runs the helper to rewrite itself, followed by commands to verify
+	// bash continues execution without syntax or offset errors.
+	initialScript := fmt.Sprintf(`#!/bin/bash
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Invoke the helper to rewrite this script in place via WriteFileAtomic
+"%s" -test.run=^TestWriteFileAtomic_RunningScriptSelfRewrite$
+
+# Ensure bash reads and executes subsequent lines
+echo "completed after self-rewrite"
+exit 0
+`, testBin)
+
+	if err := os.WriteFile(scriptPath, []byte(initialScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.CommandContext(t.Context(), bashPath, scriptPath)
+	cmd.Env = append(os.Environ(),
+		"TARGET_PATH="+scriptPath,
+		"NEW_CONTENT="+newContent,
+		"TEST_HELPER_REWRITE=1",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("script execution failed: %v\nOutput: %s", err, string(out))
+	}
+
+	if !strings.Contains(string(out), "completed after self-rewrite") {
+		t.Errorf("script output missing expected completion text; got:\n%s", string(out))
+	}
+
+	// Verify the script on disk now has the new content
+	gotContent, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("failed to read rewritten script: %v", err)
+	}
+	if string(gotContent) != newContent {
+		t.Errorf("script content mismatch after rewrite:\ngot:  %q\nwant: %q", string(gotContent), newContent)
 	}
 }

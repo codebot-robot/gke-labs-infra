@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
@@ -300,7 +301,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 		}
 		perturbedFiles = append(perturbedFiles, pf)
 
-		if err := os.WriteFile(f.Path, perturbed, info.Mode()); err != nil {
+		if err := fileutils.WriteFileAtomic(f.Path, perturbed, info.Mode()); err != nil {
 			return fmt.Errorf("failed to write perturbed file %s: %w", f.Path, err)
 		}
 	}
@@ -315,7 +316,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 			}
 			undone, ok := Undo(currentData, pf.marker, pf.isBinary, pf.wasEmpty)
 			if ok {
-				if err := os.WriteFile(pf.path, undone, pf.mode); err != nil {
+				if err := fileutils.WriteFileAtomic(pf.path, undone, pf.mode); err != nil {
 					klog.Errorf("failed to restore file %s: %v", pf.path, err)
 				}
 			}
@@ -407,6 +408,11 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 			sb.WriteString(f)
 			sb.WriteString("\n")
 		}
+		apCmd, err := GetApCommand(repoRoot, repoRoot)
+		if err != nil {
+			apCmd = "go run github.com/gke-labs/gke-labs-infra/ap@latest"
+		}
+		sb.WriteString(fmt.Sprintf("\nRun '%s generate //...' and commit the result.\n", apCmd))
 		return errors.New(sb.String())
 	}
 

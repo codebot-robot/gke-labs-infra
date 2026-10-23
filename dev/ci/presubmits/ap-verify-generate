@@ -27,7 +27,7 @@ go run ./ap generate --verify //...
 
 # Check for changes
 if [[ -n $(git status --porcelain) ]]; then
-  echo "Changes detected after running 'ap generate'. Please commit these changes."
+  echo "Changes detected after running 'ap generate'. Run 'go run ./ap generate //...' and commit the result."
   echo "<hint_for_agent>Run 'go run ./ap generate //...' to fix failures</hint_for_agent>"
   git status
   exit 1
