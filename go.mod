@@ -5,7 +5,7 @@ go 1.27.2
 toolchain go1.27.3
 
 require (
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	github.com/google/go-github/v81 v81.0.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/oauth2 v0.37.0
