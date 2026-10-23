@@ -18,13 +18,63 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"go/build/constraint"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 )
+
+var knownOS = map[string]bool{
+	"aix":       true,
+	"android":   true,
+	"darwin":    true,
+	"dragonfly": true,
+	"freebsd":   true,
+	"hurd":      true,
+	"illumos":   true,
+	"ios":       true,
+	"js":        true,
+	"linux":     true,
+	"nacl":      true,
+	"netbsd":    true,
+	"openbsd":   true,
+	"plan9":     true,
+	"solaris":   true,
+	"wasip1":    true,
+	"windows":   true,
+	"zos":       true,
+}
+
+var knownArch = map[string]bool{
+	"386":         true,
+	"amd64":       true,
+	"amd64p32":    true,
+	"arm":         true,
+	"armbe":       true,
+	"arm64":       true,
+	"arm64be":     true,
+	"loong64":     true,
+	"mips":        true,
+	"mipsle":      true,
+	"mips64":      true,
+	"mips64le":    true,
+	"mips64p32":   true,
+	"mips64p32le": true,
+	"ppc":         true,
+	"ppc64":       true,
+	"ppc64le":     true,
+	"riscv":       true,
+	"riscv64":     true,
+	"s390":        true,
+	"s390x":       true,
+	"sparc":       true,
+	"sparc64":     true,
+	"wasm":        true,
+}
 
 // File represents a file in the repository tree.
 type File struct {
@@ -41,6 +91,9 @@ type File struct {
 
 	hasGoGenerateOnce sync.Once
 	hasGoGenerate     bool
+
+	referencedGOOSOnce sync.Once
+	referencedGOOS     []string
 
 	hashOnce sync.Once
 	hash     string
@@ -262,9 +315,114 @@ func (f *File) Refresh() {
 	f.generatedHeader = ""
 	f.hasGoGenerateOnce = sync.Once{}
 	f.hasGoGenerate = false
+	f.referencedGOOSOnce = sync.Once{}
+	f.referencedGOOS = nil
 	f.hashOnce = sync.Once{}
 	f.hash = ""
 	f.hashErr = nil
+}
+
+// ReferencedGOOS returns any known GOOS values referenced by this Go file
+// via filename suffix or //go:build constraints.
+func (f *File) ReferencedGOOS() []string {
+	if !strings.HasSuffix(f.Name, ".go") {
+		return nil
+	}
+	f.referencedGOOSOnce.Do(func() {
+		f.referencedGOOS = f.scanReferencedGOOS()
+	})
+	return f.referencedGOOS
+}
+
+func (f *File) scanReferencedGOOS() []string {
+	found := make(map[string]bool)
+
+	// 1. Filename suffix matching (following Go build conventions)
+	if osTag := goosFromFilename(f.Name); osTag != "" {
+		found[osTag] = true
+	}
+
+	// 2. Build constraints parsed with go/build/constraint
+	data, err := os.ReadFile(f.Path)
+	if err != nil {
+		if len(found) == 0 {
+			return nil
+		}
+		res := make([]string, 0, len(found))
+		for goos := range found {
+			res = append(res, goos)
+		}
+		sort.Strings(res)
+		return res
+	}
+
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "package ") || strings.HasPrefix(trimmed, "package\t") {
+			break
+		}
+		if constraint.IsGoBuild(trimmed) || constraint.IsPlusBuild(trimmed) {
+			expr, err := constraint.Parse(trimmed)
+			if err != nil {
+				continue
+			}
+			collectConstraintTags(expr, found)
+		}
+	}
+
+	if len(found) == 0 {
+		return nil
+	}
+
+	res := make([]string, 0, len(found))
+	for goos := range found {
+		res = append(res, goos)
+	}
+	sort.Strings(res)
+	return res
+}
+
+func goosFromFilename(name string) string {
+	if !strings.HasSuffix(name, ".go") {
+		return ""
+	}
+	name = strings.TrimSuffix(name, ".go")
+	i := strings.Index(name, "_")
+	if i < 0 {
+		return ""
+	}
+	name = name[i:] // ignore everything before first _
+
+	l := strings.Split(name, "_")
+	if n := len(l); n > 0 && l[n-1] == "test" {
+		l = l[:n-1]
+	}
+	n := len(l)
+	if n >= 2 && knownOS[l[n-2]] && knownArch[l[n-1]] {
+		return l[n-2]
+	}
+	if n >= 1 && knownOS[l[n-1]] {
+		return l[n-1]
+	}
+	return ""
+}
+
+func collectConstraintTags(expr constraint.Expr, found map[string]bool) {
+	switch e := expr.(type) {
+	case *constraint.TagExpr:
+		if knownOS[e.Tag] {
+			found[e.Tag] = true
+		}
+	case *constraint.NotExpr:
+		collectConstraintTags(e.X, found)
+	case *constraint.AndExpr:
+		collectConstraintTags(e.X, found)
+		collectConstraintTags(e.Y, found)
+	case *constraint.OrExpr:
+		collectConstraintTags(e.X, found)
+		collectConstraintTags(e.Y, found)
+	}
 }
 
 type fileInfo struct {

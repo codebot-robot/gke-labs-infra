@@ -189,7 +189,7 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 
 	goosList := opt.GOOS
 	if len(goosList) == 0 && cfg != nil {
-		goosList = cfg.DroppedErrorsGOOS()
+		goosList = cfg.LintGOOS()
 	}
 
 	if mode == "ignore" && !opt.WriteBaseline {

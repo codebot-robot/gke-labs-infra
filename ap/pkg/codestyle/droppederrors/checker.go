@@ -22,7 +22,6 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
@@ -517,12 +516,7 @@ func Run(_ context.Context, opts Options) (*Result, error) {
 
 	goosList := opts.GOOS
 	if len(goosList) == 0 {
-		host := runtime.GOOS
-		if host == "linux" {
-			goosList = []string{"linux"}
-		} else {
-			goosList = []string{host, "linux"}
-		}
+		goosList = []string{""}
 	}
 
 	allCheckedFiles := make(map[string]bool)

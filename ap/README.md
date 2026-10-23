@@ -107,21 +107,22 @@ lint:
     mode: error
     types:
       - "*bufio.Writer"
+  goos:
+    - linux
+    - darwin
   droppedErrors:
     mode: error
     baseline: .ap/droppederrors-baseline.txt
     exclude:
       - fmt.Fprintln
     useDefaultExcludes: true
-    goos:
-      - linux
-      - darwin
   deferInLoop:
     mode: error
 ```
 
 `go.yaml` options:
 - `skip`: An optional list of glob patterns to ignore during repository scanning and linting (e.g. `vendor/**`).
+- `lint.goos`: Target `GOOS` platforms to check (defaults to `auto`, which automatically detects non-host GOOS targets referenced by in-scope Go files via filename suffixes and `//go:build` constraints). Can be explicitly configured (e.g. `[linux, darwin]`).
 - `lint.skipGenerated`: Cross-cutting boolean flag. When `false` (the default), generated code is linted unless a linter specifies its own default or per-linter override.
 - `lint.skipTests`: Cross-cutting boolean flag. When `false` (the default), test code (`*_test.go`) is linted unless a linter specifies its own default or per-linter override.
 - Analyzers and modes: Every check is on at `mode: error` unless configured (except `testcontext` and `replaceEmptyInterfaceWithAny` which default to `mode: warn`, and `unusedparameters` which is opt-in). Valid modes are `error`, `warn`, and `ignore`.
@@ -129,7 +130,7 @@ lint:
   - `unusedparameters.mode`: Enables parameter checking in the `unused` analyzer (`error | warn | ignore`).
   - `testOnlyImports.packages`: List of package import paths permitted only in test files (`*_test.go`).
   - `closeWriter.types`: List of type names whose instances must check errors when closed.
-  - `droppedErrors`: Checks for dropped errors (calls whose returned `error` is ignored). Supports `baseline` (path to baseline file), `exclude` (additional functions/methods to exclude), `useDefaultExcludes` (boolean, defaults to `true` to exclude standard library functions), and `goos` (list of target `GOOS` platforms to check).
+  - `droppedErrors`: Checks for dropped errors (calls whose returned `error` is ignored). Supports `baseline` (path to baseline file), `exclude` (additional functions/methods to exclude), and `useDefaultExcludes` (boolean, defaults to `true` to exclude standard library functions).
   - Baseline ratchet: `droppedErrors` supports a baseline ratchet using `ap lint droppederrors --write-baseline`, writing to `.ap/droppederrors-baseline.txt` (or the configured `baseline:` path). Existing dropped errors in the baseline are tolerated, but new violations cause lint failures.
 
 ### proto.yaml

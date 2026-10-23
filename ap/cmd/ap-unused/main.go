@@ -16,14 +16,9 @@ package main
 
 import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/droppederrors"
-	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/multichecker"
 )
 
 func main() {
-	var analyzers []*analysis.Analyzer
-	analyzers = append(analyzers, codestyle.PlainAnalyzers()...)
-	analyzers = append(analyzers, droppederrors.Analyzer)
-	multichecker.Main(analyzers...)
+	multichecker.Main(codestyle.PlainAnalyzers()...)
 }

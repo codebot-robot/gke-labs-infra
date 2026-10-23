@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -426,6 +427,8 @@ func TestDroppedErrorsConfig(t *testing.T) {
 
 	yamlContent := `
 lint:
+  goos:
+    - linux
   droppedErrors:
     mode: error
     exclude:
@@ -434,8 +437,6 @@ lint:
     skipTests: false
     skipGenerated: true
     useDefaultExcludes: false
-    goos:
-      - linux
 `
 	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 		t.Fatal(err)
@@ -470,8 +471,63 @@ lint:
 	if cfg.DroppedErrorsUseDefaultExcludes() != false {
 		t.Errorf("expected useDefaultExcludes to be false")
 	}
-	if len(cfg.DroppedErrorsGOOS()) != 1 || cfg.DroppedErrorsGOOS()[0] != "linux" {
-		t.Errorf("unexpected GOOS list: %v", cfg.DroppedErrorsGOOS())
+	if len(cfg.LintGOOS()) != 1 || cfg.LintGOOS()[0] != "linux" {
+		t.Errorf("unexpected GOOS list: %v", cfg.LintGOOS())
+	}
+}
+
+func TestLintGOOSConfig(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want []string
+	}{
+		{
+			name: "default auto",
+			yaml: "lint:\n  skipGenerated: true\n",
+			want: nil,
+		},
+		{
+			name: "explicit auto string",
+			yaml: "lint:\n  goos: auto\n",
+			want: nil,
+		},
+		{
+			name: "explicit auto slice",
+			yaml: "lint:\n  goos:\n    - auto\n",
+			want: nil,
+		},
+		{
+			name: "single string linux",
+			yaml: "lint:\n  goos: linux\n",
+			want: []string{"linux"},
+		},
+		{
+			name: "slice of goos",
+			yaml: "lint:\n  goos:\n    - linux\n    - darwin\n",
+			want: []string{"linux", "darwin"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			apDir := filepath.Join(dir, ".ap")
+			if err := os.Mkdir(apDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(tt.yaml), 0644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := cfg.LintGOOS()
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("LintGOOS() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 

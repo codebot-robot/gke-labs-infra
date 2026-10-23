@@ -162,35 +162,18 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 		return dir, r
 	}
 
-	findDroppedTask := func(taskGroup tasks.Task) *DroppedErrorsCheckTask {
-		group, ok := taskGroup.(*tasks.Group)
-		if !ok {
-			return nil
-		}
-		for _, t := range group.Tasks {
-			if modGroup, ok := t.(*tasks.Group); ok {
-				for _, sub := range modGroup.Tasks {
-					if dt, ok := sub.(*DroppedErrorsCheckTask); ok {
-						return dt
-					}
-				}
-			}
-		}
-		return nil
-	}
-
 	t.Run("default_error", func(t *testing.T) {
 		dir, r := setupModule(t, "")
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		dt := findDroppedTask(taskGroup)
-		if dt == nil {
-			t.Fatalf("expected DroppedErrorsCheckTask to be included by default")
+		at := findAnalyzersTask(taskGroup)
+		if at == nil {
+			t.Fatalf("expected AnalyzersTask to be included by default")
 		}
-		if dt.IsError != true {
-			t.Errorf("expected IsError to be true in default error mode")
+		if at.Enabled["droppederrors"] != codestyle.ModeError {
+			t.Errorf("expected droppederrors to be ModeError in default, got %v", at.Enabled["droppederrors"])
 		}
 	})
 
@@ -200,12 +183,12 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		dt := findDroppedTask(taskGroup)
-		if dt == nil {
-			t.Fatalf("expected DroppedErrorsCheckTask to be included")
+		at := findAnalyzersTask(taskGroup)
+		if at == nil {
+			t.Fatalf("expected AnalyzersTask to be included")
 		}
-		if dt.IsError != false {
-			t.Errorf("expected IsError to be false in mode warn")
+		if at.Enabled["droppederrors"] != codestyle.ModeWarn {
+			t.Errorf("expected droppederrors to be ModeWarn, got %v", at.Enabled["droppederrors"])
 		}
 	})
 
@@ -215,12 +198,12 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		dt := findDroppedTask(taskGroup)
-		if dt == nil {
-			t.Fatalf("expected DroppedErrorsCheckTask to be included")
+		at := findAnalyzersTask(taskGroup)
+		if at == nil {
+			t.Fatalf("expected AnalyzersTask to be included")
 		}
-		if dt.IsError != true {
-			t.Errorf("expected IsError to be true in mode error")
+		if at.Enabled["droppederrors"] != codestyle.ModeError {
+			t.Errorf("expected droppederrors to be ModeError, got %v", at.Enabled["droppederrors"])
 		}
 	})
 
@@ -230,9 +213,11 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		dt := findDroppedTask(taskGroup)
-		if dt != nil {
-			t.Fatalf("expected DroppedErrorsCheckTask to be excluded in mode ignore")
+		at := findAnalyzersTask(taskGroup)
+		if at != nil {
+			if _, ok := at.Enabled["droppederrors"]; ok {
+				t.Fatalf("expected droppederrors to be excluded in mode ignore")
+			}
 		}
 	})
 }
@@ -268,40 +253,18 @@ func TestLintTasks_SkipGenerated(t *testing.T) {
 		return dir, r
 	}
 
-	findTasks := func(taskGroup tasks.Task) (*DroppedErrorsCheckTask, *AnalyzersTask) {
-		group, ok := taskGroup.(*tasks.Group)
-		if !ok {
-			return nil, nil
-		}
-		var dt *DroppedErrorsCheckTask
-		var at *AnalyzersTask
-		for _, t := range group.Tasks {
-			if modGroup, ok := t.(*tasks.Group); ok {
-				for _, sub := range modGroup.Tasks {
-					if d, ok := sub.(*DroppedErrorsCheckTask); ok {
-						dt = d
-					}
-					if a, ok := sub.(*AnalyzersTask); ok {
-						at = a
-					}
-				}
-			}
-		}
-		return dt, at
-	}
-
 	t.Run("skipGenerated_true", func(t *testing.T) {
 		dir, r := setupModule(t, "lint:\n  skipGenerated: true\n")
 		taskGroup, err := LintTasks(r, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
-		dt, at := findTasks(taskGroup)
-		if dt == nil || at == nil {
-			t.Fatalf("expected tasks to be found")
+		at := findAnalyzersTask(taskGroup)
+		if at == nil {
+			t.Fatalf("expected AnalyzersTask to be found")
 		}
-		if !dt.SkipGenerated {
-			t.Errorf("expected DroppedErrorsCheckTask.SkipGenerated to be true")
+		if !at.SkipGenerated("droppederrors") {
+			t.Errorf("expected droppederrors SkipGenerated to be true")
 		}
 		if !at.SkipGenerated("testcontext") {
 			t.Errorf("expected testcontext SkipGenerated to be true")
@@ -314,12 +277,12 @@ func TestLintTasks_SkipGenerated(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		dt, at := findTasks(taskGroup)
-		if dt == nil || at == nil {
-			t.Fatalf("expected tasks to be found")
+		at := findAnalyzersTask(taskGroup)
+		if at == nil {
+			t.Fatalf("expected AnalyzersTask to be found")
 		}
-		if dt.SkipGenerated {
-			t.Errorf("expected DroppedErrorsCheckTask.SkipGenerated to be false by default")
+		if at.SkipGenerated("droppederrors") {
+			t.Errorf("expected droppederrors SkipGenerated to be false by default")
 		}
 		if at.SkipGenerated("testcontext") {
 			t.Errorf("expected testcontext SkipGenerated to be false by default")
@@ -875,5 +838,317 @@ func TestLintTasks_PackageLoadError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to load packages") {
 		t.Errorf("expected error to mention failed to load packages, got: %v", err)
+	}
+}
+
+func TestLintTasks_MultiGOOS_LinuxOnDarwin(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// _linux.go file containing an unused function
+	if err := os.WriteFile(filepath.Join(dir, "foo_linux.go"), []byte("package main\n\nfunc unusedInLinux() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := repo.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	taskGroup, err := LintTasks(r, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task := findAnalyzersTask(taskGroup)
+	if task == nil {
+		t.Fatalf("expected AnalyzersTask to be created")
+	}
+
+	// Simulate running on macOS (darwin host)
+	task.HostGOOS = "darwin"
+	task.GOOS = determineTargetGOOS(r, dir, nil, "darwin")
+
+	if len(task.GOOS) != 2 || task.GOOS[0] != "darwin" || task.GOOS[1] != "linux" {
+		t.Fatalf("expected target GOOS [darwin, linux], got %v", task.GOOS)
+	}
+
+	ctx := t.Context()
+	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r})
+	if err == nil {
+		t.Fatalf("expected unused error in foo_linux.go to be reported on simulated darwin, got nil")
+	}
+	if !strings.Contains(err.Error(), "unused check failed") {
+		t.Errorf("expected error to mention unused check failed, got: %v", err)
+	}
+	if task.LoadCount != 2 {
+		t.Errorf("expected 2 package loads (darwin + linux), got %d", task.LoadCount)
+	}
+}
+
+func TestLintTasks_MultiGOOS_SingleLoad(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := repo.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	taskGroup, err := LintTasks(r, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task := findAnalyzersTask(taskGroup)
+	if task == nil {
+		t.Fatalf("expected AnalyzersTask to be created")
+	}
+
+	ctx := t.Context()
+	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r})
+	if err != nil {
+		t.Fatalf("unexpected error from task.Run: %v", err)
+	}
+
+	// No OS-specific files -> exactly 1 package load
+	if task.LoadCount != 1 {
+		t.Errorf("expected exactly 1 package load, got %d", task.LoadCount)
+	}
+}
+
+func TestLintTasks_MultiGOOS_VendorIgnored(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create vendor directory with _linux.go file
+	vendorDir := filepath.Join(dir, "vendor", "example.com", "pkg")
+	if err := os.MkdirAll(vendorDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vendorDir, "foo_linux.go"), []byte("package pkg\n\nfunc unusedInVendor() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := repo.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate macOS host where vendor has _linux.go
+	targets := determineTargetGOOS(r, dir, nil, "darwin")
+	if len(targets) != 1 || targets[0] != "darwin" {
+		t.Fatalf("expected vendor _linux.go to not trigger extra load; got targets: %v", targets)
+	}
+
+	taskGroup, err := LintTasks(r, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task := findAnalyzersTask(taskGroup)
+	if task == nil {
+		t.Fatalf("expected AnalyzersTask to be created")
+	}
+
+	ctx := t.Context()
+	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if task.LoadCount != 1 {
+		t.Errorf("expected exactly 1 load when OS file is under vendor/, got %d", task.LoadCount)
+	}
+}
+
+func TestLintTasks_MultiGOOS_ExplicitOverride(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	apDir := filepath.Join(dir, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	yaml := `
+lint:
+  goos:
+    - linux
+    - darwin
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := repo.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	taskGroup, err := LintTasks(r, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task := findAnalyzersTask(taskGroup)
+	if task == nil {
+		t.Fatalf("expected AnalyzersTask to be created")
+	}
+
+	if len(task.GOOS) != 2 || task.GOOS[0] != "linux" || task.GOOS[1] != "darwin" {
+		t.Fatalf("expected explicit GOOS override [linux, darwin], got %v", task.GOOS)
+	}
+}
+
+func TestAnalyzersTask_DroppedErrorsBaselineRatchet(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	codeV1 := `package main
+
+import "errors"
+
+func f1() error { return errors.New("1") }
+func f2() error { return errors.New("2") }
+
+func main() {
+	_ = f1()
+	_ = f2()
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(codeV1), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	baselinePath := filepath.Join(dir, ".ap", "droppederrors-baseline.txt")
+
+	r, err := repo.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Write baseline via generic task
+	taskGroup, err := LintTasks(r, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := findAnalyzersTask(taskGroup)
+	if task == nil {
+		t.Fatal("expected AnalyzersTask")
+	}
+	task.WriteBaseline = true
+	task.BaselinePath = baselinePath
+
+	ctx := t.Context()
+	scope := &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r}
+	if err := task.Run(ctx, scope); err != nil {
+		t.Fatalf("write baseline failed: %v", err)
+	}
+
+	if _, err := os.Stat(baselinePath); err != nil {
+		t.Fatalf("expected baseline file to be created: %v", err)
+	}
+
+	// 2. Check with baseline in mode error -> should PASS
+	taskGroup2, err := LintTasks(r, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task2 := findAnalyzersTask(taskGroup2)
+	task2.BaselinePath = baselinePath
+	if err := task2.Run(ctx, scope); err != nil {
+		t.Fatalf("check with baseline failed unexpectedly: %v", err)
+	}
+
+	// 3. Add a new dropped error: f3() -> should FAIL
+	codeV2 := `package main
+
+import "errors"
+
+func f1() error { return errors.New("1") }
+func f2() error { return errors.New("2") }
+func f3() error { return errors.New("3") }
+
+func main() {
+	_ = f1()
+	_ = f2()
+	_ = f3()
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(codeV2), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r, err = repo.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	taskGroup3, err := LintTasks(r, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task3 := findAnalyzersTask(taskGroup3)
+	task3.BaselinePath = baselinePath
+	err = task3.Run(ctx, scope)
+	if err == nil {
+		t.Fatalf("expected new dropped error to fail check")
+	}
+	if !strings.Contains(err.Error(), "droppederrors check failed") {
+		t.Errorf("expected droppederrors failure error, got: %v", err)
+	}
+
+	// 4. Fix f2() -> f1 is tolerated, f2 is stale
+	codeV3 := `package main
+
+import "errors"
+
+func f1() error { return errors.New("1") }
+func f2() error { return errors.New("2") }
+
+func main() {
+	_ = f1()
+	if err := f2(); err != nil {
+		// handled
+	}
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(codeV3), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r, err = repo.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	taskGroup4, err := LintTasks(r, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task4 := findAnalyzersTask(taskGroup4)
+	task4.BaselinePath = baselinePath
+	// Should pass because remaining finding f1 is in baseline
+	if err := task4.Run(ctx, scope); err != nil {
+		t.Fatalf("expected check to pass after fixing f2: %v", err)
 	}
 }

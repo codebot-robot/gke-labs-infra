@@ -47,7 +47,6 @@ type Registered struct {
 	DefaultMode          Mode
 	DefaultSkipGenerated bool
 	DefaultSkipTests     bool
-	CustomTask           bool
 
 	NewSettings func() config.LinterConfig
 	New         func(policy fileset.Policy, cfg *config.Config) *analysis.Analyzer
@@ -151,14 +150,13 @@ var Analyzers = []Registered{
 		New:                  testonlyimports.New,
 	},
 	{
-		Analyzer:             droppederrors.Analyzer,
 		Name:                 "droppederrors",
 		ConfigName:           "droppedErrors",
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     true,
-		CustomTask:           true,
 		NewSettings:          func() config.LinterConfig { return &config.DroppedErrorsConfig{} },
+		New:                  droppederrors.New,
 	},
 	{
 		Name:                 "closewriter",
@@ -205,12 +203,10 @@ func Find(name string) *Registered {
 func PlainAnalyzers() []*analysis.Analyzer {
 	var list []*analysis.Analyzer
 	for _, r := range Analyzers {
-		if !r.CustomTask {
-			if r.New != nil {
-				list = append(list, r.New(fileset.Policy{}, nil))
-			} else if r.Analyzer != nil {
-				list = append(list, r.Analyzer)
-			}
+		if r.New != nil {
+			list = append(list, r.New(fileset.Policy{}, nil))
+		} else if r.Analyzer != nil {
+			list = append(list, r.Analyzer)
 		}
 	}
 	return list

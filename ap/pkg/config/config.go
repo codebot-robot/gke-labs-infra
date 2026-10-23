@@ -46,6 +46,7 @@ type GovulncheckConfig struct {
 type LintConfig struct {
 	SkipGenerated *bool `json:"skipGenerated"`
 	SkipTests     *bool `json:"skipTests"`
+	GOOS          any   `json:"goos"`
 
 	linters map[string]LinterConfig
 }
@@ -60,6 +61,7 @@ func (l *LintConfig) UnmarshalJSON(data []byte) error {
 	}
 	l.SkipGenerated = p.SkipGenerated
 	l.SkipTests = p.SkipTests
+	l.GOOS = p.GOOS
 
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -71,7 +73,7 @@ func (l *LintConfig) UnmarshalJSON(data []byte) error {
 	}
 
 	for key, rawVal := range raw {
-		if key == "skipGenerated" || key == "skipTests" {
+		if key == "skipGenerated" || key == "skipTests" || key == "goos" {
 			continue
 		}
 		newFn, ok := linterRegistry[key]
@@ -112,7 +114,6 @@ type DroppedErrorsConfig struct {
 	Exclude            []string `json:"exclude"`
 	Baseline           string   `json:"baseline"`
 	UseDefaultExcludes *bool    `json:"useDefaultExcludes"`
-	GOOS               []string `json:"goos"`
 }
 
 // Linter returns the LinterConfig for the named linter.
@@ -364,11 +365,43 @@ func (c *Config) DroppedErrorsUseDefaultExcludes() bool {
 	return true
 }
 
+// LintGOOS returns the list of target GOOS values configured under lint.goos,
+// or nil if lint.goos is omitted or set to "auto".
+func (c *Config) LintGOOS() []string {
+	if c == nil || c.Lint == nil || c.Lint.GOOS == nil {
+		return nil
+	}
+	switch v := c.Lint.GOOS.(type) {
+	case string:
+		if strings.EqualFold(v, "auto") {
+			return nil
+		}
+		return []string{v}
+	case []any:
+		var res []string
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				if strings.EqualFold(s, "auto") {
+					return nil
+				}
+				res = append(res, s)
+			}
+		}
+		return res
+	case []string:
+		if len(v) == 1 && strings.EqualFold(v[0], "auto") {
+			return nil
+		}
+		return v
+	}
+	return nil
+}
+
 // DroppedErrorsGOOS returns the list of GOOS targets to check.
-// Default is host plus "linux" (or just "linux" if host is linux).
+// Deprecated: use LintGOOS instead.
 func (c *Config) DroppedErrorsGOOS() []string {
-	if de := c.DroppedErrors(); de != nil && len(de.GOOS) > 0 {
-		return de.GOOS
+	if goos := c.LintGOOS(); len(goos) > 0 {
+		return goos
 	}
 	host := runtime.GOOS
 	if host == "linux" {
