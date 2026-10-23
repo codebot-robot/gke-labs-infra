@@ -427,25 +427,8 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 			skipTests := reg.ResolveSkipTests(cfg)
 			flags = append(flags, fmt.Sprintf("-skip-tests=%t", skipTests))
 
-			switch reg.Name {
-			case "unused":
-				if cfg.IsUnusedParametersEnabled() {
-					flags = append(flags, "-check-parameters=true")
-				} else {
-					flags = append(flags, "-check-parameters=false")
-				}
-			case "testonlyimports":
-				if c := cfg.TestOnlyImports(); c != nil {
-					for _, pkg := range c.Packages {
-						flags = append(flags, "-package="+pkg)
-					}
-				}
-			case "closewriter":
-				if c := cfg.CloseWriter(); c != nil {
-					for _, typ := range c.Types {
-						flags = append(flags, "-type="+typ)
-					}
-				}
+			if reg.ExtraFlags != nil {
+				flags = append(flags, reg.ExtraFlags(cfg)...)
 			}
 			analyzersTask.PerAnalyzerFlags[reg.Name] = flags
 		}
