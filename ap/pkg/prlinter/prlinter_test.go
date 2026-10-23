@@ -62,3 +62,174 @@ func TestCheckDoubleSpacing(t *testing.T) {
 		})
 	}
 }
+
+func TestIsErrAssign(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{
+			name:     "simple err assign",
+			input:    "err := foo()",
+			expected: true,
+		},
+		{
+			name:     "multiple assignment with space after comma",
+			input:    "val, err := foo()",
+			expected: true,
+		},
+		{
+			name:     "multiple assignment without space after comma",
+			input:    "val,err := foo()",
+			expected: true,
+		},
+		{
+			name:     "three assignments",
+			input:    "a, b, err := bar()",
+			expected: true,
+		},
+		{
+			name:     "no space before colon-equal",
+			input:    "err:= foo()",
+			expected: true,
+		},
+		{
+			name:     "no space around colon-equal",
+			input:    "err:=foo()",
+			expected: true,
+		},
+		{
+			name:     "no space anywhere",
+			input:    "val,err:=foo()",
+			expected: true,
+		},
+		{
+			name:     "trailing assignment",
+			input:    "err :=",
+			expected: true,
+		},
+		{
+			name:     "my_err variable with prefix",
+			input:    "my_err := foo()",
+			expected: false,
+		},
+		{
+			name:     "xerr variable",
+			input:    "xerr := foo()",
+			expected: false,
+		},
+		{
+			name:     "err_val variable with suffix",
+			input:    "err_val := foo()",
+			expected: false,
+		},
+		{
+			name:     "equality comparison",
+			input:    "err == foo()",
+			expected: false,
+		},
+		{
+			name:     "plain assignment",
+			input:    "err = foo()",
+			expected: false,
+		},
+		{
+			name:     "err not directly before :=",
+			input:    "err, val := foo()",
+			expected: false,
+		},
+		{
+			name:     "assigned to err",
+			input:    "foo := err",
+			expected: false,
+		},
+		{
+			name:     "if err != nil check",
+			input:    "if err != nil {",
+			expected: false,
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isErrAssign(tt.input)
+			if got != tt.expected {
+				t.Errorf("isErrAssign(%q) = %v, want %v", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsIfErrCheck(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{
+			name:     "standard if err != nil with brace space",
+			input:    "if err != nil {",
+			expected: true,
+		},
+		{
+			name:     "extra whitespace",
+			input:    "if   err   !=   nil   {",
+			expected: true,
+		},
+		{
+			name:     "no space before brace",
+			input:    "if err != nil{",
+			expected: true,
+		},
+		{
+			name:     "unspaced tokens not matched",
+			input:    "if err!=nil{",
+			expected: false,
+		},
+		{
+			name:     "if err != nil with inline comment",
+			input:    "if err != nil { // handle error",
+			expected: true,
+		},
+		{
+			name:     "err == nil",
+			input:    "if err == nil {",
+			expected: false,
+		},
+		{
+			name:     "myerr variable",
+			input:    "if myerr != nil {",
+			expected: false,
+		},
+		{
+			name:     "missing brace",
+			input:    "if err != nil",
+			expected: false,
+		},
+		{
+			name:     "statement without if",
+			input:    "err != nil {",
+			expected: false,
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isIfErrCheck(tt.input)
+			if got != tt.expected {
+				t.Errorf("isIfErrCheck(%q) = %v, want %v", tt.input, got, tt.expected)
+			}
+		})
+	}
+}

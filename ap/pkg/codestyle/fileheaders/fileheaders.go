@@ -15,12 +15,12 @@
 package fileheaders
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -29,6 +29,137 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"k8s.io/klog/v2"
 )
+
+func hasK8sStyleBlockHeader(buf []byte) bool {
+	idx := bytes.Index(buf, []byte("/*"))
+	return idx != -1 && bytes.Contains(buf[idx:], []byte("Copyright"))
+}
+
+func isYearOrRange(s string) bool {
+	if s == "" {
+		return false
+	}
+	hasDigit := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= '0' && c <= '9' {
+			hasDigit = true
+		} else if c == ',' || c == '-' || c == ' ' || c == '\t' {
+			// separator
+		} else {
+			return false
+		}
+	}
+	return hasDigit
+}
+
+func matchCopyrightLine(line string, copyrightHolder string) bool {
+	if !strings.HasPrefix(line, "Copyright") {
+		return false
+	}
+	rest := line[len("Copyright"):]
+	if len(rest) == 0 || (rest[0] != ' ' && rest[0] != '\t') {
+		return false
+	}
+	rest = strings.TrimSpace(rest)
+
+	var yearPart string
+	if copyrightHolder != "" {
+		if !strings.HasSuffix(rest, copyrightHolder) {
+			return false
+		}
+		beforeHolder := rest[:len(rest)-len(copyrightHolder)]
+		if len(beforeHolder) == 0 || (beforeHolder[len(beforeHolder)-1] != ' ' && beforeHolder[len(beforeHolder)-1] != '\t') {
+			return false
+		}
+		yearPart = strings.TrimSpace(beforeHolder)
+	} else {
+		yearPart = rest
+	}
+
+	return isYearOrRange(yearPart)
+}
+
+func match13Lines(lines []string, copyrightHolder string) bool {
+	if len(lines) != 13 {
+		return false
+	}
+	if !matchCopyrightLine(lines[0], copyrightHolder) {
+		return false
+	}
+	if lines[1] != "" {
+		return false
+	}
+	if lines[2] != `Licensed under the Apache License, Version 2.0 (the "License");` {
+		return false
+	}
+	if lines[3] != "you may not use this file except in compliance with the License." &&
+		lines[3] != "You may not use this file except in compliance with the License." {
+		return false
+	}
+	if lines[4] != "you may obtain a copy of the License at" &&
+		lines[4] != "You may obtain a copy of the License at" {
+		return false
+	}
+	if lines[5] != "" {
+		return false
+	}
+	if lines[6] != "http://www.apache.org/licenses/LICENSE-2.0" {
+		return false
+	}
+	if lines[7] != "" {
+		return false
+	}
+	if lines[8] != "Unless required by applicable law or agreed to in writing, software" {
+		return false
+	}
+	if lines[9] != `distributed under the License is distributed on an "AS IS" BASIS,` {
+		return false
+	}
+	if lines[10] != "WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied." {
+		return false
+	}
+	if lines[11] != "See the License for the specific language governing permissions and" {
+		return false
+	}
+	if lines[12] != "limitations under the License." {
+		return false
+	}
+	return true
+}
+
+func matchExpectedHeader(header string, style string, copyrightHolder string) bool {
+	rawLines := strings.Split(header, "\n")
+	if len(rawLines) < 13 {
+		return false
+	}
+
+	lines := make([]string, len(rawLines))
+	hasStyle := make([]bool, len(rawLines))
+	for i, raw := range rawLines {
+		trimmed := strings.TrimSpace(raw)
+		if strings.HasPrefix(trimmed, style) {
+			hasStyle[i] = true
+			lines[i] = strings.TrimSpace(trimmed[len(style):])
+		} else {
+			lines[i] = trimmed
+		}
+	}
+
+	for start := 0; start <= len(lines)-13; start++ {
+		allHaveStyle := true
+		for j := 0; j < 13; j++ {
+			if !hasStyle[start+j] {
+				allHaveStyle = false
+				break
+			}
+		}
+		if allHaveStyle && match13Lines(lines[start:start+13], copyrightHolder) {
+			return true
+		}
+	}
+	return false
+}
 
 type FileHeadersOptions struct {
 	IgnoreFiles []string `json:"ignore"`
@@ -112,29 +243,6 @@ func Run(ctx context.Context, r *repo.Repo, repoRoot string, files []string) err
 	return errors.Join(errs...)
 }
 
-func makeExpectedHeaderRegex(style string, copyrightHolder string) (*regexp.Regexp, error) {
-	s := regexp.QuoteMeta(style)
-	holder := regexp.QuoteMeta(copyrightHolder)
-
-	var patternParts []string
-	patternParts = append(patternParts, s+`\s+Copyright\s+[0-9,\s-]+\s+`+holder)
-	patternParts = append(patternParts, s)
-	patternParts = append(patternParts, s+`\s+Licensed under the Apache License, Version 2.0 \(the "License"\);`)
-	patternParts = append(patternParts, s+`\s+[yY]ou may not use this file except in compliance with the License\.`)
-	patternParts = append(patternParts, s+`\s+[yY]ou may obtain a copy of the License at`)
-	patternParts = append(patternParts, s)
-	patternParts = append(patternParts, s+`\s+http://www\.apache\.org/licenses/LICENSE-2.0`)
-	patternParts = append(patternParts, s)
-	patternParts = append(patternParts, s+`\s+Unless required by applicable law or agreed to in writing, software`)
-	patternParts = append(patternParts, s+`\s+distributed under the License is distributed on an "AS IS" BASIS,`)
-	patternParts = append(patternParts, s+`\s+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied\.`)
-	patternParts = append(patternParts, s+`\s+See the License for the specific language governing permissions and`)
-	patternParts = append(patternParts, s+`\s+limitations under the License\.`)
-
-	pattern := `(?m)^\s*` + strings.Join(patternParts, `\s*(?:\r?\n)\s*`) + `\s*$`
-	return regexp.Compile(pattern)
-}
-
 func (p *processor) processFile(ctx context.Context, absPath, relPath string) error {
 	log := klog.FromContext(ctx)
 
@@ -169,8 +277,7 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 	// Check for K8s style block headers in Go files
 	if ext == ".go" {
 		// Look for /* ... Copyright ... */ pattern
-		// We use a simplified regex that looks for /* followed by Copyright within the buffer
-		if regexp.MustCompile(`(?s)/\*.*?Copyright`).Match(checkBuf) {
+		if hasK8sStyleBlockHeader(checkBuf) {
 			return nil
 		}
 	}
@@ -220,12 +327,7 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 	}
 
 	// Validate strictly against the contiguous leading comment block at the top of the file
-	regex, err := makeExpectedHeaderRegex(commentStyle, p.config.CopyrightHolder)
-	if err != nil {
-		return err
-	}
-
-	if regex.MatchString(joinedComments) {
+	if matchExpectedHeader(joinedComments, commentStyle, p.config.CopyrightHolder) {
 		return nil
 	}
 

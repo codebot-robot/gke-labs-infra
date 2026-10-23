@@ -507,3 +507,218 @@ func TestRun_UnsupportedLicense(t *testing.T) {
 		t.Errorf("Expected error to mention .ap/headers.yaml, got %v", err)
 	}
 }
+
+func TestHasK8sStyleBlockHeader(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{
+			name:     "k8s standard block header",
+			input:    "/*\nCopyright 2018 The Kubernetes Authors.\n*/\npackage main\n",
+			expected: true,
+		},
+		{
+			name:     "inline block comment with Copyright",
+			input:    "/* Copyright 2026 */\n",
+			expected: true,
+		},
+		{
+			name:     "line comment with Copyright",
+			input:    "// Copyright 2026 Google LLC\n",
+			expected: false,
+		},
+		{
+			name:     "block comment without Copyright",
+			input:    "/* Some other comment */\n",
+			expected: false,
+		},
+		{
+			name:     "Copyright before block comment start",
+			input:    "Copyright /* not a header */\n",
+			expected: false,
+		},
+		{
+			name:     "empty",
+			input:    "",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hasK8sStyleBlockHeader([]byte(tt.input))
+			if got != tt.expected {
+				t.Errorf("hasK8sStyleBlockHeader(%q) = %v, want %v", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMatchExpectedHeader(t *testing.T) {
+	validGoHeader := `// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.`
+
+	validHashHeader := `# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.`
+
+	tests := []struct {
+		name     string
+		header   string
+		style    string
+		holder   string
+		expected bool
+	}{
+		{
+			name:     "valid Go header",
+			header:   validGoHeader,
+			style:    "//",
+			holder:   "Google LLC",
+			expected: true,
+		},
+		{
+			name:     "valid hash header",
+			header:   validHashHeader,
+			style:    "#",
+			holder:   "Google LLC",
+			expected: true,
+		},
+		{
+			name:     "valid with year range",
+			header:   strings.Replace(validGoHeader, "2026", "2020-2026", 1),
+			style:    "//",
+			holder:   "Google LLC",
+			expected: true,
+		},
+		{
+			name:     "valid with year list and range",
+			header:   strings.Replace(validGoHeader, "2026", "2020, 2022-2026", 1),
+			style:    "//",
+			holder:   "Google LLC",
+			expected: true,
+		},
+		{
+			name:     "valid with You capitalized",
+			header:   strings.Replace(validGoHeader, "you may not use", "You may not use", 1),
+			style:    "//",
+			holder:   "Google LLC",
+			expected: true,
+		},
+		{
+			name:     "valid with you lowercase on obtain line",
+			header:   strings.Replace(validGoHeader, "You may obtain", "you may obtain", 1),
+			style:    "//",
+			holder:   "Google LLC",
+			expected: true,
+		},
+		{
+			name:     "valid with empty copyright holder",
+			header:   strings.Replace(validGoHeader, "Copyright 2026 Google LLC", "Copyright 2026", 1),
+			style:    "//",
+			holder:   "",
+			expected: true,
+		},
+		{
+			name:     "extra comment line before license block (e.g. go:build)",
+			header:   "//go:build linux\n" + validGoHeader,
+			style:    "//",
+			holder:   "Google LLC",
+			expected: true,
+		},
+		{
+			name:     "extra comment line after license block (e.g. package doc)",
+			header:   validGoHeader + "\n// Package foo does things.",
+			style:    "//",
+			holder:   "Google LLC",
+			expected: true,
+		},
+		{
+			name:     "wrong holder",
+			header:   validGoHeader,
+			style:    "//",
+			holder:   "Other Org",
+			expected: false,
+		},
+		{
+			name:     "wrong comment style",
+			header:   validGoHeader,
+			style:    "#",
+			holder:   "Google LLC",
+			expected: false,
+		},
+		{
+			name:     "corrupted url",
+			header:   strings.Replace(validGoHeader, "LICENSE-2.0", "LICENSE-2.01", 1),
+			style:    "//",
+			holder:   "Google LLC",
+			expected: false,
+		},
+		{
+			name:     "missing line",
+			header:   strings.Replace(validGoHeader, "//     http://www.apache.org/licenses/LICENSE-2.0\n", "", 1),
+			style:    "//",
+			holder:   "Google LLC",
+			expected: false,
+		},
+		{
+			name:     "invalid year characters",
+			header:   strings.Replace(validGoHeader, "2026", "2026abc", 1),
+			style:    "//",
+			holder:   "Google LLC",
+			expected: false,
+		},
+		{
+			name:     "license text without comment markers",
+			header:   strings.ReplaceAll(validGoHeader, "// ", ""),
+			style:    "//",
+			holder:   "Google LLC",
+			expected: false,
+		},
+		{
+			name:     "missing comment marker on internal line",
+			header:   strings.Replace(validGoHeader, "// you may not use", "you may not use", 1),
+			style:    "//",
+			holder:   "Google LLC",
+			expected: false,
+		},
+		{
+			name:     "empty",
+			header:   "",
+			style:    "//",
+			holder:   "Google LLC",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchExpectedHeader(tt.header, tt.style, tt.holder)
+			if got != tt.expected {
+				t.Errorf("matchExpectedHeader() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
