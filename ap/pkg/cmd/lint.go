@@ -46,12 +46,8 @@ func BuildLintCommand(rootOpt *RootOptions) *cobra.Command {
 		},
 	}
 
-	cmd.AddCommand(BuildUnusedCommand())
-	cmd.AddCommand(BuildTestContextCommand())
-	cmd.AddCommand(BuildReplaceEmptyInterfaceWithAnyCommand())
+	cmd.AddCommand(BuildAnalyzeCommand())
 	cmd.AddCommand(BuildDroppedErrorsCommand(rootOpt))
-	cmd.AddCommand(BuildTestOnlyImportsCommand())
-	cmd.AddCommand(BuildCloseWriterCommand())
 
 	return cmd
 }

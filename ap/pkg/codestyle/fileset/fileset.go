@@ -132,14 +132,27 @@ func (p *Policy) ShouldSkipAST(fset *token.FileSet, file *ast.File) bool {
 	return p.ShouldSkip(filename, file)
 }
 
+// Resettable is implemented by flags that can be reset to their default state between runs.
+type Resettable interface {
+	Reset()
+}
+
 // StringListFlag implements flag.Value for repeated or comma-separated string flags.
 type StringListFlag []string
+
+func (s *StringListFlag) Reset() {
+	*s = nil
+}
 
 func (s *StringListFlag) String() string {
 	return strings.Join(*s, ",")
 }
 
 func (s *StringListFlag) Set(val string) error {
+	if val == "" {
+		*s = nil
+		return nil
+	}
 	for _, part := range strings.Split(val, ",") {
 		part = strings.TrimSpace(part)
 		if part != "" {

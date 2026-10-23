@@ -40,6 +40,10 @@ var DefaultTypes = []string{
 // TypeListFlag implements flag.Value for repeated or comma-separated type flags.
 type TypeListFlag []string
 
+func (t *TypeListFlag) Reset() {
+	*t = nil
+}
+
 func (t *TypeListFlag) String() string {
 	return strings.Join(*t, ",")
 }
