@@ -19,6 +19,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/any"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/closewriter"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/deferinloop"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/droppederrors"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/testcontext"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/testonlyimports"
@@ -153,6 +154,15 @@ var Analyzers = []Registered{
 		Name:                 "closewriter",
 		ConfigName:           "closeWriter",
 		Aliases:              []string{"closeWriter"},
+		DefaultMode:          ModeError,
+		DefaultSkipGenerated: false,
+		DefaultSkipTests:     false,
+	},
+	{
+		Analyzer:             deferinloop.Analyzer,
+		Name:                 "deferinloop",
+		ConfigName:           "deferInLoop",
+		Aliases:              []string{"deferInLoop"},
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,

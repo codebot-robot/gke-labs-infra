@@ -84,6 +84,15 @@ func TestRegistry_FindAndDefaults(t *testing.T) {
 			wantDefaultSkipTests: false,
 			wantCustom:           false,
 		},
+		{
+			name:                 "deferinloop alias",
+			lookup:               "deferInLoop",
+			wantName:             "deferinloop",
+			wantDefaultMode:      ModeError,
+			wantDefaultSkipGen:   false,
+			wantDefaultSkipTests: false,
+			wantCustom:           false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -113,8 +122,8 @@ func TestRegistry_FindAndDefaults(t *testing.T) {
 
 func TestRegistry_PlainAnalyzers(t *testing.T) {
 	plain := PlainAnalyzers()
-	if len(plain) != 5 {
-		t.Fatalf("expected 5 plain analyzers, got %d", len(plain))
+	if len(plain) != 6 {
+		t.Fatalf("expected 6 plain analyzers, got %d", len(plain))
 	}
 }
 
