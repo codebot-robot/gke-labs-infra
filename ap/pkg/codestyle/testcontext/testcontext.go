@@ -21,21 +21,18 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-var Analyzer = &analysis.Analyzer{
-	Name: "testcontext",
-	Doc:  "check for context.Background() and context.TODO() in tests, suggesting t.Context() instead",
-	Run:  run,
+// NewAnalyzer creates a testcontext analyzer configured with policy.
+func NewAnalyzer(policy fileset.Policy) *analysis.Analyzer {
+	return &analysis.Analyzer{
+		Name: "testcontext",
+		Doc:  "check for context.Background() and context.TODO() in tests, suggesting t.Context() instead",
+		Run: func(pass *analysis.Pass) (any, error) {
+			return run(pass, policy)
+		},
+	}
 }
 
-var policyFlags *fileset.PolicyFlags
-
-func init() {
-	policyFlags = fileset.RegisterFlags(Analyzer, false, false)
-}
-
-func run(pass *analysis.Pass) (any, error) {
-	policy := policyFlags.NewPolicy()
-
+func run(pass *analysis.Pass, policy fileset.Policy) (any, error) {
 	for _, f := range pass.Files {
 		if policy.ShouldSkipAST(pass.Fset, f) {
 			continue

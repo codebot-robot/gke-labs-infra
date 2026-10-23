@@ -31,60 +31,31 @@ var DefaultPackages = []string{
 	"k8s.io/client-go/kubernetes/fake",
 }
 
-// PackageListFlag implements flag.Value for repeated or comma-separated test-only package flags.
-// Setting an empty value resets the list.
-type PackageListFlag []string
-
-func (p *PackageListFlag) Reset() {
-	*p = nil
+// Config holds configuration options for the testonlyimports analyzer.
+type Config struct {
+	fileset.Policy
+	Packages []string
 }
 
-func (p *PackageListFlag) String() string {
-	return strings.Join(*p, ",")
-}
-
-func (p *PackageListFlag) Set(val string) error {
-	if val == "" {
-		*p = nil
-		return nil
+// NewAnalyzer creates a testonlyimports analyzer configured with cfg.
+func NewAnalyzer(cfg Config) *analysis.Analyzer {
+	return &analysis.Analyzer{
+		Name: "testonlyimports",
+		Doc:  "check for imports of test-only packages from non-test Go code",
+		Run: func(pass *analysis.Pass) (any, error) {
+			return run(pass, cfg)
+		},
 	}
-	for _, part := range strings.Split(val, ",") {
-		part = strings.TrimSpace(part)
-		if part != "" {
-			*p = append(*p, part)
-		}
-	}
-	return nil
 }
 
-var (
-	packagesFlag PackageListFlag
-	policyFlags  *fileset.PolicyFlags
-)
-
-// Analyzer checks for imports of test-only packages from non-test Go code.
-var Analyzer = &analysis.Analyzer{
-	Name: "testonlyimports",
-	Doc:  "check for imports of test-only packages from non-test Go code",
-	Run:  run,
-}
-
-func init() {
-	Analyzer.Flags.Var(&packagesFlag, "package", "test-only package prefix (can be repeated or comma-separated; replaces default list)")
-	Analyzer.Flags.Var(&packagesFlag, "packages", "test-only package prefix (can be repeated or comma-separated; replaces default list)")
-	policyFlags = fileset.RegisterFlags(Analyzer, false, false)
-}
-
-func run(pass *analysis.Pass) (any, error) {
-	policy := policyFlags.NewPolicy()
-
+func run(pass *analysis.Pass, cfg Config) (any, error) {
 	packages := DefaultPackages
-	if len(packagesFlag) > 0 {
-		packages = packagesFlag
+	if len(cfg.Packages) > 0 {
+		packages = cfg.Packages
 	}
 
 	for _, f := range pass.Files {
-		if policy.ShouldSkipAST(pass.Fset, f) {
+		if cfg.Policy.ShouldSkipAST(pass.Fset, f) {
 			continue
 		}
 

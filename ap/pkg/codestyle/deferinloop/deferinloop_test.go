@@ -17,10 +17,11 @@ package deferinloop
 import (
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis/analysistest"
 )
 
 func TestAll(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, Analyzer, "a")
+	analysistest.Run(t, testdata, NewAnalyzer(fileset.Policy{}), "a")
 }

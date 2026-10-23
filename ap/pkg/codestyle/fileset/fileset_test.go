@@ -18,8 +18,6 @@ import (
 	"go/parser"
 	"go/token"
 	"testing"
-
-	"golang.org/x/tools/go/analysis"
 )
 
 func TestIsGenerated(t *testing.T) {
@@ -161,47 +159,5 @@ func TestPolicy_ShouldSkip(t *testing.T) {
 	}
 	if pSkipGlobs.ShouldSkip("/repo/pkg/bar.go", nil) {
 		t.Errorf("expected /repo/pkg/bar.go to NOT be skipped")
-	}
-}
-
-func TestRegisterFlags(t *testing.T) {
-	analyzer := &analysis.Analyzer{
-		Name: "testcheck",
-	}
-	flags := RegisterFlags(analyzer, false, true)
-
-	pDefault := flags.NewPolicy()
-	if pDefault.SkipGenerated {
-		t.Errorf("expected default SkipGenerated to be false")
-	}
-	if !pDefault.SkipTests {
-		t.Errorf("expected default SkipTests to be true")
-	}
-
-	if err := analyzer.Flags.Set("skip-generated", "true"); err != nil {
-		t.Fatal(err)
-	}
-	if err := analyzer.Flags.Set("skip-tests", "false"); err != nil {
-		t.Fatal(err)
-	}
-	if err := analyzer.Flags.Set("skip-glob", "gen/**,auto/**"); err != nil {
-		t.Fatal(err)
-	}
-	if err := analyzer.Flags.Set("repo-root", "/my/repo"); err != nil {
-		t.Fatal(err)
-	}
-
-	pUpdated := flags.NewPolicy()
-	if !pUpdated.SkipGenerated {
-		t.Errorf("expected SkipGenerated to be true after flag set")
-	}
-	if pUpdated.SkipTests {
-		t.Errorf("expected SkipTests to be false after flag set")
-	}
-	if len(pUpdated.SkipGlobs) != 2 || pUpdated.SkipGlobs[0] != "gen/**" || pUpdated.SkipGlobs[1] != "auto/**" {
-		t.Errorf("unexpected SkipGlobs: %v", pUpdated.SkipGlobs)
-	}
-	if pUpdated.RepoRoot != "/my/repo" {
-		t.Errorf("expected RepoRoot to be /my/repo, got %q", pUpdated.RepoRoot)
 	}
 }

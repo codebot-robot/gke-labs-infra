@@ -17,22 +17,21 @@ package testcontext
 import (
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis/analysistest"
 )
 
 func TestAll(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, Analyzer, "a")
+	analysistest.Run(t, testdata, NewAnalyzer(fileset.Policy{}), "a")
 }
 
 func TestTestContext_GeneratedDefault(t *testing.T) {
 	testdata := analysistest.TestData()
-	analysistest.Run(t, testdata, Analyzer, "generated_check")
+	analysistest.Run(t, testdata, NewAnalyzer(fileset.Policy{}), "generated_check")
 }
 
 func TestTestContext_GeneratedSkip(t *testing.T) {
 	testdata := analysistest.TestData()
-	Analyzer.Flags.Set("skip-generated", "true")
-	defer Analyzer.Flags.Set("skip-generated", "false")
-	analysistest.Run(t, testdata, Analyzer, "generated_skip")
+	analysistest.Run(t, testdata, NewAnalyzer(fileset.NewPolicy(true, false, nil, "")), "generated_skip")
 }

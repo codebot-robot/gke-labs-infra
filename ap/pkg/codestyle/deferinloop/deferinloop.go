@@ -25,22 +25,19 @@ import (
 
 const message = "defer inside a loop runs when the function returns, not each iteration; move the body into a function"
 
-// Analyzer checks for defer statements inside for or range loops.
-var Analyzer = &analysis.Analyzer{
-	Name:     "deferinloop",
-	Doc:      "check for defer statements inside loops",
-	Requires: []*analysis.Analyzer{inspect.Analyzer},
-	Run:      run,
+// NewAnalyzer creates a deferinloop analyzer configured with policy.
+func NewAnalyzer(policy fileset.Policy) *analysis.Analyzer {
+	return &analysis.Analyzer{
+		Name:     "deferinloop",
+		Doc:      "check for defer statements inside loops",
+		Requires: []*analysis.Analyzer{inspect.Analyzer},
+		Run: func(pass *analysis.Pass) (any, error) {
+			return run(pass, policy)
+		},
+	}
 }
 
-var policyFlags *fileset.PolicyFlags
-
-func init() {
-	policyFlags = fileset.RegisterFlags(Analyzer, false, false)
-}
-
-func run(pass *analysis.Pass) (any, error) {
-	policy := policyFlags.NewPolicy()
+func run(pass *analysis.Pass, policy fileset.Policy) (any, error) {
 	inspect := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
 
 	skippedFiles := make(map[*ast.File]bool, len(pass.Files))

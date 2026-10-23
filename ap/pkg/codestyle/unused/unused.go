@@ -23,23 +23,24 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-var (
-	checkParameters bool
-	policyFlags     *fileset.PolicyFlags
-)
-
-var Analyzer = &analysis.Analyzer{
-	Name: "unused",
-	Doc:  "check for unused parameters, methods, and fields",
-	Run:  run,
+// Config holds configuration options for the unused analyzer.
+type Config struct {
+	fileset.Policy
+	CheckParameters bool
 }
 
-func init() {
-	Analyzer.Flags.BoolVar(&checkParameters, "check-parameters", false, "report unused parameters")
-	policyFlags = fileset.RegisterFlags(Analyzer, true, false)
+// NewAnalyzer creates an unused analyzer configured with cfg.
+func NewAnalyzer(cfg Config) *analysis.Analyzer {
+	return &analysis.Analyzer{
+		Name: "unused",
+		Doc:  "check for unused parameters, methods, and fields",
+		Run: func(pass *analysis.Pass) (any, error) {
+			return run(pass, cfg)
+		},
+	}
 }
 
-func run(pass *analysis.Pass) (any, error) {
+func run(pass *analysis.Pass, cfg Config) (any, error) {
 	// We use token.Pos as the key because go/types creates different Object instances
 	// for different instantiations of a generic type, even though they refer to the same declaration.
 	used := make(map[token.Pos]bool)
@@ -49,19 +50,17 @@ func run(pass *analysis.Pass) (any, error) {
 		}
 	}
 
-	policy := policyFlags.NewPolicy()
-
 	for _, f := range pass.Files {
-		if policy.ShouldSkipAST(pass.Fset, f) {
+		if cfg.Policy.ShouldSkipAST(pass.Fset, f) {
 			continue
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
 			switch node := n.(type) {
 			case *ast.FuncDecl:
-				checkUnusedParams(pass, node.Type.Params, node.Body, used)
+				checkUnusedParams(pass, node.Type.Params, node.Body, used, cfg.CheckParameters)
 				checkUnusedFunc(pass, node, used)
 			case *ast.FuncLit:
-				checkUnusedParams(pass, node.Type.Params, node.Body, used)
+				checkUnusedParams(pass, node.Type.Params, node.Body, used, cfg.CheckParameters)
 			case *ast.StructType:
 				checkUnusedFields(pass, node, used)
 			}
@@ -71,7 +70,7 @@ func run(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
-func checkUnusedParams(pass *analysis.Pass, params *ast.FieldList, body *ast.BlockStmt, used map[token.Pos]bool) {
+func checkUnusedParams(pass *analysis.Pass, params *ast.FieldList, body *ast.BlockStmt, used map[token.Pos]bool, checkParameters bool) {
 	if !checkParameters {
 		return
 	}

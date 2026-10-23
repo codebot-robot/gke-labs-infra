@@ -17,18 +17,17 @@ package golang
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
-	"strings"
-	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/unused"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -37,8 +36,6 @@ import (
 	"golang.org/x/tools/go/packages"
 	"k8s.io/klog/v2"
 )
-
-var analyzerMu sync.Mutex
 
 // GoVetTask represents a task to run go vet.
 type GoVetTask struct {
@@ -92,121 +89,68 @@ func (t *GovulncheckTask) GetChildren() []tasks.Task {
 
 // AnalyzersTask represents a task to run enabled code style analyzers in-process.
 type AnalyzersTask struct {
-	Dir              string
-	RepoRoot         string
-	Enabled          map[string]codestyle.Mode
-	PerAnalyzerFlags map[string][]string
-	SkipGlobs        []string
+	Dir       string
+	Analyzers []*analysis.Analyzer
+	Enabled   map[string]codestyle.Mode
+	Policies  map[string]fileset.Policy
+	Settings  map[string]config.LinterConfig
 }
 
 // SkipGenerated reports whether skipGenerated is enabled for the named analyzer.
 func (t *AnalyzersTask) SkipGenerated(name string) bool {
-	for _, f := range t.PerAnalyzerFlags[name] {
-		if strings.HasPrefix(f, "-skip-generated=") {
-			return strings.TrimPrefix(f, "-skip-generated=") == "true"
-		}
+	if p, ok := t.Policies[name]; ok {
+		return p.SkipGenerated
 	}
 	return false
 }
 
 // SkipTests reports whether skipTests is enabled for the named analyzer.
 func (t *AnalyzersTask) SkipTests(name string) bool {
-	for _, f := range t.PerAnalyzerFlags[name] {
-		if strings.HasPrefix(f, "-skip-tests=") {
-			return strings.TrimPrefix(f, "-skip-tests=") == "true"
-		}
+	if p, ok := t.Policies[name]; ok {
+		return p.SkipTests
 	}
 	return false
 }
 
-// Packages returns any -package flags configured for the named analyzer.
+// Packages returns any packages configured for the named analyzer.
 func (t *AnalyzersTask) Packages(name string) []string {
-	var pkgs []string
-	for _, f := range t.PerAnalyzerFlags[name] {
-		if strings.HasPrefix(f, "-package=") {
-			pkgs = append(pkgs, strings.TrimPrefix(f, "-package="))
+	if s, ok := t.Settings[name]; ok && s != nil {
+		val := reflect.ValueOf(s)
+		if val.Kind() == reflect.Pointer {
+			val = val.Elem()
+		}
+		if val.Kind() == reflect.Struct {
+			f := val.FieldByName("Packages")
+			if f.IsValid() && f.Type() == reflect.TypeOf([]string(nil)) {
+				return f.Interface().([]string)
+			}
 		}
 	}
-	return pkgs
+	return nil
 }
 
-// Types returns any -type flags configured for the named analyzer.
+// Types returns any types configured for the named analyzer.
 func (t *AnalyzersTask) Types(name string) []string {
-	var types []string
-	for _, f := range t.PerAnalyzerFlags[name] {
-		if strings.HasPrefix(f, "-type=") {
-			types = append(types, strings.TrimPrefix(f, "-type="))
+	if s, ok := t.Settings[name]; ok && s != nil {
+		val := reflect.ValueOf(s)
+		if val.Kind() == reflect.Pointer {
+			val = val.Elem()
+		}
+		if val.Kind() == reflect.Struct {
+			f := val.FieldByName("Types")
+			if f.IsValid() && f.Type() == reflect.TypeOf([]string(nil)) {
+				return f.Interface().([]string)
+			}
 		}
 	}
-	return types
-}
-
-func setAnalyzerFlag(fs *flag.FlagSet, analyzerName, flagStr string) error {
-	flagStr = strings.TrimLeft(flagStr, "-")
-	if idx := strings.Index(flagStr, "."); idx != -1 {
-		prefix := flagStr[:idx]
-		if strings.EqualFold(prefix, analyzerName) || strings.EqualFold(strings.ReplaceAll(prefix, "-", ""), strings.ReplaceAll(analyzerName, "-", "")) {
-			flagStr = flagStr[idx+1:]
-		}
-	}
-	k, v, hasVal := strings.Cut(flagStr, "=")
-	if !hasVal {
-		v = "true"
-	}
-	f := fs.Lookup(k)
-	if f == nil {
-		return fmt.Errorf("unknown flag %q for analyzer %s", k, analyzerName)
-	}
-	return fs.Set(k, v)
+	return nil
 }
 
 func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running analyzers in %s", t.Dir)
 
-	var analyzersToRun []*analysis.Analyzer
-	for _, reg := range codestyle.Analyzers {
-		if reg.CustomTask {
-			continue
-		}
-		mode, ok := t.Enabled[reg.Name]
-		if !ok || mode == codestyle.ModeIgnore {
-			continue
-		}
-		analyzersToRun = append(analyzersToRun, reg.Analyzer)
-	}
-	if len(analyzersToRun) == 0 {
+	if len(t.Analyzers) == 0 {
 		return nil
-	}
-
-	analyzerMu.Lock()
-	defer analyzerMu.Unlock()
-
-	for _, a := range analyzersToRun {
-		a.Flags.VisitAll(func(f *flag.Flag) {
-			if r, ok := f.Value.(fileset.Resettable); ok {
-				r.Reset()
-			}
-		})
-
-		if t.RepoRoot != "" {
-			if f := a.Flags.Lookup("repo-root"); f != nil {
-				if err := a.Flags.Set("repo-root", t.RepoRoot); err != nil {
-					return fmt.Errorf("failed to set repo-root for %s: %w", a.Name, err)
-				}
-			}
-		}
-		for _, g := range t.SkipGlobs {
-			if f := a.Flags.Lookup("skip-glob"); f != nil {
-				if err := a.Flags.Set("skip-glob", g); err != nil {
-					return fmt.Errorf("failed to set skip-glob for %s: %w", a.Name, err)
-				}
-			}
-		}
-		for _, flagStr := range t.PerAnalyzerFlags[a.Name] {
-			if err := setAnalyzerFlag(&a.Flags, a.Name, flagStr); err != nil {
-				return err
-			}
-		}
 	}
 
 	cfg := &packages.Config{
@@ -228,7 +172,7 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 		return fmt.Errorf("failed to load packages in %s: %d error(s)", t.Dir, n)
 	}
 
-	graph, err := checker.Analyze(analyzersToRun, pkgs, nil)
+	graph, err := checker.Analyze(t.Analyzers, pkgs, nil)
 	if err != nil {
 		return fmt.Errorf("analyzers failed in %s: %w", t.Dir, err)
 	}
@@ -272,7 +216,7 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	}
 
 	var errs []error
-	for _, a := range analyzersToRun {
+	for _, a := range t.Analyzers {
 		diags := diagsByAnalyzer[a.Name]
 		if len(diags) == 0 {
 			continue
@@ -391,11 +335,10 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 		}
 
 		analyzersTask := &AnalyzersTask{
-			Dir:              dir,
-			RepoRoot:         root,
-			Enabled:          make(map[string]codestyle.Mode),
-			PerAnalyzerFlags: make(map[string][]string),
-			SkipGlobs:        cfg.Skip,
+			Dir:      dir,
+			Enabled:  make(map[string]codestyle.Mode),
+			Policies: make(map[string]fileset.Policy),
+			Settings: make(map[string]config.LinterConfig),
 		}
 
 		for _, reg := range codestyle.Analyzers {
@@ -421,36 +364,29 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 				continue
 			}
 			analyzersTask.Enabled[reg.Name] = mode
-			var flags []string
-			skipGen := reg.ResolveSkipGenerated(cfg)
-			flags = append(flags, fmt.Sprintf("-skip-generated=%t", skipGen))
-			skipTests := reg.ResolveSkipTests(cfg)
-			flags = append(flags, fmt.Sprintf("-skip-tests=%t", skipTests))
 
-			switch reg.Name {
-			case "unused":
-				if cfg.IsUnusedParametersEnabled() {
-					flags = append(flags, "-check-parameters=true")
-				} else {
-					flags = append(flags, "-check-parameters=false")
-				}
-			case "testonlyimports":
-				if c := cfg.TestOnlyImports(); c != nil {
-					for _, pkg := range c.Packages {
-						flags = append(flags, "-package="+pkg)
-					}
-				}
-			case "closewriter":
-				if c := cfg.CloseWriter(); c != nil {
-					for _, typ := range c.Types {
-						flags = append(flags, "-type="+typ)
+			skipGen := reg.ResolveSkipGenerated(cfg)
+			skipTests := reg.ResolveSkipTests(cfg)
+			policy := fileset.NewPolicy(skipGen, skipTests, cfg.Skip, root)
+			analyzersTask.Policies[reg.Name] = policy
+
+			settings := cfg.Linter(reg.ConfigKey())
+			if reg.Matches("unused") {
+				if us, ok := settings.(*unused.Settings); ok {
+					if us.Parameters == nil && cfg.IsUnusedParametersEnabled() {
+						us.Parameters = &unused.ParametersSettings{Mode: "error"}
 					}
 				}
 			}
-			analyzersTask.PerAnalyzerFlags[reg.Name] = flags
+			analyzersTask.Settings[reg.Name] = settings
+
+			if reg.New != nil {
+				analyzer := reg.New(policy, settings)
+				analyzersTask.Analyzers = append(analyzersTask.Analyzers, analyzer)
+			}
 		}
 
-		if len(analyzersTask.Enabled) > 0 {
+		if len(analyzersTask.Analyzers) > 0 {
 			modGroup.Tasks = append(modGroup.Tasks, analyzersTask)
 		}
 
@@ -468,11 +404,11 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 
 // Lint runs go vet and govulncheck in discovered modules.
 func Lint(ctx context.Context, r *repo.Repo, root string) error {
-	t, err := LintTasks(r, root)
+	task, err := LintTasks(r, root)
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r})
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r}, []tasks.Task{task}, tasks.RunOptions{})
 }
 
 // hasGoFiles returns true if the directory or any of its subdirectories

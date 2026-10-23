@@ -28,15 +28,19 @@ var Analyzer = &analysis.Analyzer{
 	Run:  runAnalyzer,
 }
 
-var policyFlags *fileset.PolicyFlags
+var (
+	skipGenerated bool
+	skipTests     bool = true
+)
 
 func init() {
-	policyFlags = fileset.RegisterFlags(Analyzer, false, true)
+	Analyzer.Flags.BoolVar(&skipGenerated, "skip-generated", false, "skip generated files")
+	Analyzer.Flags.BoolVar(&skipTests, "skip-tests", true, "skip _test.go files")
 }
 
 func runAnalyzer(pass *analysis.Pass) (any, error) {
 	matcher := NewExclusionMatcher(nil, true)
-	policy := policyFlags.NewPolicy()
+	policy := fileset.NewPolicy(skipGenerated, skipTests, nil, "")
 
 	for _, file := range pass.Files {
 		if policy.ShouldSkipAST(pass.Fset, file) {
