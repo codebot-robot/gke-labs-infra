@@ -20,35 +20,36 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-// ParametersSettings holds configuration for parameter checking.
+// ParametersSettings declares the YAML configuration for unusedparameters in .ap/go.yaml.
 type ParametersSettings struct {
-	Mode string `json:"mode"`
-}
-
-// Settings declares the YAML configuration for the unused linter in .ap/go.yaml.
-type Settings struct {
 	config.CommonLinterConfig
-	Parameters *ParametersSettings `json:"parameters"`
 }
 
 // CheckParameters reports whether unused parameter checking is enabled.
-func (s *Settings) CheckParameters() bool {
-	if s == nil || s.Parameters == nil {
-		return false
-	}
-	return s.Parameters.Mode != "" && s.Parameters.Mode != "skip" && s.Parameters.Mode != "ignore"
+func (s *ParametersSettings) CheckParameters() bool {
+	return s != nil && s.IsEnabled() && s.Mode != ""
 }
 
-// NewSettings returns a new empty Settings instance.
+// NewParametersSettings returns a new empty ParametersSettings instance.
+func NewParametersSettings() config.LinterConfig {
+	return &ParametersSettings{}
+}
+
+// NewSettings returns a new empty CommonLinterConfig instance for unused.
 func NewSettings() config.LinterConfig {
-	return &Settings{}
+	return &config.CommonLinterConfig{}
 }
 
-// New constructs the unused Analyzer from the resolved policy and linter settings.
-func New(policy fileset.Policy, lc config.LinterConfig) *analysis.Analyzer {
-	cfg := Config{Policy: policy}
-	if s, ok := lc.(*Settings); ok && s != nil {
-		cfg.CheckParameters = s.CheckParameters()
+// New constructs the unused Analyzer from the resolved policy and loaded config.
+func New(policy fileset.Policy, cfg *config.Config) *analysis.Analyzer {
+	checkParams := false
+	if cfg != nil {
+		if ps, ok := cfg.Linter("unusedparameters").(*ParametersSettings); ok && ps != nil {
+			checkParams = ps.CheckParameters()
+		}
 	}
-	return NewAnalyzer(cfg)
+	return NewAnalyzer(Config{
+		Policy:          policy,
+		CheckParameters: checkParams,
+	})
 }

@@ -16,42 +16,26 @@ package config
 
 import (
 	"sort"
-	"sync"
 )
 
-var (
-	linterMu       sync.RWMutex
-	linterRegistry = make(map[string]func() LinterConfig)
-	aliasToCanon   = make(map[string]string)
-	canonToAliases = make(map[string][]string)
-)
+var linterRegistry = make(map[string]func() LinterConfig)
 
-// RegisterLinter registers a constructor for a linter's settings type.
+// RegisterLinter registers a constructor for a linter's settings type under name and any aliases.
 func RegisterLinter(name string, newConfig func() LinterConfig, aliases ...string) {
-	linterMu.Lock()
-	defer linterMu.Unlock()
 	if newConfig == nil {
 		newConfig = func() LinterConfig { return &CommonLinterConfig{} }
 	}
 	linterRegistry[name] = newConfig
 	for _, alias := range aliases {
-		if alias != name {
-			aliasToCanon[alias] = name
-			canonToAliases[name] = append(canonToAliases[name], alias)
-			linterRegistry[alias] = newConfig
-		}
+		linterRegistry[alias] = newConfig
 	}
 }
 
-// RegisteredLinters returns a sorted list of registered canonical linter names (excluding aliases).
+// RegisteredLinters returns a sorted list of registered linter names.
 func RegisteredLinters() []string {
-	linterMu.RLock()
-	defer linterMu.RUnlock()
 	names := make([]string, 0, len(linterRegistry))
 	for name := range linterRegistry {
-		if _, isAlias := aliasToCanon[name]; !isAlias {
-			names = append(names, name)
-		}
+		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
@@ -59,7 +43,5 @@ func RegisteredLinters() []string {
 
 // RegisteredLinterConstructor returns the constructor for the named linter, or nil if not registered.
 func RegisteredLinterConstructor(name string) func() LinterConfig {
-	linterMu.RLock()
-	defer linterMu.RUnlock()
 	return linterRegistry[name]
 }

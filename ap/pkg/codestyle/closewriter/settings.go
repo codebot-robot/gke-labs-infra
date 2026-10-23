@@ -31,11 +31,13 @@ func NewSettings() config.LinterConfig {
 	return &Settings{}
 }
 
-// New constructs the closewriter Analyzer from the resolved policy and linter settings.
-func New(policy fileset.Policy, lc config.LinterConfig) *analysis.Analyzer {
-	cfg := Config{Policy: policy}
-	if s, ok := lc.(*Settings); ok && s != nil {
-		cfg.Types = s.Types
+// New constructs the closewriter Analyzer from the resolved policy and loaded config.
+func New(policy fileset.Policy, cfg *config.Config) *analysis.Analyzer {
+	c := Config{Policy: policy}
+	if cfg != nil {
+		if s, ok := cfg.Linter("closeWriter").(*Settings); ok && s != nil {
+			c.Types = s.Types
+		}
 	}
-	return NewAnalyzer(cfg)
+	return NewAnalyzer(c)
 }

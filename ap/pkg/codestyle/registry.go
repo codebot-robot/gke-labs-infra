@@ -50,7 +50,7 @@ type Registered struct {
 	CustomTask           bool
 
 	NewSettings func() config.LinterConfig
-	New         func(policy fileset.Policy, settings config.LinterConfig) *analysis.Analyzer
+	New         func(policy fileset.Policy, cfg *config.Config) *analysis.Analyzer
 }
 
 // ConfigKey returns the configuration key used in Config.Linter.
@@ -125,7 +125,7 @@ var Analyzers = []Registered{
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
 		NewSettings:          func() config.LinterConfig { return &config.CommonLinterConfig{} },
-		New: func(policy fileset.Policy, _ config.LinterConfig) *analysis.Analyzer {
+		New: func(policy fileset.Policy, _ *config.Config) *analysis.Analyzer {
 			return testcontext.NewAnalyzer(policy)
 		},
 	},
@@ -137,14 +137,13 @@ var Analyzers = []Registered{
 		DefaultSkipGenerated: true,
 		DefaultSkipTests:     false,
 		NewSettings:          func() config.LinterConfig { return &config.CommonLinterConfig{} },
-		New: func(policy fileset.Policy, _ config.LinterConfig) *analysis.Analyzer {
+		New: func(policy fileset.Policy, _ *config.Config) *analysis.Analyzer {
 			return any.NewAnalyzer(policy)
 		},
 	},
 	{
 		Name:                 "testonlyimports",
 		ConfigName:           "testOnlyImports",
-		Aliases:              []string{"testonlyimports"},
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
@@ -155,7 +154,6 @@ var Analyzers = []Registered{
 		Analyzer:             droppederrors.Analyzer,
 		Name:                 "droppederrors",
 		ConfigName:           "droppedErrors",
-		Aliases:              []string{"droppederrors"},
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     true,
@@ -165,7 +163,6 @@ var Analyzers = []Registered{
 	{
 		Name:                 "closewriter",
 		ConfigName:           "closeWriter",
-		Aliases:              []string{"closewriter"},
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
@@ -175,12 +172,11 @@ var Analyzers = []Registered{
 	{
 		Name:                 "deferinloop",
 		ConfigName:           "deferInLoop",
-		Aliases:              []string{"deferinloop"},
 		DefaultMode:          ModeError,
 		DefaultSkipGenerated: false,
 		DefaultSkipTests:     false,
 		NewSettings:          func() config.LinterConfig { return &config.CommonLinterConfig{} },
-		New: func(policy fileset.Policy, _ config.LinterConfig) *analysis.Analyzer {
+		New: func(policy fileset.Policy, _ *config.Config) *analysis.Analyzer {
 			return deferinloop.NewAnalyzer(policy)
 		},
 	},
@@ -192,7 +188,7 @@ func init() {
 			config.RegisterLinter(reg.ConfigKey(), reg.NewSettings, reg.Aliases...)
 		}
 	}
-	config.RegisterLinter("unusedparameters", func() config.LinterConfig { return &config.UnusedParametersConfig{} })
+	config.RegisterLinter("unusedparameters", unused.NewParametersSettings)
 }
 
 // Find finds a registered analyzer by name or alias.

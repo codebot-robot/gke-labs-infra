@@ -20,28 +20,18 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-func TestDecodeSettings(t *testing.T) {
+func TestDecodeParametersSettings(t *testing.T) {
 	yamlContent := `
 mode: error
-skipGenerated: false
-skipTests: true
-parameters:
-  mode: warn
 `
-	var s Settings
-	if err := yaml.Unmarshal([]byte(yamlContent), &s); err != nil {
-		t.Fatalf("failed to unmarshal Settings: %v", err)
+	var ps ParametersSettings
+	if err := yaml.Unmarshal([]byte(yamlContent), &ps); err != nil {
+		t.Fatalf("failed to unmarshal ParametersSettings: %v", err)
 	}
-	if s.Mode != "error" {
-		t.Errorf("expected Mode error, got %q", s.Mode)
+	if ps.Mode != "error" {
+		t.Errorf("expected Mode error, got %q", ps.Mode)
 	}
-	if s.SkipGeneratedOverride() == nil || *s.SkipGeneratedOverride() != false {
-		t.Errorf("expected SkipGeneratedOverride false")
-	}
-	if s.SkipTestsOverride() == nil || *s.SkipTestsOverride() != true {
-		t.Errorf("expected SkipTestsOverride true")
-	}
-	if !s.CheckParameters() {
+	if !ps.CheckParameters() {
 		t.Errorf("expected CheckParameters true")
 	}
 }

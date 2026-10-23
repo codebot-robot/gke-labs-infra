@@ -22,12 +22,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"sort"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/closewriter"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/unused"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/testonlyimports"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -114,34 +114,16 @@ func (t *AnalyzersTask) SkipTests(name string) bool {
 
 // Packages returns any packages configured for the named analyzer.
 func (t *AnalyzersTask) Packages(name string) []string {
-	if s, ok := t.Settings[name]; ok && s != nil {
-		val := reflect.ValueOf(s)
-		if val.Kind() == reflect.Pointer {
-			val = val.Elem()
-		}
-		if val.Kind() == reflect.Struct {
-			f := val.FieldByName("Packages")
-			if f.IsValid() && f.Type() == reflect.TypeOf([]string(nil)) {
-				return f.Interface().([]string)
-			}
-		}
+	if s, ok := t.Settings[name].(*testonlyimports.Settings); ok && s != nil {
+		return s.Packages
 	}
 	return nil
 }
 
 // Types returns any types configured for the named analyzer.
 func (t *AnalyzersTask) Types(name string) []string {
-	if s, ok := t.Settings[name]; ok && s != nil {
-		val := reflect.ValueOf(s)
-		if val.Kind() == reflect.Pointer {
-			val = val.Elem()
-		}
-		if val.Kind() == reflect.Struct {
-			f := val.FieldByName("Types")
-			if f.IsValid() && f.Type() == reflect.TypeOf([]string(nil)) {
-				return f.Interface().([]string)
-			}
-		}
+	if s, ok := t.Settings[name].(*closewriter.Settings); ok && s != nil {
+		return s.Types
 	}
 	return nil
 }
@@ -369,19 +351,10 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 			skipTests := reg.ResolveSkipTests(cfg)
 			policy := fileset.NewPolicy(skipGen, skipTests, cfg.Skip, root)
 			analyzersTask.Policies[reg.Name] = policy
-
-			settings := cfg.Linter(reg.ConfigKey())
-			if reg.Matches("unused") {
-				if us, ok := settings.(*unused.Settings); ok {
-					if us.Parameters == nil && cfg.IsUnusedParametersEnabled() {
-						us.Parameters = &unused.ParametersSettings{Mode: "error"}
-					}
-				}
-			}
-			analyzersTask.Settings[reg.Name] = settings
+			analyzersTask.Settings[reg.Name] = cfg.Linter(reg.ConfigKey())
 
 			if reg.New != nil {
-				analyzer := reg.New(policy, settings)
+				analyzer := reg.New(policy, cfg)
 				analyzersTask.Analyzers = append(analyzersTask.Analyzers, analyzer)
 			}
 		}
