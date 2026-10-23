@@ -388,6 +388,40 @@ lint:
 	}
 }
 
+func TestCommonLinterConfig_Baseline(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.Mkdir(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	yamlContent := `
+lint:
+  closeWriter:
+    baseline: .ap/custom-closewriter.txt
+  unused:
+    baseline: .ap/custom-unused.txt
+`
+	if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(tempDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	cw := cfg.Linter("closeWriter")
+	if cw.GetBaseline() != ".ap/custom-closewriter.txt" {
+		t.Errorf("expected closewriter baseline .ap/custom-closewriter.txt, got %q", cw.GetBaseline())
+	}
+
+	u := cfg.Linter("unused")
+	if u.GetBaseline() != ".ap/custom-unused.txt" {
+		t.Errorf("expected unused baseline .ap/custom-unused.txt, got %q", u.GetBaseline())
+	}
+}
+
 func TestConfig_InvalidUnusedMode(t *testing.T) {
 	tempDir := t.TempDir()
 	apDir := filepath.Join(tempDir, ".ap")

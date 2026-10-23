@@ -15,7 +15,6 @@
 package droppederrors
 
 import (
-	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -457,49 +456,4 @@ func formatCallee(expr ast.Expr, info *types.Info) string {
 		return id.Name
 	}
 	return types.ExprString(call.Fun)
-}
-
-func findEnclosingFunc(file *ast.File, fset *token.FileSet, pos token.Pos) string {
-	targetOffset := fset.Position(pos).Offset
-
-	// Check function declarations first
-	for _, decl := range file.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok {
-			start := fset.Position(fn.Pos()).Offset
-			end := fset.Position(fn.End()).Offset
-			if targetOffset >= start && targetOffset <= end {
-				return formatEnclosingFunc(fn)
-			}
-		}
-	}
-
-	// Check package-level variable declarations (e.g. var x = func() { _ = f() })
-	for _, decl := range file.Decls {
-		if gen, ok := decl.(*ast.GenDecl); ok && gen.Tok == token.VAR {
-			for _, spec := range gen.Specs {
-				if vspec, ok := spec.(*ast.ValueSpec); ok {
-					start := fset.Position(vspec.Pos()).Offset
-					end := fset.Position(vspec.End()).Offset
-					if targetOffset >= start && targetOffset <= end {
-						if len(vspec.Names) > 0 {
-							return vspec.Names[0].Name
-						}
-					}
-				}
-			}
-		}
-	}
-
-	return "<init>"
-}
-
-func formatEnclosingFunc(fn *ast.FuncDecl) string {
-	if fn.Recv != nil && len(fn.Recv.List) > 0 {
-		recv := fn.Recv.List[0].Type
-		if star, ok := recv.(*ast.StarExpr); ok {
-			return fmt.Sprintf("(*%s).%s", types.ExprString(star.X), fn.Name.Name)
-		}
-		return fmt.Sprintf("(%s).%s", types.ExprString(recv), fn.Name.Name)
-	}
-	return fn.Name.Name
 }

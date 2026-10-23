@@ -14,25 +14,17 @@
 
 package droppederrors
 
-import "go/token"
+import (
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/baseline"
+)
 
 const (
-	CategoryDroppedError               = "dropped-error"
-	CategoryErrorOnlyCheckedForSuccess = "error-only-checked-for-success"
+	CategoryDroppedError               = baseline.CategoryDroppedError
+	CategoryErrorOnlyCheckedForSuccess = baseline.CategoryErrorOnlyCheckedForSuccess
 )
 
 // Finding represents an unchecked error finding in source code.
-type Finding struct {
-	Pos           token.Position
-	Category      string // CategoryDroppedError or CategoryErrorOnlyCheckedForSuccess
-	Callee        string
-	EnclosingFunc string
-	RelFile       string // Relative to AP root
-	RepoRel       string // Relative to repo root
-	ModRel        string // Relative to module dir
-}
+type Finding = baseline.Finding
 
-// Key returns a unique signature for deduplication.
-func (f Finding) Key() string {
-	return f.Pos.Filename + ":" + f.Pos.String() + ":" + f.Category + ":" + f.EnclosingFunc + ":" + f.Callee
-}
+// BaselineEntry represents a baseline entry.
+type BaselineEntry = baseline.Entry
