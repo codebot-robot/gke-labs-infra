@@ -15,10 +15,212 @@
 package droppederrors
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
+	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/analysis/checker"
+	"golang.org/x/tools/go/packages"
 )
+
+// Options holds configuration for running the dropped errors checker in tests.
+type Options struct {
+	RepoRoot           string
+	APRoot             string
+	Dir                string
+	Packages           []string
+	Mode               string // ignore | warn | error
+	BaselinePath       string
+	WriteBaseline      bool
+	Exclude            []string
+	SkipTests          bool
+	SkipGenerated      bool
+	SkipGlobs          []string
+	UseDefaultExcludes *bool
+	GOOS               []string
+}
+
+// Result holds the findings and matching results.
+type Result struct {
+	Findings        []Finding
+	NewFindings     []Finding
+	StaleEntries    []BaselineEntry
+	BaselineEntries []BaselineEntry
+	CheckedFiles    map[string]bool
+}
+
+func Run(ctx context.Context, opts Options) (*Result, error) {
+	if opts.Dir == "" {
+		if opts.APRoot != "" {
+			opts.Dir = opts.APRoot
+		} else if opts.RepoRoot != "" {
+			opts.Dir = opts.RepoRoot
+		}
+	}
+	if opts.APRoot == "" {
+		opts.APRoot = opts.Dir
+	}
+	if opts.RepoRoot == "" {
+		opts.RepoRoot = opts.APRoot
+	}
+	if len(opts.Packages) == 0 {
+		opts.Packages = []string{"./..."}
+	}
+
+	policy := fileset.NewPolicy(opts.SkipGenerated, opts.SkipTests, opts.SkipGlobs, opts.RepoRoot)
+	a := NewAnalyzer(Config{
+		Policy:             policy,
+		Exclude:            opts.Exclude,
+		UseDefaultExcludes: opts.UseDefaultExcludes,
+	})
+
+	cfg := &packages.Config{
+		Context: ctx,
+		Mode:    packages.LoadAllSyntax | packages.NeedModule,
+		Dir:     opts.Dir,
+		Tests:   !opts.SkipTests,
+	}
+	pkgs, err := packages.Load(cfg, opts.Packages...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load packages in %s: %w", opts.Dir, err)
+	}
+
+	allCheckedFiles := make(map[string]bool)
+	for _, pkg := range pkgs {
+		for _, file := range pkg.Syntax {
+			pos := pkg.Fset.Position(file.Pos())
+			allCheckedFiles[filepath.ToSlash(pos.Filename)] = true
+			if opts.RepoRoot != "" {
+				allCheckedFiles[relPath(opts.RepoRoot, pos.Filename)] = true
+			}
+			if opts.Dir != "" {
+				allCheckedFiles[relPath(opts.Dir, pos.Filename)] = true
+			}
+		}
+	}
+
+	graph, err := checker.Analyze([]*analysis.Analyzer{a}, pkgs, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var allFindings []Finding
+	seenFindings := make(map[string]bool)
+	for _, act := range graph.Roots {
+		if act.Err != nil {
+			return nil, act.Err
+		}
+		if !act.IsRoot {
+			continue
+		}
+		if fList, ok := act.Result.([]Finding); ok {
+			for _, f := range fList {
+				f.RelFile = relPath(opts.APRoot, f.Pos.Filename)
+				f.RepoRel = relPath(opts.RepoRoot, f.Pos.Filename)
+				f.ModRel = relPath(opts.Dir, f.Pos.Filename)
+				k := f.Key()
+				if !seenFindings[k] {
+					seenFindings[k] = true
+					allFindings = append(allFindings, f)
+				}
+			}
+		}
+	}
+
+	sort.Slice(allFindings, func(i, j int) bool {
+		if allFindings[i].RelFile != allFindings[j].RelFile {
+			return allFindings[i].RelFile < allFindings[j].RelFile
+		}
+		if allFindings[i].Pos.Line != allFindings[j].Pos.Line {
+			return allFindings[i].Pos.Line < allFindings[j].Pos.Line
+		}
+		if allFindings[i].Pos.Column != allFindings[j].Pos.Column {
+			return allFindings[i].Pos.Column < allFindings[j].Pos.Column
+		}
+		if allFindings[i].Category != allFindings[j].Category {
+			return allFindings[i].Category < allFindings[j].Category
+		}
+		return allFindings[i].Callee < allFindings[j].Callee
+	})
+
+	res := &Result{
+		Findings:     allFindings,
+		CheckedFiles: allCheckedFiles,
+	}
+
+	baselineRoot := opts.RepoRoot
+	if baselineRoot == "" {
+		baselineRoot = opts.APRoot
+	}
+	if opts.BaselinePath != "" {
+		bDir := filepath.Dir(opts.BaselinePath)
+		if filepath.Base(bDir) == ".ap" {
+			baselineRoot = filepath.Dir(bDir)
+		}
+	}
+
+	if opts.WriteBaseline {
+		var finalEntries []BaselineEntry
+		if opts.BaselinePath != "" {
+			existingEntries, err := LoadBaseline(opts.BaselinePath)
+			if err != nil {
+				return nil, err
+			}
+			for _, e := range existingEntries {
+				entryFile := filepath.ToSlash(e.File)
+				if !allCheckedFiles[entryFile] {
+					finalEntries = append(finalEntries, e)
+				}
+			}
+		}
+
+		for _, f := range allFindings {
+			relFile := relPath(baselineRoot, f.Pos.Filename)
+			finalEntries = append(finalEntries, BaselineEntry{
+				File:          relFile,
+				EnclosingFunc: f.EnclosingFunc,
+				Category:      f.Category,
+				Callee:        f.Callee,
+			})
+		}
+		if opts.BaselinePath != "" {
+			if err := WriteBaseline(opts.BaselinePath, finalEntries); err != nil {
+				return nil, fmt.Errorf("failed to write baseline to %s: %w", opts.BaselinePath, err)
+			}
+		}
+		res.BaselineEntries = finalEntries
+		return res, nil
+	}
+
+	var baselineEntries []BaselineEntry
+	if opts.BaselinePath != "" {
+		var err error
+		baselineEntries, err = LoadBaseline(opts.BaselinePath)
+		if err != nil {
+			return nil, err
+		}
+	}
+	res.BaselineEntries = baselineEntries
+
+	newFindings, staleEntries := MatchFindings(allFindings, baselineEntries, allCheckedFiles, baselineRoot)
+	res.NewFindings = newFindings
+	res.StaleEntries = staleEntries
+
+	return res, nil
+}
+
+func relPath(base, target string) string {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return filepath.ToSlash(target)
+	}
+	return filepath.ToSlash(rel)
+}
 
 func createTestModule(t *testing.T, files map[string]string) string {
 	t.Helper()

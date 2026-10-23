@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -44,9 +43,9 @@ type GovulncheckConfig struct {
 }
 
 type LintConfig struct {
-	SkipGenerated *bool `json:"skipGenerated"`
-	SkipTests     *bool `json:"skipTests"`
-	GOOS          any   `json:"goos"`
+	SkipGenerated *bool    `json:"skipGenerated"`
+	SkipTests     *bool    `json:"skipTests"`
+	GOOS          []string `json:"goos"`
 
 	linters map[string]LinterConfig
 }
@@ -366,48 +365,12 @@ func (c *Config) DroppedErrorsUseDefaultExcludes() bool {
 }
 
 // LintGOOS returns the list of target GOOS values configured under lint.goos,
-// or nil if lint.goos is omitted or set to "auto".
+// or nil if omitted (which implies automatic detection).
 func (c *Config) LintGOOS() []string {
-	if c == nil || c.Lint == nil || c.Lint.GOOS == nil {
+	if c == nil || c.Lint == nil {
 		return nil
 	}
-	switch v := c.Lint.GOOS.(type) {
-	case string:
-		if strings.EqualFold(v, "auto") {
-			return nil
-		}
-		return []string{v}
-	case []any:
-		var res []string
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				if strings.EqualFold(s, "auto") {
-					return nil
-				}
-				res = append(res, s)
-			}
-		}
-		return res
-	case []string:
-		if len(v) == 1 && strings.EqualFold(v[0], "auto") {
-			return nil
-		}
-		return v
-	}
-	return nil
-}
-
-// DroppedErrorsGOOS returns the list of GOOS targets to check.
-// Deprecated: use LintGOOS instead.
-func (c *Config) DroppedErrorsGOOS() []string {
-	if goos := c.LintGOOS(); len(goos) > 0 {
-		return goos
-	}
-	host := runtime.GOOS
-	if host == "linux" {
-		return []string{"linux"}
-	}
-	return []string{host, "linux"}
+	return c.Lint.GOOS
 }
 
 // ImageRepo returns the image repository to use, defaulting to "images.local".

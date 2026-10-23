@@ -33,7 +33,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/testonlyimports"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"golang.org/x/tools/go/analysis"
@@ -167,6 +166,8 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 		message string
 	}
 	seen := make(map[diagKey]bool)
+	seenFindings := make(map[string]bool)
+	var allDroppedErrorsFindings []droppederrors.Finding
 
 	diagsByAnalyzer := make(map[string][]positionedDiag)
 	allCheckedFiles := make(map[string]bool)
@@ -222,6 +223,19 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 			if !act.IsRoot {
 				continue
 			}
+			if act.Analyzer.Name == "droppederrors" {
+				if fList, ok := act.Result.([]droppederrors.Finding); ok {
+					for _, f := range fList {
+						k := f.Key()
+						if seenFindings[k] {
+							continue
+						}
+						seenFindings[k] = true
+						allDroppedErrorsFindings = append(allDroppedErrorsFindings, f)
+					}
+				}
+				continue
+			}
 			for _, diag := range act.Diagnostics {
 				posn := act.Package.Fset.Position(diag.Pos)
 				end := act.Package.Fset.Position(diag.End)
@@ -240,15 +254,14 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 
 	var errs []error
 	for _, a := range t.Analyzers {
-		diags := diagsByAnalyzer[a.Name]
-
 		if a.Name == "droppederrors" {
-			if err := t.processDroppedErrors(a, diags, allCheckedFiles); err != nil {
+			if err := t.processDroppedErrors(a, allDroppedErrorsFindings, allCheckedFiles); err != nil {
 				errs = append(errs, err)
 			}
 			continue
 		}
 
+		diags := diagsByAnalyzer[a.Name]
 		if len(diags) == 0 {
 			continue
 		}
@@ -285,7 +298,7 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	return errors.Join(errs...)
 }
 
-func (t *AnalyzersTask) processDroppedErrors(a *analysis.Analyzer, diags []positionedDiag, allCheckedFiles map[string]bool) error {
+func (t *AnalyzersTask) processDroppedErrors(a *analysis.Analyzer, findings []droppederrors.Finding, allCheckedFiles map[string]bool) error {
 	baselineRoot := t.RepoRoot
 	if baselineRoot == "" {
 		baselineRoot = t.Dir
@@ -293,34 +306,11 @@ func (t *AnalyzersTask) processDroppedErrors(a *analysis.Analyzer, diags []posit
 
 	baselinePath := t.BaselinePath
 	if baselinePath == "" {
-		if de, ok := t.Settings["droppederrors"].(*config.DroppedErrorsConfig); ok && de != nil && de.Baseline != "" {
-			baselinePath = de.Baseline
+		configured := ""
+		if de, ok := t.Settings["droppederrors"].(*config.DroppedErrorsConfig); ok && de != nil {
+			configured = de.Baseline
 		}
-	}
-	if baselinePath == "" {
-		defaultBaseline := filepath.Join(baselineRoot, ".ap", "droppederrors-baseline.txt")
-		exists, err := fileutils.FileExists(defaultBaseline)
-		if err != nil {
-			return err
-		}
-		if exists {
-			baselinePath = defaultBaseline
-		} else if t.Dir != "" {
-			modBaseline := filepath.Join(t.Dir, ".ap", "droppederrors-baseline.txt")
-			exists, err := fileutils.FileExists(modBaseline)
-			if err != nil {
-				return err
-			}
-			if exists {
-				baselinePath = modBaseline
-			}
-		}
-		if baselinePath == "" && t.WriteBaseline {
-			baselinePath = defaultBaseline
-		}
-	}
-	if baselinePath != "" && !filepath.IsAbs(baselinePath) {
-		baselinePath = filepath.Join(baselineRoot, baselinePath)
+		baselinePath = droppederrors.ResolveBaselinePath(t.RepoRoot, t.Dir, configured, t.WriteBaseline)
 	}
 
 	if baselinePath != "" {
@@ -330,21 +320,10 @@ func (t *AnalyzersTask) processDroppedErrors(a *analysis.Analyzer, diags []posit
 		}
 	}
 
-	var findings []droppederrors.Finding
-	for _, pd := range diags {
-		posn := pd.fset.Position(pd.diag.Pos)
-		cat, enclosingFunc := extractCategoryAndEnclosingFunc(pd.diag)
-		callee := extractCallee(pd.diag.Message)
-
-		findings = append(findings, droppederrors.Finding{
-			Pos:           posn,
-			Category:      cat,
-			Callee:        callee,
-			EnclosingFunc: enclosingFunc,
-			RelFile:       relPath(baselineRoot, posn.Filename),
-			RepoRel:       relPath(t.RepoRoot, posn.Filename),
-			ModRel:        relPath(t.Dir, posn.Filename),
-		})
+	for i := range findings {
+		findings[i].RelFile = relPath(baselineRoot, findings[i].Pos.Filename)
+		findings[i].RepoRel = relPath(t.RepoRoot, findings[i].Pos.Filename)
+		findings[i].ModRel = relPath(t.Dir, findings[i].Pos.Filename)
 	}
 
 	sort.Slice(findings, func(i, j int) bool {
@@ -431,36 +410,6 @@ func (t *AnalyzersTask) processDroppedErrors(a *analysis.Analyzer, diags []posit
 		}
 	}
 	return nil
-}
-
-func extractCategoryAndEnclosingFunc(diag analysis.Diagnostic) (category, enclosingFunc string) {
-	if diag.Category != "" {
-		parts := strings.SplitN(diag.Category, ":", 2)
-		category = parts[0]
-		if len(parts) > 1 {
-			enclosingFunc = parts[1]
-		}
-	}
-	if enclosingFunc == "" && diag.URL != "" {
-		enclosingFunc = diag.URL
-	}
-	if category == "" {
-		category = droppederrors.CategoryDroppedError
-	}
-	return category, enclosingFunc
-}
-
-func extractCallee(msg string) string {
-	if strings.HasPrefix(msg, "unchecked error: ") {
-		return strings.TrimPrefix(msg, "unchecked error: ")
-	}
-	if strings.HasPrefix(msg, "error only checked for success: ") {
-		return strings.TrimPrefix(msg, "error only checked for success: ")
-	}
-	if idx := strings.LastIndex(msg, ": "); idx != -1 {
-		return msg[idx+2:]
-	}
-	return msg
 }
 
 func relPath(base, target string) string {

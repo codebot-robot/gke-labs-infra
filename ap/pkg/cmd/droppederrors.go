@@ -18,12 +18,15 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/droppederrors"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
+	"golang.org/x/tools/go/analysis"
 )
 
 // DroppedErrorsOptions holds CLI options for the droppederrors command.
@@ -69,7 +72,7 @@ func BuildDroppedErrorsCommand(rootOpt *RootOptions) *cobra.Command {
 }
 
 // RunDroppedErrors executes the droppederrors command.
-func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrorsOptions, args []string) error {
+func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrorsOptions, _ []string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get current working directory: %w", err)
@@ -135,35 +138,8 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 	if mode != "error" && mode != "warn" && mode != "ignore" {
 		return fmt.Errorf("invalid droppederrors mode %q: must be one of 'error', 'warn', 'ignore'", mode)
 	}
-
-	baseline := opt.Baseline
-	if baseline == "" && cfg != nil {
-		baseline = cfg.DroppedErrorsBaseline()
-	}
-	if baseline == "" {
-		defaultBaseline := filepath.Join(apRoot, ".ap", "droppederrors-baseline.txt")
-		exists, err := fileutils.FileExists(defaultBaseline)
-		if err != nil {
-			return err
-		}
-		if exists {
-			baseline = defaultBaseline
-		} else if repoRoot != "" {
-			repoBaseline := filepath.Join(repoRoot, ".ap", "droppederrors-baseline.txt")
-			exists, err := fileutils.FileExists(repoBaseline)
-			if err != nil {
-				return err
-			}
-			if exists {
-				baseline = repoBaseline
-			}
-		}
-		if baseline == "" && opt.WriteBaseline {
-			baseline = defaultBaseline
-		}
-	}
-	if baseline != "" && !filepath.IsAbs(baseline) {
-		baseline = filepath.Join(apRoot, baseline)
+	if mode == "ignore" && !opt.WriteBaseline {
+		return nil
 	}
 
 	var exclude []string
@@ -187,87 +163,50 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		useDefaultExcludes = cfg.DroppedErrorsUseDefaultExcludes()
 	}
 
-	goosList := opt.GOOS
-	if len(goosList) == 0 && cfg != nil {
-		goosList = cfg.LintGOOS()
-	}
-
-	if mode == "ignore" && !opt.WriteBaseline {
-		return nil
-	}
-
-	packages := args
-	if len(packages) == 0 {
-		packages = []string{"./..."}
-	}
-
 	var skipGlobs []string
 	if cfg != nil {
 		skipGlobs = cfg.Skip
 	}
 
-	checkOpts := droppederrors.Options{
-		RepoRoot:           repoRoot,
-		APRoot:             apRoot,
-		Dir:                cwd,
-		Packages:           packages,
-		Mode:               mode,
-		BaselinePath:       baseline,
-		WriteBaseline:      opt.WriteBaseline,
+	goosList := opt.GOOS
+	if len(goosList) == 0 && cfg != nil {
+		goosList = cfg.LintGOOS()
+	}
+
+	policy := fileset.NewPolicy(skipGenerated, skipTests, skipGlobs, repoRoot)
+	analyzer := droppederrors.NewAnalyzer(droppederrors.Config{
+		Policy:             policy,
 		Exclude:            exclude,
-		SkipTests:          skipTests,
-		SkipGenerated:      skipGenerated,
-		SkipGlobs:          skipGlobs,
 		UseDefaultExcludes: &useDefaultExcludes,
-		GOOS:               goosList,
+	})
+
+	configuredBaseline := opt.Baseline
+	if configuredBaseline == "" && cfg != nil {
+		configuredBaseline = cfg.DroppedErrorsBaseline()
 	}
 
-	res, err := droppederrors.Run(ctx, checkOpts)
-	if err != nil {
-		return err
+	deSettings := &config.DroppedErrorsConfig{
+		CommonLinterConfig: config.CommonLinterConfig{
+			Mode:          mode,
+			SkipGenerated: &skipGenerated,
+			SkipTests:     &skipTests,
+		},
+		Exclude:            exclude,
+		Baseline:           configuredBaseline,
+		UseDefaultExcludes: &useDefaultExcludes,
 	}
 
-	if opt.WriteBaseline {
-		fmt.Printf("Wrote %d baseline entries to %s\n", len(res.BaselineEntries), baseline)
-		return nil
+	task := &golang.AnalyzersTask{
+		Dir:           cwd,
+		RepoRoot:      repoRoot,
+		Enabled:       map[string]codestyle.Mode{"droppederrors": codestyle.Mode(mode)},
+		Policies:      map[string]fileset.Policy{"droppederrors": policy},
+		Settings:      map[string]config.LinterConfig{"droppederrors": deSettings},
+		Analyzers:     []*analysis.Analyzer{analyzer},
+		GOOS:          goosList,
+		WriteBaseline: opt.WriteBaseline,
+		BaselinePath:  opt.Baseline,
 	}
 
-	for _, stale := range res.StaleEntries {
-		fmt.Printf("stale baseline entry: %s (remove from baseline)\n", stale)
-	}
-
-	if mode == "warn" {
-		findingsToReport := res.NewFindings
-		if len(res.BaselineEntries) == 0 {
-			findingsToReport = res.Findings
-		}
-		for _, f := range findingsToReport {
-			formatFindingMsg(f, "warn")
-		}
-		return nil
-	}
-
-	if mode == "error" {
-		if len(res.NewFindings) > 0 {
-			for _, f := range res.NewFindings {
-				formatFindingMsg(f, "error")
-			}
-			return fmt.Errorf("droppederrors: %d new unchecked errors found", len(res.NewFindings))
-		}
-		return nil
-	}
-
-	return nil
-}
-
-func formatFindingMsg(f droppederrors.Finding, severity string) {
-	desc := "unchecked error"
-	if f.Category == droppederrors.CategoryErrorOnlyCheckedForSuccess {
-		desc = "error only checked for success"
-	}
-	if severity == "warn" {
-		fmt.Printf("%s:%d:%d: [warn] %s in %s: %s\n", f.Pos.Filename, f.Pos.Line, f.Pos.Column, desc, f.EnclosingFunc, f.Callee)
-	} else {
-		fmt.Printf("%s:%d:%d: %s in %s: %s\n", f.Pos.Filename, f.Pos.Line, f.Pos.Column, desc, f.EnclosingFunc, f.Callee)
-	}
+	return task.Run(ctx, &tasks.APScope{RepoRoot: repoRoot, Dir: cwd})
 }

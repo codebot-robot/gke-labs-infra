@@ -122,7 +122,7 @@ lint:
 
 `go.yaml` options:
 - `skip`: An optional list of glob patterns to ignore during repository scanning and linting (e.g. `vendor/**`).
-- `lint.goos`: Target `GOOS` platforms to check (defaults to `auto`, which automatically detects non-host GOOS targets referenced by in-scope Go files via filename suffixes and `//go:build` constraints). Can be explicitly configured (e.g. `[linux, darwin]`).
+- `lint.goos`: An optional list of target `GOOS` platforms to check (e.g. `[linux, darwin]`), which overrides automatic detection; omit it for auto (automatically detects non-host GOOS targets referenced by in-scope Go files via filename suffixes and `//go:build` constraints).
 - `lint.skipGenerated`: Cross-cutting boolean flag. When `false` (the default), generated code is linted unless a linter specifies its own default or per-linter override.
 - `lint.skipTests`: Cross-cutting boolean flag. When `false` (the default), test code (`*_test.go`) is linted unless a linter specifies its own default or per-linter override.
 - Analyzers and modes: Every check is on at `mode: error` unless configured (except `testcontext` and `replaceEmptyInterfaceWithAny` which default to `mode: warn`, and `unusedparameters` which is opt-in). Valid modes are `error`, `warn`, and `ignore`.

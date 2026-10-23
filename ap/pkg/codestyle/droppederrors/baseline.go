@@ -234,3 +234,39 @@ func isStaleCandidate(entry BaselineEntry, checkedFiles map[string]bool, rootDir
 	}
 	return false
 }
+
+// ResolveBaselinePath determines the baseline file path given repoRoot, module dir,
+// any explicitly configured path (from CLI or config), and whether write-baseline is requested.
+func ResolveBaselinePath(repoRoot, dir, configured string, writeBaseline bool) string {
+	if configured != "" {
+		if filepath.IsAbs(configured) {
+			return configured
+		}
+		if repoRoot != "" {
+			return filepath.Join(repoRoot, configured)
+		}
+		return filepath.Join(dir, configured)
+	}
+
+	root := repoRoot
+	if root == "" {
+		root = dir
+	}
+
+	defaultBaseline := filepath.Join(root, ".ap", "droppederrors-baseline.txt")
+	if fi, err := os.Stat(defaultBaseline); err == nil && !fi.IsDir() {
+		return defaultBaseline
+	}
+
+	if dir != "" && dir != root {
+		modBaseline := filepath.Join(dir, ".ap", "droppederrors-baseline.txt")
+		if fi, err := os.Stat(modBaseline); err == nil && !fi.IsDir() {
+			return modBaseline
+		}
+	}
+
+	if writeBaseline {
+		return defaultBaseline
+	}
+	return ""
+}

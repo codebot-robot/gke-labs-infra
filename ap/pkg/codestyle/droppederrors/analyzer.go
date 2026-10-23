@@ -16,6 +16,7 @@ package droppederrors
 
 import (
 	"fmt"
+	"reflect"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
@@ -27,13 +28,7 @@ type Config struct {
 	Policy             fileset.Policy
 	Exclude            []string
 	UseDefaultExcludes *bool
-	isDefault          bool
 }
-
-var (
-	skipGenerated bool
-	skipTests     bool = true
-)
 
 // NewAnalyzer creates a new droppederrors Analyzer with the specified configuration.
 func NewAnalyzer(cfg Config) *analysis.Analyzer {
@@ -45,17 +40,13 @@ func NewAnalyzer(cfg Config) *analysis.Analyzer {
 	policy := cfg.Policy
 
 	return &analysis.Analyzer{
-		Name: "droppederrors",
-		Doc:  "check for dropped errors, including errors assigned to blank identifier",
+		Name:       "droppederrors",
+		Doc:        "check for dropped errors, including errors assigned to blank identifier",
+		ResultType: reflect.TypeOf([]Finding(nil)),
 		Run: func(pass *analysis.Pass) (any, error) {
-			effectivePolicy := policy
-			if cfg.isDefault {
-				effectivePolicy.SkipGenerated = skipGenerated
-				effectivePolicy.SkipTests = skipTests
-			}
-
+			var findings []Finding
 			for _, file := range pass.Files {
-				if effectivePolicy.ShouldSkipAST(pass.Fset, file) {
+				if policy.ShouldSkipAST(pass.Fset, file) {
 					continue
 				}
 
@@ -63,6 +54,15 @@ func NewAnalyzer(cfg Config) *analysis.Analyzer {
 				for _, raw := range rawFindings {
 					callee := formatCallee(raw.expr, pass.TypesInfo)
 					enclosingFunc := findEnclosingFunc(file, pass.Fset, raw.pos)
+					posn := pass.Fset.Position(raw.pos)
+
+					findings = append(findings, Finding{
+						Pos:           posn,
+						Category:      raw.category,
+						Callee:        callee,
+						EnclosingFunc: enclosingFunc,
+					})
+
 					msg := fmt.Sprintf("unchecked error: %s", callee)
 					if raw.category == CategoryErrorOnlyCheckedForSuccess {
 						msg = fmt.Sprintf("error only checked for success: %s", callee)
@@ -70,22 +70,13 @@ func NewAnalyzer(cfg Config) *analysis.Analyzer {
 					pass.Report(analysis.Diagnostic{
 						Pos:      raw.pos,
 						Message:  msg,
-						Category: fmt.Sprintf("%s:%s", raw.category, enclosingFunc),
-						URL:      enclosingFunc,
+						Category: "droppederrors",
 					})
 				}
 			}
-			return nil, nil
+			return findings, nil
 		},
 	}
-}
-
-// Analyzer is the default droppederrors analyzer instance.
-var Analyzer = NewAnalyzer(Config{Policy: fileset.NewPolicy(false, true, nil, ""), isDefault: true})
-
-func init() {
-	Analyzer.Flags.BoolVar(&skipGenerated, "skip-generated", false, "skip generated files")
-	Analyzer.Flags.BoolVar(&skipTests, "skip-tests", true, "skip _test.go files")
 }
 
 // New constructs the droppederrors Analyzer from the resolved policy and loaded config.

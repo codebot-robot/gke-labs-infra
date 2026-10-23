@@ -478,34 +478,25 @@ lint:
 
 func TestLintGOOSConfig(t *testing.T) {
 	tests := []struct {
-		name string
-		yaml string
-		want []string
+		name    string
+		yaml    string
+		want    []string
+		wantErr bool
 	}{
 		{
-			name: "default auto",
+			name: "default auto when omitted",
 			yaml: "lint:\n  skipGenerated: true\n",
 			want: nil,
-		},
-		{
-			name: "explicit auto string",
-			yaml: "lint:\n  goos: auto\n",
-			want: nil,
-		},
-		{
-			name: "explicit auto slice",
-			yaml: "lint:\n  goos:\n    - auto\n",
-			want: nil,
-		},
-		{
-			name: "single string linux",
-			yaml: "lint:\n  goos: linux\n",
-			want: []string{"linux"},
 		},
 		{
 			name: "slice of goos",
 			yaml: "lint:\n  goos:\n    - linux\n    - darwin\n",
 			want: []string{"linux", "darwin"},
+		},
+		{
+			name:    "string goos rejected by strict loading",
+			yaml:    "lint:\n  goos: auto\n",
+			wantErr: true,
 		},
 	}
 
@@ -520,8 +511,11 @@ func TestLintGOOSConfig(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg, err := Load(dir)
-			if err != nil {
-				t.Fatal(err)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Load() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
 			}
 			got := cfg.LintGOOS()
 			if !reflect.DeepEqual(got, tt.want) {
