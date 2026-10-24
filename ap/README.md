@@ -151,6 +151,21 @@ plugins:
 - Any requested version not found in `versions.yaml` falls back to resolving dynamically from the GitHub API with a warning, which is subject to GitHub API rate limits.
 - Run `ap tool update-protoc-versions` to refresh the table of well-known protoc releases and plugin versions with their asset digests.
 
+### docker.yaml
+
+Configures Docker CLI and docker-buildx pinning for `ap tool docker`, `ap tool docker-buildx`, and `ap deploy`.
+
+Example `.ap/docker.yaml`:
+```yaml
+docker: "29.9.2"
+buildx: "0.38.1"
+```
+
+- `docker`: Pinned version of the Docker CLI binary (defaults to the newest version in `versions.yaml`, e.g. `"29.9.2"`).
+- `buildx`: Pinned version of the `docker-buildx` binary (defaults to the newest version in `versions.yaml`, e.g. `"0.38.1"`).
+- Pinned binaries are downloaded and cached in `~/.cache/ap/tools/`.
+- `ap deploy` and `ap build` automatically use these pinned versions rather than whatever version happens to be on the system PATH.
+
 ### ap.yaml
 
 General configuration for `ap` itself.

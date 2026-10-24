@@ -418,9 +418,15 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 	origExec := execCommandContext
 	defer func() { execCommandContext = origExec }()
 
+	origEnsureBuildx := ensureBuildx
+	defer func() { ensureBuildx = origEnsureBuildx }()
+	ensureBuildx = func(ctx context.Context, repoRoot string) (string, error) {
+		return "docker-buildx", nil
+	}
+
 	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		if name == "docker" && len(args) > 1 && args[0] == "buildx" && args[1] == "inspect" {
-			// Mock 'docker buildx inspect' to simulate support/lack of support for multi-platform
+		if (name == "docker-buildx" || name == "docker") && len(args) > 0 && (args[0] == "inspect" || (args[0] == "buildx" && len(args) > 1 && args[1] == "inspect")) {
+			// Mock 'inspect' to simulate support/lack of support for multi-platform
 			return exec.CommandContext(ctx, "echo", "Driver: "+driverMock)
 		}
 		calls = append(calls, commandCall{name: name, args: args})
@@ -446,12 +452,12 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 		t.Fatalf("unexpected error running task: %v", err)
 	}
 
-	if len(calls) != 1 || calls[0].name != "docker" {
-		t.Errorf("expected 1 docker command call, got %v", calls)
+	if len(calls) != 1 || calls[0].name != "docker-buildx" {
+		t.Errorf("expected 1 docker-buildx command call, got %v", calls)
 	} else {
 		argsStr := strings.Join(calls[0].args, " ")
-		if !strings.Contains(argsStr, "buildx build") {
-			t.Errorf("expected 'buildx build' in args, got: %s", argsStr)
+		if calls[0].args[0] != "build" {
+			t.Errorf("expected 'build' as first arg, got: %s", argsStr)
 		}
 		if !strings.Contains(argsStr, "--platform linux/amd64,linux/arm64") {
 			t.Errorf("expected '--platform linux/amd64,linux/arm64' in args, got: %s", argsStr)
@@ -469,12 +475,12 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 		t.Fatalf("unexpected error running task: %v", err)
 	}
 
-	if len(calls) != 1 || calls[0].name != "docker" {
-		t.Errorf("expected 1 docker command call, got %v", calls)
+	if len(calls) != 1 || calls[0].name != "docker-buildx" {
+		t.Errorf("expected 1 docker-buildx command call, got %v", calls)
 	} else {
 		argsStr := strings.Join(calls[0].args, " ")
-		if !strings.Contains(argsStr, "buildx build") {
-			t.Errorf("expected 'buildx build' in args, got: %s", argsStr)
+		if calls[0].args[0] != "build" {
+			t.Errorf("expected 'build' as first arg, got: %s", argsStr)
 		}
 		if !strings.Contains(argsStr, "--load") {
 			t.Errorf("expected '--load' in args, got: %s", argsStr)
@@ -498,12 +504,12 @@ platforms:
 		t.Fatalf("unexpected error running task: %v", err)
 	}
 
-	if len(calls) != 1 || calls[0].name != "docker" {
-		t.Errorf("expected 1 docker command call, got %v", calls)
+	if len(calls) != 1 || calls[0].name != "docker-buildx" {
+		t.Errorf("expected 1 docker-buildx command call, got %v", calls)
 	} else {
 		argsStr := strings.Join(calls[0].args, " ")
-		if !strings.Contains(argsStr, "buildx build") {
-			t.Errorf("expected 'buildx build' in args, got: %s", argsStr)
+		if calls[0].args[0] != "build" {
+			t.Errorf("expected 'build' as first arg, got: %s", argsStr)
 		}
 		if !strings.Contains(argsStr, "--load") {
 			t.Errorf("expected '--load' in args, got: %s", argsStr)
@@ -552,14 +558,14 @@ platforms:
 	driverMock = "docker"
 	createSucceeded := false
 	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		if name == "docker" && len(args) > 1 && args[0] == "buildx" && args[1] == "inspect" {
+		if (name == "docker-buildx" || name == "docker") && len(args) > 0 && args[0] == "inspect" {
 			driver := driverMock
 			if createSucceeded {
 				driver = "docker-container"
 			}
 			return exec.CommandContext(ctx, "echo", "Driver: "+driver)
 		}
-		if name == "docker" && len(args) > 2 && args[0] == "buildx" && args[1] == "create" {
+		if (name == "docker-buildx" || name == "docker") && len(args) > 0 && args[0] == "create" {
 			createSucceeded = true
 		}
 		calls = append(calls, commandCall{name: name, args: args})
@@ -574,22 +580,22 @@ platforms:
 	foundBuildxBuild := false
 	for _, call := range calls {
 		argsStr := strings.Join(call.args, " ")
-		if strings.Contains(argsStr, "buildx build") && strings.Contains(argsStr, "--platform linux/amd64,linux/arm64") && strings.Contains(argsStr, "--push") {
+		if len(call.args) > 0 && call.args[0] == "build" && strings.Contains(argsStr, "--platform linux/amd64,linux/arm64") && strings.Contains(argsStr, "--push") {
 			foundBuildxBuild = true
 			break
 		}
 	}
 	if !foundBuildxBuild {
-		t.Errorf("expected buildx build call with multi-platform and --push after builder creation, calls: %v", calls)
+		t.Errorf("expected build call with multi-platform and --push after builder creation, calls: %v", calls)
 	}
 
 	// 9. Test case G: Multi-platform NOT supported and creating ap-builder fails -> should return wrapped error
 	driverMock = "docker"
 	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		if name == "docker" && len(args) > 1 && args[0] == "buildx" && args[1] == "inspect" {
+		if (name == "docker-buildx" || name == "docker") && len(args) > 0 && args[0] == "inspect" {
 			return exec.CommandContext(ctx, "echo", "Driver: "+driverMock)
 		}
-		if name == "docker" && len(args) > 2 && args[0] == "buildx" && args[1] == "create" {
+		if (name == "docker-buildx" || name == "docker") && len(args) > 0 && args[0] == "create" {
 			return exec.CommandContext(ctx, "false")
 		}
 		return exec.CommandContext(ctx, "echo", "mocked")
@@ -728,4 +734,73 @@ func TestResolveBuildkitHost(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDockerBuildTask_ToolDocker(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	var executedCmd string
+	var executedEnv []string
+	origExec := execCommandContext
+	defer func() { execCommandContext = origExec }()
+
+	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		executedCmd = name
+		cmd := exec.CommandContext(ctx, "echo", "mocked")
+		return cmd
+	}
+
+	mockBuildxBin := "/custom/tools/docker-buildx/bin/docker-buildx"
+	ensureCalled := false
+	origEnsureBuildx := ensureBuildx
+	defer func() { ensureBuildx = origEnsureBuildx }()
+	ensureBuildx = func(ctx context.Context, repoRoot string) (string, error) {
+		ensureCalled = true
+		return mockBuildxBin, nil
+	}
+
+	task := &DockerBuildTask{
+		ImageName:  "test-img",
+		Dockerfile: "images/test-img/Dockerfile",
+		Root:       tmpDir,
+		Push:       false,
+	}
+
+	scope := &tasks.APScope{
+		RepoRoot: tmpDir,
+		Dir:      tmpDir,
+	}
+
+	if err := task.Run(t.Context(), scope); err != nil {
+		t.Fatalf("unexpected error running task: %v", err)
+	}
+
+	if !ensureCalled {
+		t.Error("expected ensureBuildx to be called")
+	}
+	if executedCmd != mockBuildxBin {
+		t.Errorf("expected command %q, got %q", mockBuildxBin, executedCmd)
+	}
+
+	// Now test with explicit BuildxBin override on task
+	ensureCalled = false
+	explicitBin := "/override/bin/docker-buildx"
+	taskExplicit := &DockerBuildTask{
+		ImageName:  "test-img-explicit",
+		Dockerfile: "images/test-img/Dockerfile",
+		Root:       tmpDir,
+		Push:       false,
+		BuildxBin:  explicitBin,
+	}
+
+	if err := taskExplicit.Run(t.Context(), scope); err != nil {
+		t.Fatalf("unexpected error running taskExplicit: %v", err)
+	}
+	if ensureCalled {
+		t.Error("expected ensureBuildx NOT to be called when BuildxBin is set")
+	}
+	if executedCmd != explicitBin {
+		t.Errorf("expected command %q, got %q", explicitBin, executedCmd)
+	}
+	_ = executedEnv
 }

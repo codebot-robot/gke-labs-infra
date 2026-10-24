@@ -27,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	toolversions "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/versions"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,7 +45,7 @@ func UpdateVersionsFile(ctx context.Context, repoRoot string) error {
 		apiBase = "https://api.github.com"
 	}
 
-	var releases []Release
+	var releases []toolversions.Release
 	seenVersions := make(map[string]bool)
 
 	nextURL := fmt.Sprintf("%s/repos/protocolbuffers/protobuf/releases?per_page=100", strings.TrimRight(apiBase, "/"))
@@ -75,7 +76,7 @@ func UpdateVersionsFile(ctx context.Context, repoRoot string) error {
 			}
 
 			if len(assetsMap) == len(supportedPlatforms) {
-				releases = append(releases, Release{
+				releases = append(releases, toolversions.Release{
 					Version: ver,
 					Assets:  assetsMap,
 				})

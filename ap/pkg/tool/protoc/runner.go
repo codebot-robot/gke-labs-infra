@@ -22,8 +22,6 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
-
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 )
 
 // ProtocEnvironment holds resolved binary paths and environment settings for invoking protoc.
@@ -90,9 +88,9 @@ func DetectRequiredPlugins(args []string) []string {
 
 // PrepareProtoc downloads/caches the required protoc and plugins based on config and arguments,
 // and sets up an execution environment with plugins in PATH.
-func PrepareProtoc(ctx context.Context, cfg *config.ProtoConfig, args []string) (*ProtocEnvironment, error) {
+func PrepareProtoc(ctx context.Context, cfg *Config, args []string) (*ProtocEnvironment, error) {
 	if cfg == nil {
-		cfg = config.DefaultProtoConfig()
+		cfg = DefaultConfig()
 	}
 
 	protocBin, includeDir, err := EnsureProtoc(ctx, cfg.Protoc)
@@ -146,7 +144,7 @@ func PrepareProtoc(ctx context.Context, cfg *config.ProtoConfig, args []string) 
 // RunProtoc executes protoc with the provided arguments, ensuring the release zip include directory
 // and required plugins are available. The include directory is appended after user arguments so
 // user include paths take precedence.
-func RunProtoc(ctx context.Context, cfg *config.ProtoConfig, workDir string, args []string, stdout, stderr io.Writer, stdin io.Reader) error {
+func RunProtoc(ctx context.Context, cfg *Config, workDir string, args []string, stdout, stderr io.Writer, stdin io.Reader) error {
 	env, err := PrepareProtoc(ctx, cfg, args)
 	if err != nil {
 		return err

@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package config
+package protoc
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 )
 
 const (
@@ -26,23 +28,22 @@ const (
 	DefaultProtocVersion = "latest"
 )
 
-// ProtoConfig represents the protobuf configuration loaded from .ap/proto.yaml.
-type ProtoConfig struct {
+// Config represents the protobuf configuration loaded from .ap/proto.yaml.
+type Config struct {
 	Protoc  string            `json:"protoc"`
 	Plugins map[string]string `json:"plugins"`
 }
 
-// DefaultProtoConfig returns a ProtoConfig with default protoc and plugin versions.
-func DefaultProtoConfig() *ProtoConfig {
-	return &ProtoConfig{
-		Protoc:  DefaultProtocVersion,
-		Plugins: make(map[string]string),
+// DefaultConfig returns a Config with default protoc and plugin versions.
+func DefaultConfig() *Config {
+	return &Config{
+		Protoc: DefaultProtocVersion,
 	}
 }
 
-// LoadProtoConfig loads and validates the protobuf configuration from .ap/proto.yaml in the specified directory.
+// LoadConfig loads and validates the protobuf configuration from .ap/proto.yaml in the specified directory.
 // If the configuration file does not exist, it returns nil, nil.
-func LoadProtoConfig(root string) (*ProtoConfig, error) {
+func LoadConfig(root string) (*Config, error) {
 	configFile := filepath.Join(root, ".ap/proto.yaml")
 
 	data, err := os.ReadFile(configFile)
@@ -53,8 +54,8 @@ func LoadProtoConfig(root string) (*ProtoConfig, error) {
 		return nil, fmt.Errorf("error reading %s: %w", configFile, err)
 	}
 
-	var cfg ProtoConfig
-	if err := UnmarshalStrict(data, &cfg); err != nil {
+	var cfg Config
+	if err := config.UnmarshalStrict(data, &cfg); err != nil {
 		return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
 	}
 
@@ -65,15 +66,16 @@ func LoadProtoConfig(root string) (*ProtoConfig, error) {
 	return &cfg, nil
 }
 
-// ApplyDefaultsAndValidate fills in defaults and validates the configuration fields.
-func (c *ProtoConfig) ApplyDefaultsAndValidate() error {
+// ApplyDefaultsAndValidate fills in defaults and validates configuration fields.
+func (c *Config) ApplyDefaultsAndValidate() error {
 	if c.Protoc == "" {
 		c.Protoc = DefaultProtocVersion
 	}
+	if c.Protoc != "latest" && !strings.Contains(c.Protoc, ".") {
+		return fmt.Errorf("invalid protoc version: %q", c.Protoc)
+	}
 
-	if c.Plugins == nil {
-		c.Plugins = make(map[string]string)
-	} else {
+	if c.Plugins != nil {
 		for name, ver := range c.Plugins {
 			if ver == "" {
 				return fmt.Errorf("plugin %q has empty version", name)

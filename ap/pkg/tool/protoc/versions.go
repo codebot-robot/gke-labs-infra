@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strings"
 
+	toolversions "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/versions"
 	"gopkg.in/yaml.v3"
 )
 
@@ -34,41 +35,35 @@ var supportedPlatforms = []string{
 }
 
 type versionsData struct {
-	Protoc  []Release         `yaml:"protoc"`
-	Plugins map[string]string `yaml:"plugins"`
-}
-
-// Release represents a known protoc release and its asset checksum digests.
-type Release struct {
-	Version string            `yaml:"version"`
-	Assets  map[string]string `yaml:"assets"`
+	Protoc  []toolversions.Release `yaml:"protoc"`
+	Plugins map[string]string      `yaml:"plugins"`
 }
 
 var parsedVersions = func() versionsData {
-	var v versionsData
-	if err := yaml.Unmarshal(embeddedVersionsYAML, &v); err != nil {
+	protocRels, err := toolversions.Parse(embeddedVersionsYAML, "protoc")
+	if err != nil {
 		panic(fmt.Sprintf("failed to parse embedded versions.yaml: %v", err))
 	}
-	return v
+	var raw struct {
+		Plugins map[string]string `yaml:"plugins"`
+	}
+	if err := yaml.Unmarshal(embeddedVersionsYAML, &raw); err != nil {
+		panic(fmt.Sprintf("failed to parse embedded versions.yaml plugins: %v", err))
+	}
+	return versionsData{
+		Protoc:  protocRels,
+		Plugins: raw.Plugins,
+	}
 }()
 
 // Latest returns the newest known protoc release from the table, or nil if empty.
-func Latest() *Release {
-	if len(parsedVersions.Protoc) == 0 {
-		return nil
-	}
-	return &parsedVersions.Protoc[0]
+func Latest() *toolversions.Release {
+	return toolversions.Latest(parsedVersions.Protoc)
 }
 
 // Lookup finds a protoc release by version string (with or without 'v' prefix).
-func Lookup(version string) (*Release, bool) {
-	norm := strings.TrimPrefix(version, "v")
-	for i := range parsedVersions.Protoc {
-		if parsedVersions.Protoc[i].Version == norm {
-			return &parsedVersions.Protoc[i], true
-		}
-	}
-	return nil, false
+func Lookup(version string) (*toolversions.Release, bool) {
+	return toolversions.Lookup(parsedVersions.Protoc, version)
 }
 
 // PluginVersion returns the pinned version for a plugin from the table.

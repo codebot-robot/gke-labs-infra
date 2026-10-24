@@ -36,6 +36,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/fetch"
 	"k8s.io/klog/v2"
 )
 
@@ -62,11 +63,6 @@ var (
 	protocMu sync.Mutex
 	pluginMu sync.Mutex
 )
-
-// CacheDir returns the root cache directory for ap tools.
-func CacheDir() (string, error) {
-	return fileutils.CacheDir()
-}
 
 // ResolveProtocAsset returns the expected protobuf release asset filename for the given version and target OS/arch.
 func ResolveProtocAsset(version, goos, goarch string) (string, error) {
@@ -138,7 +134,7 @@ func EnsureProtoc(ctx context.Context, version string) (protocBin string, includ
 	protocMu.Lock()
 	defer protocMu.Unlock()
 
-	cacheRoot, err := CacheDir()
+	cacheRoot, err := fileutils.CacheDir()
 	if err != nil {
 		return "", "", err
 	}
@@ -153,7 +149,7 @@ func EnsureProtoc(ctx context.Context, version string) (protocBin string, includ
 		normalizedVer := strings.TrimPrefix(version, "v")
 		installDir := filepath.Join(cacheRoot, "tools", "protoc", normalizedVer)
 		binPath := filepath.Join(installDir, "bin", binName)
-		if isExecutable(binPath) {
+		if fileutils.IsExecutable(binPath) {
 			klog.Infof("Using protoc %s", normalizedVer)
 			return binPath, filepath.Join(installDir, "include"), nil
 		}
@@ -178,13 +174,13 @@ func EnsureProtoc(ctx context.Context, version string) (protocBin string, includ
 
 	installDir := filepath.Join(cacheRoot, "tools", "protoc", resolvedVer)
 	binPath := filepath.Join(installDir, "bin", binName)
-	if isExecutable(binPath) {
+	if fileutils.IsExecutable(binPath) {
 		klog.Infof("Using protoc %s", resolvedVer)
 		return binPath, filepath.Join(installDir, "include"), nil
 	}
 
 	// 2. Download the release archive
-	tmpZip, err := downloadProtocZip(ctx, downloadURL, expectedDigest, cacheRoot)
+	tmpZip, err := fetch.Download(ctx, downloadURL, expectedDigest, cacheRoot)
 	if err != nil {
 		return "", "", err
 	}
@@ -296,59 +292,6 @@ func resolvePinnedProtocRelease(ctx context.Context, version string) (resolvedVe
 	return resolvedVer, asset.BrowserDownloadURL, asset.Digest, nil
 }
 
-func downloadProtocZip(ctx context.Context, downloadURL, expectedDigest, cacheRoot string) (string, error) {
-	tmpZip, err := os.CreateTemp(cacheRoot, "protoc-*.zip")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temporary zip file: %w", err)
-	}
-	tmpZipName := tmpZip.Name()
-	defer func() {
-		if closeErr := tmpZip.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close temporary file: %v", closeErr)
-		}
-	}()
-
-	req, err := newGitHubRequest(ctx, downloadURL)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request for %s: %w", downloadURL, err)
-	}
-
-	resp, err := scoped.HTTPClient(ctx).Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to download protoc from %s: %w", downloadURL, err)
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			klog.V(2).Infof("failed to close response body: %v", err)
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download protoc from %s: status %s", downloadURL, resp.Status)
-	}
-
-	hasher := sha256.New()
-	writer := io.MultiWriter(tmpZip, hasher)
-
-	if _, err := io.Copy(writer, resp.Body); err != nil {
-		return "", fmt.Errorf("failed writing downloaded protoc zip: %w", err)
-	}
-	if err := tmpZip.Close(); err != nil {
-		return "", fmt.Errorf("failed closing downloaded protoc zip: %w", err)
-	}
-
-	// Verify digest if provided
-	if expectedDigest != "" {
-		expectedHash := strings.TrimPrefix(expectedDigest, "sha256:")
-		actualHash := hex.EncodeToString(hasher.Sum(nil))
-		if !strings.EqualFold(actualHash, expectedHash) {
-			return "", fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
-		}
-	}
-
-	return tmpZipName, nil
-}
-
 func installProtocZip(zipPath, installDir, binName, resolvedVer string) (protocBin, includeDir string, err error) {
 	if err := os.MkdirAll(installDir, 0755); err != nil {
 		return "", "", fmt.Errorf("failed to create protoc directory %s: %w", installDir, err)
@@ -402,7 +345,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 		module = module[:atIdx]
 	}
 
-	cacheRoot, err := CacheDir()
+	cacheRoot, err := fileutils.CacheDir()
 	if err != nil {
 		return "", err
 	}
@@ -430,7 +373,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 		}
 		targetBinDir := filepath.Join(cacheRoot, "tools", "plugins", normalizedName, ver, "bin")
 		targetBin := filepath.Join(targetBinDir, binName)
-		if isExecutable(targetBin) {
+		if fileutils.IsExecutable(targetBin) {
 			klog.Infof("Using %s %s", normalizedName, ver)
 			return targetBinDir, nil
 		}
@@ -446,7 +389,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 			return "", fmt.Errorf("failed to install plugin %s@%s: %w\n%s", normalizedName, ver, err, strings.TrimSpace(string(output)))
 		}
 
-		if !isExecutable(targetBin) {
+		if !fileutils.IsExecutable(targetBin) {
 			return "", fmt.Errorf("expected plugin binary was not produced at %s", targetBin)
 		}
 		if err := os.Chmod(targetBin, 0755); err != nil {
@@ -841,15 +784,4 @@ func findAsset(assets []githubAsset, name string) (githubAsset, bool) {
 		}
 	}
 	return githubAsset{}, false
-}
-
-func isExecutable(path string) bool {
-	fi, err := os.Stat(path)
-	if err != nil || fi.IsDir() {
-		return false
-	}
-	if runtime.GOOS == "windows" {
-		return true
-	}
-	return fi.Mode()&0111 != 0
 }

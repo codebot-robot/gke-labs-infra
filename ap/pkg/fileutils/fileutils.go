@@ -21,6 +21,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 
 	"k8s.io/klog/v2"
 )
@@ -135,4 +137,43 @@ func CopyFile(src, dst string, perm os.FileMode) error {
 		klog.V(2).Infof("failed to set mtime on %s: %v", dst, chtimesErr)
 	}
 	return nil
+}
+
+// PrependPath returns a copy of env with dir prepended to the PATH environment variable.
+func PrependPath(env []string, dir string) []string {
+	if dir == "" {
+		return env
+	}
+	pathKey := "PATH"
+	var existingPath string
+	found := false
+	var result []string
+	for _, entry := range env {
+		if len(entry) >= 5 && strings.EqualFold(entry[:5], "PATH=") {
+			pathKey = entry[:4]
+			existingPath = entry[5:]
+			found = true
+			continue
+		}
+		result = append(result, entry)
+	}
+
+	newPath := dir
+	if found && existingPath != "" {
+		newPath = dir + string(os.PathListSeparator) + existingPath
+	}
+	result = append(result, pathKey+"="+newPath)
+	return result
+}
+
+// IsExecutable reports whether the file at path exists and is an executable file.
+func IsExecutable(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return fi.Mode().Perm()&0111 != 0
 }

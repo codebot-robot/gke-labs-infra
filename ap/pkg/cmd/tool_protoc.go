@@ -21,7 +21,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/protoc"
 	"github.com/spf13/cobra"
 )
@@ -82,18 +81,18 @@ func RunToolProtoc(ctx context.Context, opt ToolProtocOptions) error {
 		}
 	}
 
-	cfg, err := config.LoadProtoConfig(workDir)
+	cfg, err := protoc.LoadConfig(workDir)
 	if err != nil {
 		return err
 	}
 	if cfg == nil && opt.RepoRoot != "" && opt.RepoRoot != workDir {
-		cfg, err = config.LoadProtoConfig(opt.RepoRoot)
+		cfg, err = protoc.LoadConfig(opt.RepoRoot)
 		if err != nil {
 			return err
 		}
 	}
 	if cfg == nil {
-		cfg = config.DefaultProtoConfig()
+		cfg = protoc.DefaultConfig()
 	}
 
 	stdout := opt.Stdout
