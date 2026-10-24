@@ -25,6 +25,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
+	gotool "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/protoc"
 )
@@ -308,6 +309,55 @@ var registry = []*Tool{
 		},
 		Update: func(ctx context.Context, repoRoot string) error {
 			return protoc.Update(ctx, repoRoot)
+		},
+	},
+	{
+		Name:       "go",
+		Short:      "Run go with pinned toolchain",
+		UpdateFlag: "go",
+		UpdateDesc: "Update Go versions in ap/pkg/tool/go/versions.yaml",
+		Ensure: func(ctx context.Context, repoRoot string) (string, error) {
+			return gotool.EnsureGoForRepo(ctx, repoRoot)
+		},
+		Prepare: func(ctx context.Context, repoRoot string, args []string) (*Invocation, error) {
+			target := repoRoot
+			if target == "" {
+				wd, err := os.Getwd()
+				if err != nil {
+					return nil, err
+				}
+				target = wd
+			}
+			version, err := gotool.ResolveVersion(target, repoRoot)
+			if err != nil {
+				return nil, err
+			}
+			goBin, err := gotool.EnsureGo(ctx, version)
+			if err != nil {
+				return nil, fmt.Errorf("failed to prepare go: %w", err)
+			}
+
+			installDir := filepath.Dir(filepath.Dir(goBin))
+
+			env := os.Environ()
+			var filteredEnv []string
+			for _, e := range env {
+				if strings.HasPrefix(e, "GOROOT=") || strings.HasPrefix(e, "GOTOOLCHAIN=") {
+					continue
+				}
+				filteredEnv = append(filteredEnv, e)
+			}
+			filteredEnv = append(filteredEnv, "GOROOT="+installDir, "GOTOOLCHAIN=local")
+
+			return &Invocation{
+				Binary: goBin,
+				Args:   args,
+				Env:    fileutils.PrependPath(filteredEnv, filepath.Dir(goBin)),
+				Dir:    "",
+			}, nil
+		},
+		Update: func(ctx context.Context, repoRoot string) error {
+			return gotool.Update(ctx, repoRoot)
 		},
 	},
 }
