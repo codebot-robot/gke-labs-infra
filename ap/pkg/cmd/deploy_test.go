@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -240,6 +241,138 @@ func extractDeployTasks(planTasks []tasks.Task) (builtImages []string, appliedMa
 		}
 	}
 	return
+}
+
+func TestParseKindClusterFromContext(t *testing.T) {
+	tests := []struct {
+		context string
+		want    string
+		wantOK  bool
+	}{
+		{"kind-mycluster", "mycluster", true},
+		{"kind-dev", "dev", true},
+		{"kind-", "", false},
+		{"gke_project_zone", "", false},
+		{"docker-desktop", "", false},
+		{"", "", false},
+	}
+	for _, tt := range tests {
+		got, ok := ParseKindClusterFromContext(tt.context)
+		if ok != tt.wantOK || got != tt.want {
+			t.Errorf("ParseKindClusterFromContext(%q) = (%q, %v), want (%q, %v)", tt.context, got, ok, tt.want, tt.wantOK)
+		}
+	}
+}
+
+func TestBuildDeployPlan_KindMode(t *testing.T) {
+	t.Setenv("IMAGE_TAG", "v1.0")
+
+	t.Run("kind mode wiring", func(t *testing.T) {
+		tempDir := setupFixtureRepo(t)
+		t.Setenv("IMAGE_PREFIX", "example.com/test")
+
+		opt := DeployOptions{
+			RootOptions: &RootOptions{
+				RepoRoot: tempDir,
+				APRoots:  []string{tempDir},
+				DryRun:   true,
+			},
+			kindCluster: "my-cluster",
+		}
+		if err := opt.Resolve(nil); err != nil {
+			t.Fatalf("opt.Resolve failed: %v", err)
+		}
+		r, err := opt.GetRepo()
+		if err != nil {
+			t.Fatalf("opt.GetRepo failed: %v", err)
+		}
+
+		allTasks, err := BuildDeployPlan(opt, r, "")
+		if err != nil {
+			t.Fatalf("BuildDeployPlan failed: %v", err)
+		}
+
+		var kindLoads []*KindLoadTask
+		var buildTasksPush []bool
+		for _, task := range allTasks {
+			if group, ok := task.(*tasks.Group); ok {
+				for _, child := range group.Tasks {
+					if kt, ok := child.(*KindLoadTask); ok {
+						kindLoads = append(kindLoads, kt)
+					}
+					if bg, ok := child.(*tasks.Group); ok && bg.Name == "build-images" {
+						for _, bt := range bg.Tasks {
+							if dbt, ok := bt.(*images.DockerBuildTask); ok {
+								buildTasksPush = append(buildTasksPush, dbt.Push)
+							}
+						}
+					}
+				}
+			}
+		}
+
+		if len(kindLoads) != 1 {
+			t.Fatalf("expected 1 kind load task, got %d", len(kindLoads))
+		}
+		if kindLoads[0].ClusterName != "my-cluster" {
+			t.Errorf("cluster = %q, want 'my-cluster'", kindLoads[0].ClusterName)
+		}
+		expectedImages := []string{"example.com/test/a:v1.0", "example.com/test/b:v1.0"}
+		if !reflect.DeepEqual(kindLoads[0].Images, expectedImages) {
+			t.Errorf("images = %v, want %v", kindLoads[0].Images, expectedImages)
+		}
+		for i, push := range buildTasksPush {
+			if push {
+				t.Errorf("buildTasksPush[%d] = true, want false (push disabled in kind mode)", i)
+			}
+		}
+	})
+
+	t.Run("images.local prefix exempt from kind load", func(t *testing.T) {
+		tempDir := setupFixtureRepo(t)
+		t.Setenv("IMAGE_PREFIX", "images.local")
+
+		opt := DeployOptions{
+			RootOptions: &RootOptions{
+				RepoRoot: tempDir,
+				APRoots:  []string{tempDir},
+				DryRun:   true,
+			},
+			kindCluster: "my-cluster",
+		}
+		// In RunDeploy, kindCluster is only set if ImageRepo() != "images.local"
+		// If ImageRepo() == "images.local", RunDeploy skips setting kindCluster.
+		cfg, err := config.Load(tempDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.ImageRepo() == "images.local" {
+			opt.kindCluster = ""
+		}
+
+		if err := opt.Resolve(nil); err != nil {
+			t.Fatalf("opt.Resolve failed: %v", err)
+		}
+		r, err := opt.GetRepo()
+		if err != nil {
+			t.Fatalf("opt.GetRepo failed: %v", err)
+		}
+
+		allTasks, err := BuildDeployPlan(opt, r, "")
+		if err != nil {
+			t.Fatalf("BuildDeployPlan failed: %v", err)
+		}
+
+		for _, task := range allTasks {
+			if group, ok := task.(*tasks.Group); ok {
+				for _, child := range group.Tasks {
+					if _, ok := child.(*KindLoadTask); ok {
+						t.Error("expected no KindLoadTask when imagePrefix is images.local")
+					}
+				}
+			}
+		}
+	})
 }
 
 func TestDeploy_FixtureRepo_SelectK8s(t *testing.T) {

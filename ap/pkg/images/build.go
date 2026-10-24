@@ -67,6 +67,17 @@ func ResolveBuildkitHost(value string) (string, error) {
 	return value, nil
 }
 
+// FullImageName returns the fully-qualified image tag given prefix, image name, and tag.
+func FullImageName(imagePrefix, imageName, tag string) string {
+	if tag == "" {
+		tag = "latest"
+	}
+	if imagePrefix != "" {
+		return fmt.Sprintf("%s/%s:%s", imagePrefix, imageName, tag)
+	}
+	return fmt.Sprintf("%s:%s", imageName, tag)
+}
+
 // DockerBuildTask represents a task to build a single docker image.
 type DockerBuildTask struct {
 	ImageName    string
@@ -105,12 +116,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 		}
 	}
 
-	var fullImageName string
-	if actualImagePrefix != "" {
-		fullImageName = fmt.Sprintf("%s/%s:%s", actualImagePrefix, t.ImageName, tag)
-	} else {
-		fullImageName = fmt.Sprintf("%s:%s", t.ImageName, tag)
-	}
+	fullImageName := FullImageName(actualImagePrefix, t.ImageName, tag)
 
 	if t.BuildkitHost != "" {
 		return t.runBuildctl(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix, platforms)
