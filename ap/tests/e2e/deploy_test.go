@@ -15,6 +15,7 @@
 package e2e
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,8 @@ func TestDeploy_DigestRollout(t *testing.T) {
 	}
 
 	h := e2e.NewHarness(t, e2e.Options{ClusterName: "ap-deploy-digest-e2e"})
+	ns := h.Namespace()
+	imagePrefix := fmt.Sprintf("example.com/%s", ns)
 
 	repoRoot := h.FindRepoRoot()
 	if err := os.Chdir(repoRoot); err != nil {
@@ -48,7 +51,7 @@ func TestDeploy_DigestRollout(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(tmpDir, ".ap"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, ".ap", "ap.yaml"), []byte("imagePrefix: example.com/test\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, ".ap", "ap.yaml"), []byte(fmt.Sprintf("imagePrefix: %s\n", imagePrefix)), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(tmpDir, "images", "my-app"), 0755); err != nil {
@@ -62,12 +65,12 @@ func TestDeploy_DigestRollout(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(tmpDir, "k8s"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	deploymentManifest := `
+	deploymentManifest := fmt.Sprintf(`
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: my-app
-  namespace: default
+  namespace: %s
 spec:
   replicas: 1
   selector:
@@ -78,32 +81,56 @@ spec:
       labels:
         app: my-app
     spec:
+      terminationGracePeriodSeconds: 0
       containers:
       - name: my-app
         image: my-app
         imagePullPolicy: IfNotPresent
         command: ["/bin/sh", "-c", "sleep 3600"]
-`
+`, ns)
 	if err := os.WriteFile(filepath.Join(tmpDir, "k8s", "deployment.yaml"), []byte(deploymentManifest), 0644); err != nil {
 		t.Fatal(err)
 	}
 
+	getRSForImage := func(expectedImage string) string {
+		out := strings.TrimSpace(h.RunCmd("kubectl", "get", "replicaset", "-l", "app=my-app", "-n", ns, "-o", "jsonpath={range .items[*]}{.metadata.name}{\" \"}{.spec.template.spec.containers[0].image}{\"\\n\"}{end}"))
+		for _, line := range strings.Split(out, "\n") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 && parts[1] == expectedImage {
+				return parts[0]
+			}
+		}
+		t.Fatalf("no replicaset found with template image %q in namespace %s, got:\n%s", expectedImage, ns, out)
+		return ""
+	}
+
+	getPodImageIDForRS := func(rsName string) string {
+		out := strings.TrimSpace(h.RunCmd("kubectl", "get", "pods", "-l", "app=my-app", "-n", ns, "--field-selector=status.phase=Running", "-o", "jsonpath={range .items[*]}{.metadata.ownerReferences[0].name}{\" \"}{.status.containerStatuses[0].imageID}{\"\\n\"}{end}"))
+		for _, line := range strings.Split(out, "\n") {
+			parts := strings.Fields(line)
+			if len(parts) >= 2 && parts[0] == rsName {
+				return parts[1]
+			}
+		}
+		t.Fatalf("no running pod found for ReplicaSet %q in namespace %s, got:\n%s", rsName, ns, out)
+		return ""
+	}
+
 	// 1. Deploy initial version with default tag (:latest)
 	os.Unsetenv("IMAGE_TAG")
-	os.Setenv("IMAGE_PREFIX", "example.com/test")
+	os.Setenv("IMAGE_PREFIX", imagePrefix)
 
 	h.RunCmd("go", "run", "./ap", "deploy", "--root="+tmpDir)
-	h.RunCmd("kubectl", "rollout", "status", "deployment/my-app", "-n", "default", "--timeout=60s")
+	h.RunCmd("kubectl", "rollout", "status", "deployment/my-app", "-n", ns, "--timeout=60s")
 
-	rs1 := strings.TrimSpace(h.RunCmd("kubectl", "get", "pods", "-l", "app=my-app", "-n", "default", "-o", "jsonpath={.items[0].metadata.ownerReferences[0].name}"))
-	appliedImage1 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", "default", "-o", "jsonpath={.spec.template.spec.containers[0].image}"))
-
+	appliedImage1 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.spec.template.spec.containers[0].image}"))
 	if !strings.Contains(appliedImage1, "@sha256:") {
 		t.Fatalf("expected applied image to contain @sha256: digest, got %q", appliedImage1)
 	}
 	digest1 := appliedImage1[strings.LastIndex(appliedImage1, "@")+1:]
 
-	podImageID1 := strings.TrimSpace(h.RunCmd("kubectl", "get", "pods", "-l", "app=my-app", "-n", "default", "-o", "jsonpath={.items[0].status.containerStatuses[0].imageID}"))
+	rs1 := getRSForImage(appliedImage1)
+	podImageID1 := getPodImageIDForRS(rs1)
 	if !strings.Contains(podImageID1, digest1) {
 		t.Errorf("expected pod imageID %q to match digest %q", podImageID1, digest1)
 	}
@@ -115,14 +142,9 @@ spec:
 	}
 
 	h.RunCmd("go", "run", "./ap", "deploy", "--root="+tmpDir)
-	h.RunCmd("kubectl", "rollout", "status", "deployment/my-app", "-n", "default", "--timeout=60s")
+	h.RunCmd("kubectl", "rollout", "status", "deployment/my-app", "-n", ns, "--timeout=60s")
 
-	rs2 := strings.TrimSpace(h.RunCmd("kubectl", "get", "pods", "-l", "app=my-app", "-n", "default", "-o", "jsonpath={.items[0].metadata.ownerReferences[0].name}"))
-	if rs2 == rs1 {
-		t.Errorf("expected a new ReplicaSet after redeploy with changed Dockerfile, but both were %q", rs1)
-	}
-
-	appliedImage2 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", "default", "-o", "jsonpath={.spec.template.spec.containers[0].image}"))
+	appliedImage2 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.spec.template.spec.containers[0].image}"))
 	if appliedImage2 == appliedImage1 {
 		t.Errorf("expected applied image to change after redeploy, got %q", appliedImage2)
 	}
@@ -134,7 +156,12 @@ spec:
 		t.Errorf("expected different digest for changed image, got %q", digest2)
 	}
 
-	podImageID2 := strings.TrimSpace(h.RunCmd("kubectl", "get", "pods", "-l", "app=my-app", "-n", "default", "-o", "jsonpath={.items[0].status.containerStatuses[0].imageID}"))
+	rs2 := getRSForImage(appliedImage2)
+	if rs2 == rs1 {
+		t.Errorf("expected a new ReplicaSet after redeploy with changed Dockerfile, but both were %q", rs1)
+	}
+
+	podImageID2 := getPodImageIDForRS(rs2)
 	if !strings.Contains(podImageID2, digest2) {
 		t.Errorf("expected pod imageID %q to match new digest %q", podImageID2, digest2)
 	}
@@ -142,10 +169,10 @@ spec:
 	// 3. Redeploy with an explicit unique tag (no digest should be appended)
 	os.Setenv("IMAGE_TAG", "v1.0")
 	h.RunCmd("go", "run", "./ap", "deploy", "--root="+tmpDir)
-	h.RunCmd("kubectl", "rollout", "status", "deployment/my-app", "-n", "default", "--timeout=60s")
+	h.RunCmd("kubectl", "rollout", "status", "deployment/my-app", "-n", ns, "--timeout=60s")
 
-	appliedImage3 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", "default", "-o", "jsonpath={.spec.template.spec.containers[0].image}"))
-	expectedImage3 := "example.com/test/my-app:v1.0"
+	appliedImage3 := strings.TrimSpace(h.RunCmd("kubectl", "get", "deployment", "my-app", "-n", ns, "-o", "jsonpath={.spec.template.spec.containers[0].image}"))
+	expectedImage3 := fmt.Sprintf("%s/my-app:v1.0", imagePrefix)
 	if appliedImage3 != expectedImage3 {
 		t.Errorf("expected applied image %q with explicit IMAGE_TAG, got %q", expectedImage3, appliedImage3)
 	}

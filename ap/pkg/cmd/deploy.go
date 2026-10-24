@@ -345,6 +345,19 @@ func (t *KindLoadTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	return nil
 }
 
+// tagContainerdDigests tags loaded images in kind's containerd image store with their buildx
+// manifest digests so they are addressable by digest (e.g. tag@sha256:<digest>).
+//
+// This is kind-specific: on standard registry push paths, the remote registry receives the OCI
+// manifest index containing the canonical digest, and kubelet resolves/pulls the digest from the
+// registry. However, when deploying locally to a kind cluster, `kind load docker-image` archives
+// the local docker image via `docker save` and imports it into containerd via `ctr images import`.
+// That archive import creates local repository tags (e.g. repo:latest) but does not record the
+// buildx manifest digest in containerd's image index. Consequently, containerd treats a digest-pinned
+// image reference in the pod spec (repo:latest@sha256:<digest>) as a local cache miss and attempts
+// to pull it from the remote registry (which fails for never-pushed images). Explicitly adding the
+// digest tag in containerd via `ctr --namespace=k8s.io images tag` ensures containerd recognizes
+// the loaded image locally when kubelet resolves the digest.
 func (t *KindLoadTask) tagContainerdDigests(ctx context.Context, kindBin, root string) {
 	dockerBin, err := toolDocker.EnsureDocker(ctx, "")
 	if err != nil || dockerBin == "" {
@@ -436,10 +449,7 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 			return nil, err
 		}
 		imageRepo := cfg.ImageRepo()
-		tag := os.Getenv("IMAGE_TAG")
-		if tag == "" {
-			tag = "latest"
-		}
+		tag := cfg.ImageTag()
 
 		imageDigests := make(map[string]string)
 

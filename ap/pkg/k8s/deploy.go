@@ -464,10 +464,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 	}
 	tag := t.ImageTag
 	if tag == "" {
-		tag = os.Getenv("IMAGE_TAG")
-		if tag == "" {
-			tag = "latest"
-		}
+		tag = config.ImageTag()
 	}
 
 	relPath, err := filepath.Rel(scope.RepoRoot, t.ManifestPath)
@@ -560,7 +557,7 @@ func (t *KubectlApplyTask) GetChildren() []tasks.Task {
 		}
 	}
 	if imageTag == "" {
-		imageTag = os.Getenv("IMAGE_TAG")
+		imageTag = config.ImageTag()
 	}
 	if imageRepository == "" {
 		return nil

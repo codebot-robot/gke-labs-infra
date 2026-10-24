@@ -104,10 +104,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	}
 	platforms := imagesCfg.GetPlatforms()
 
-	tag := os.Getenv("IMAGE_TAG")
-	if tag == "" {
-		tag = "latest"
-	}
+	tag := cfg.ImageTag()
 
 	actualImagePrefix := imagePrefix
 	if imagePrefix == "images.local" && t.Push {
@@ -206,10 +203,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 
 	buildctlImageName := fullImageName
 	if imagePrefix == "images.local" && t.Push && strings.HasPrefix(t.BuildkitHost, "k8s://") {
-		tag := os.Getenv("IMAGE_TAG")
-		if tag == "" {
-			tag = "latest"
-		}
+		tag := config.ImageTag()
 		buildctlImageName = fmt.Sprintf("in-cluster-image-registry.in-cluster-image-registry-system.svc.cluster.local:80/%s:%s", t.ImageName, tag)
 	}
 
@@ -218,10 +212,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 		output += ",registry.insecure=true"
 	}
 
-	tag := os.Getenv("IMAGE_TAG")
-	if tag == "" {
-		tag = "latest"
-	}
+	tag := config.ImageTag()
 
 	metaDir, err := os.MkdirTemp("", "ap-buildctl-meta-*")
 	if err != nil {
@@ -306,10 +297,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 func (t *DockerBuildTask) runDocker(ctx context.Context, buildxBin, root, fullImageName, relDockerfilePath, imagePrefix string, platforms []string) error {
 	klog.Infof("Building image %s from %s using docker buildx", fullImageName, root)
 
-	tag := os.Getenv("IMAGE_TAG")
-	if tag == "" {
-		tag = "latest"
-	}
+	tag := config.ImageTag()
 
 	metaDir, err := os.MkdirTemp("", "ap-buildx-meta-*")
 	if err != nil {
