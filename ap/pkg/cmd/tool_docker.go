@@ -110,7 +110,16 @@ func RunToolDocker(ctx context.Context, opt ToolDockerOptions) error {
 	}
 
 	if opt.DryRun {
-		dockerBin, err := docker.EnsureDockerWithBuildx(ctx, cfg.Docker, cfg.Buildx)
+		if len(opt.Args) > 0 && opt.Args[0] == "buildx" {
+			buildxBin, err := docker.EnsureDockerBuildx(ctx, cfg.Buildx)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(stdout, "[dry-run] %s %s\n", buildxBin, strings.Join(opt.Args[1:], " "))
+			return err
+		}
+
+		dockerBin, err := docker.EnsureDocker(ctx, cfg.Docker)
 		if err != nil {
 			return err
 		}
@@ -118,5 +127,5 @@ func RunToolDocker(ctx context.Context, opt ToolDockerOptions) error {
 		return err
 	}
 
-	return docker.RunDocker(ctx, cfg, opt.Args, stdout, stderr, stdin)
+	return docker.RunDocker(ctx, cfg.Docker, cfg.Buildx, opt.Args, stdout, stderr, stdin)
 }

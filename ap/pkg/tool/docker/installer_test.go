@@ -279,30 +279,60 @@ func TestEnsureDockerBuildx_Download(t *testing.T) {
 	}
 }
 
-func TestSetupBuildxPlugin(t *testing.T) {
+func TestColdRun_DoesNotMutateHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("skipping tar.gz test on windows")
+	}
+
 	tempHome := t.TempDir()
 	t.Setenv("HOME", tempHome)
-	t.Setenv("DOCKER_CONFIG", filepath.Join(tempHome, ".docker"))
+	t.Setenv("DOCKER_CONFIG", "")
 
-	buildxBin := filepath.Join(tempHome, "bin", "docker-buildx")
-	if err := os.MkdirAll(filepath.Dir(buildxBin), 0755); err != nil {
-		t.Fatal(err)
+	tempCache := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", tempCache)
+
+	dockerArchive := createTarGz(t, map[string][]byte{
+		"docker/docker": []byte("#!/bin/sh\necho docker\n"),
+	})
+	dockerHasher := sha256.New()
+	dockerHasher.Write(dockerArchive)
+	dockerDigest := "sha256:" + hex.EncodeToString(dockerHasher.Sum(nil))
+
+	buildxBin := []byte("#!/bin/sh\necho buildx\n")
+	buildxHasher := sha256.New()
+	buildxHasher.Write(buildxBin)
+	buildxDigest := "sha256:" + hex.EncodeToString(buildxHasher.Sum(nil))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "docker-") {
+			_, _ = w.Write(dockerArchive)
+			return
+		}
+		_, _ = w.Write(buildxBin)
+	}))
+	defer server.Close()
+
+	t.Setenv("DOCKER_DOWNLOAD_BASE_URL", server.URL)
+	t.Setenv("DOCKER_DOWNLOAD_DIGEST", dockerDigest)
+	t.Setenv("BUILDX_DOWNLOAD_BASE_URL", server.URL)
+	t.Setenv("BUILDX_DOWNLOAD_DIGEST", buildxDigest)
+
+	dockerPath, buildxPath, err := EnsureDockerWithBuildx(t.Context(), "28.0.1", "v0.21.1")
+	if err != nil {
+		t.Fatalf("EnsureDockerWithBuildx failed: %v", err)
 	}
-	if err := os.WriteFile(buildxBin, []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatal(err)
+	if !isExecutable(dockerPath) {
+		t.Errorf("expected docker %s to be executable", dockerPath)
+	}
+	if !isExecutable(buildxPath) {
+		t.Errorf("expected buildx %s to be executable", buildxPath)
 	}
 
-	if err := SetupBuildxPlugin(buildxBin); err != nil {
-		t.Fatalf("SetupBuildxPlugin failed: %v", err)
+	entries, err := os.ReadDir(tempHome)
+	if err != nil {
+		t.Fatalf("failed to read temp home: %v", err)
 	}
-
-	binName := "docker-buildx"
-	if runtime.GOOS == "windows" {
-		binName = "docker-buildx.exe"
-	}
-	pluginPath := filepath.Join(tempHome, ".docker", "cli-plugins", binName)
-
-	if !isExecutable(pluginPath) {
-		t.Errorf("expected plugin %s to exist and be executable", pluginPath)
+	if len(entries) != 0 {
+		t.Fatalf("expected HOME (%s) to remain untouched, but found %d entries: %v", tempHome, len(entries), entries)
 	}
 }

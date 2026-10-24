@@ -118,5 +118,5 @@ func RunToolDockerBuildx(ctx context.Context, opt ToolDockerBuildxOptions) error
 		return err
 	}
 
-	return docker.RunDockerBuildx(ctx, cfg, opt.Args, stdout, stderr, stdin)
+	return docker.RunDockerBuildx(ctx, cfg.Buildx, opt.Args, stdout, stderr, stdin)
 }

@@ -22,17 +22,16 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 )
 
-// RunDocker executes the pinned docker binary with the specified arguments.
-func RunDocker(ctx context.Context, cfg *config.DockerConfig, args []string, stdout, stderr io.Writer, stdin io.Reader) error {
-	if cfg == nil {
-		cfg = config.DefaultDockerConfig()
+// RunDocker executes the pinned docker binary, or rewrites 'buildx' subcommands to the pinned docker-buildx binary.
+func RunDocker(ctx context.Context, dockerVer, buildxVer string, args []string, stdout, stderr io.Writer, stdin io.Reader) error {
+	if len(args) > 0 && args[0] == "buildx" {
+		return RunDockerBuildx(ctx, buildxVer, args[1:], stdout, stderr, stdin)
 	}
 
-	dockerBin, err := EnsureDockerWithBuildx(ctx, cfg.Docker, cfg.Buildx)
+	dockerBin, err := EnsureDocker(ctx, dockerVer)
 	if err != nil {
 		return fmt.Errorf("failed to prepare docker: %w", err)
 	}
@@ -47,12 +46,8 @@ func RunDocker(ctx context.Context, cfg *config.DockerConfig, args []string, std
 }
 
 // RunDockerBuildx executes the pinned docker-buildx binary with the specified arguments.
-func RunDockerBuildx(ctx context.Context, cfg *config.DockerConfig, args []string, stdout, stderr io.Writer, stdin io.Reader) error {
-	if cfg == nil {
-		cfg = config.DefaultDockerConfig()
-	}
-
-	buildxBin, err := EnsureDockerBuildx(ctx, cfg.Buildx)
+func RunDockerBuildx(ctx context.Context, buildxVer string, args []string, stdout, stderr io.Writer, stdin io.Reader) error {
+	buildxBin, err := EnsureDockerBuildx(ctx, buildxVer)
 	if err != nil {
 		return fmt.Errorf("failed to prepare docker-buildx: %w", err)
 	}

@@ -38,7 +38,6 @@ import (
 var (
 	dockerMu sync.Mutex
 	buildxMu sync.Mutex
-	pluginMu sync.Mutex
 )
 
 // CacheDir returns the root cache directory for ap tools.
@@ -313,77 +312,19 @@ func EnsureDockerBuildx(ctx context.Context, version string) (string, error) {
 	return binPath, nil
 }
 
-// SetupBuildxPlugin links or copies the cached docker-buildx binary into the docker cli-plugins directory.
-func SetupBuildxPlugin(buildxBin string) error {
-	pluginMu.Lock()
-	defer pluginMu.Unlock()
-
-	configDir := os.Getenv("DOCKER_CONFIG")
-	if configDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			klog.V(2).Infof("could not determine user home directory: %v", err)
-			return nil
-		}
-		configDir = filepath.Join(home, ".docker")
-	}
-
-	pluginDir := filepath.Join(configDir, "cli-plugins")
-	if err := os.MkdirAll(pluginDir, 0755); err != nil {
-		klog.V(2).Infof("failed to create docker cli-plugins directory %s: %v", pluginDir, err)
-		return err
-	}
-
-	binName := "docker-buildx"
-	if runtime.GOOS == "windows" {
-		binName = "docker-buildx.exe"
-	}
-	target := filepath.Join(pluginDir, binName)
-
-	targetFi, err := os.Lstat(target)
+// EnsureDockerWithBuildx ensures that both docker and docker-buildx are installed and ready.
+func EnsureDockerWithBuildx(ctx context.Context, dockerVer, buildxVer string) (dockerBin, buildxBin string, err error) {
+	dockerBin, err = EnsureDocker(ctx, dockerVer)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			klog.V(2).Infof("failed to stat target plugin %s: %v", target, err)
-		}
-	} else {
-		if targetFi.Mode()&os.ModeSymlink != 0 {
-			dest, err := os.Readlink(target)
-			if err != nil {
-				klog.V(2).Infof("failed to readlink target plugin %s: %v", target, err)
-			} else if dest == buildxBin {
-				return nil
-			}
-		}
-		if rmErr := os.Remove(target); rmErr != nil && !os.IsNotExist(rmErr) {
-			klog.V(2).Infof("failed to remove target plugin %s: %v", target, rmErr)
-		}
+		return "", "", err
 	}
 
-	if err := os.Symlink(buildxBin, target); err != nil {
-		return fileutils.CopyFile(buildxBin, target, 0755)
-	}
-
-	return nil
-}
-
-// EnsureDockerWithBuildx ensures that both docker and docker-buildx are installed and ready,
-// and configures docker-buildx as a CLI plugin for docker.
-func EnsureDockerWithBuildx(ctx context.Context, dockerVer, buildxVer string) (string, error) {
-	dockerBin, err := EnsureDocker(ctx, dockerVer)
+	buildxBin, err = EnsureDockerBuildx(ctx, buildxVer)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	buildxBin, err := EnsureDockerBuildx(ctx, buildxVer)
-	if err != nil {
-		return "", err
-	}
-
-	if err := SetupBuildxPlugin(buildxBin); err != nil {
-		klog.V(2).Infof("warning: failed to configure docker-buildx plugin: %v", err)
-	}
-
-	return dockerBin, nil
+	return dockerBin, buildxBin, nil
 }
 
 func downloadFile(ctx context.Context, downloadURL, expectedDigest, cacheRoot, tempPattern string) (string, error) {

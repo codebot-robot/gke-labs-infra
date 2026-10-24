@@ -273,3 +273,82 @@ func TestToolDockerBuildx_DryRun(t *testing.T) {
 		t.Errorf("expected output to contain 'version', got: %s", output)
 	}
 }
+
+func TestToolDocker_DefaultNewestVersion(t *testing.T) {
+	tempCache := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", tempCache)
+
+	tempDir := t.TempDir()
+	t.Setenv("AP_ROOT", tempDir)
+
+	// Pre-populate cache for newest docker (29.9.2)
+	dockerBinDir := filepath.Join(tempCache, "tools", "docker", "29.9.2", "bin")
+	if err := os.MkdirAll(dockerBinDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dockerBinDir, "docker"), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	rootCmd := BuildRootCommand()
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"tool", "docker", "--dry-run", "--", "version"})
+
+	err := rootCmd.ExecuteContext(t.Context())
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "[dry-run]") {
+		t.Errorf("expected output to contain [dry-run], got: %s", output)
+	}
+	if !strings.Contains(output, "29.9.2") {
+		t.Errorf("expected output to reference newest table version 29.9.2, got: %s", output)
+	}
+}
+
+func TestToolDocker_BuildxRewrite(t *testing.T) {
+	tempCache := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", tempCache)
+
+	tempDir := t.TempDir()
+	t.Setenv("AP_ROOT", tempDir)
+
+	// Pre-populate cache for buildx (0.38.1)
+	buildxBinDir := filepath.Join(tempCache, "tools", "docker-buildx", "v0.38.1", "bin")
+	if err := os.MkdirAll(buildxBinDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(buildxBinDir, "docker-buildx"), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	rootCmd := BuildRootCommand()
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"tool", "docker", "--dry-run", "--", "buildx", "version"})
+
+	err := rootCmd.ExecuteContext(t.Context())
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(output, "[dry-run]") {
+		t.Errorf("expected output to contain [dry-run], got: %s", output)
+	}
+	if !strings.Contains(output, "docker-buildx") {
+		t.Errorf("expected output to reference docker-buildx binary, got: %s", output)
+	}
+	if !strings.Contains(output, "version") {
+		t.Errorf("expected output to contain 'version', got: %s", output)
+	}
+	// Verify "buildx" was rewritten and stripped from the subcommand args
+	if strings.Contains(output, "docker-buildx buildx version") {
+		t.Errorf("expected buildx to be rewritten, but found duplicate: %s", output)
+	}
+}

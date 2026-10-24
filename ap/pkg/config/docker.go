@@ -18,27 +18,28 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
 )
 
-const (
-	// DefaultDockerVersion is the default docker CLI version.
-	DefaultDockerVersion = "28.0.1"
-	// DefaultBuildxVersion is the default docker-buildx plugin version.
-	DefaultBuildxVersion = "v0.21.1"
-)
-
-// DockerConfig represents the docker and docker-buildx configuration loaded from .ap/docker.yaml.
+// DockerConfig represents the docker and buildx configuration loaded from .ap/docker.yaml.
 type DockerConfig struct {
-	Docker       string `json:"docker"`
-	Buildx       string `json:"buildx"`
-	DockerBuildx string `json:"docker-buildx"`
+	Docker string `json:"docker"`
+	Buildx string `json:"buildx"`
 }
 
-// DefaultDockerConfig returns a DockerConfig with default docker and buildx versions.
+// DefaultDockerConfig returns a DockerConfig with default docker and buildx versions from the table.
 func DefaultDockerConfig() *DockerConfig {
+	var dockerVer, buildxVer string
+	if rel := docker.LatestDocker(); rel != nil {
+		dockerVer = rel.Version
+	}
+	if rel := docker.LatestBuildx(); rel != nil {
+		buildxVer = rel.Version
+	}
 	return &DockerConfig{
-		Docker: DefaultDockerVersion,
-		Buildx: DefaultBuildxVersion,
+		Docker: dockerVer,
+		Buildx: buildxVer,
 	}
 }
 
@@ -69,14 +70,15 @@ func LoadDockerConfig(root string) (*DockerConfig, error) {
 
 // ApplyDefaultsAndValidate fills in defaults and validates configuration fields.
 func (c *DockerConfig) ApplyDefaultsAndValidate() error {
-	if c.Buildx == "" && c.DockerBuildx != "" {
-		c.Buildx = c.DockerBuildx
+	if c.Docker == "" || c.Docker == "latest" {
+		if rel := docker.LatestDocker(); rel != nil {
+			c.Docker = rel.Version
+		}
 	}
-	if c.Docker == "" {
-		c.Docker = DefaultDockerVersion
-	}
-	if c.Buildx == "" {
-		c.Buildx = DefaultBuildxVersion
+	if c.Buildx == "" || c.Buildx == "latest" {
+		if rel := docker.LatestBuildx(); rel != nil {
+			c.Buildx = rel.Version
+		}
 	}
 	return nil
 }

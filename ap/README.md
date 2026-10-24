@@ -153,16 +153,16 @@ plugins:
 
 ### docker.yaml
 
-Configures Docker CLI and docker-buildx plugin pinning for `ap tool docker`, `ap tool docker-buildx`, and `ap deploy`.
+Configures Docker CLI and docker-buildx pinning for `ap tool docker`, `ap tool docker-buildx`, and `ap deploy`.
 
 Example `.ap/docker.yaml`:
 ```yaml
-docker: "28.0.1"
-buildx: "v0.21.1"
+docker: "29.9.2"
+buildx: "0.38.1"
 ```
 
-- `docker`: Pinned version of the Docker CLI binary (defaults to `"28.0.1"`).
-- `buildx`: Pinned version of the `docker-buildx` plugin binary (defaults to `"v0.21.1"`).
+- `docker`: Pinned version of the Docker CLI binary (defaults to the newest version in `versions.yaml`, e.g. `"29.9.2"`).
+- `buildx`: Pinned version of the `docker-buildx` binary (defaults to the newest version in `versions.yaml`, e.g. `"0.38.1"`).
 - Pinned binaries are downloaded and cached in `~/.cache/ap/tools/`.
 - `ap deploy` and `ap build` automatically use these pinned versions rather than whatever version happens to be on the system PATH.
 

@@ -18,6 +18,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
 )
 
 func TestLoadDockerConfig_NotFound(t *testing.T) {
@@ -61,7 +63,7 @@ buildx: "v0.21.1"
 	}
 }
 
-func TestLoadDockerConfig_Alias(t *testing.T) {
+func TestLoadDockerConfig_DisallowAlias(t *testing.T) {
 	tmpDir := t.TempDir()
 	apDir := filepath.Join(tmpDir, ".ap")
 	if err := os.MkdirAll(apDir, 0755); err != nil {
@@ -69,25 +71,17 @@ func TestLoadDockerConfig_Alias(t *testing.T) {
 	}
 
 	content := `
-docker: "29.8.2"
-docker-buildx: "v0.38.1"
+docker: "29.9.2"
+docker-buildx: "0.38.1"
 `
 	if err := os.WriteFile(filepath.Join(apDir, "docker.yaml"), []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadDockerConfig(tmpDir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg == nil {
-		t.Fatal("expected non-nil config")
-	}
-	if cfg.Docker != "29.8.2" {
-		t.Errorf("expected docker 29.8.2, got %q", cfg.Docker)
-	}
-	if cfg.Buildx != "v0.38.1" {
-		t.Errorf("expected buildx v0.38.1 via alias, got %q", cfg.Buildx)
+	// Strict unmarshal must reject the unapproved key docker-buildx
+	_, err := LoadDockerConfig(tmpDir)
+	if err == nil {
+		t.Fatal("expected error parsing docker.yaml with unknown field docker-buildx, got nil")
 	}
 }
 
@@ -109,10 +103,12 @@ func TestLoadDockerConfig_Defaults(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("expected non-nil config")
 	}
-	if cfg.Docker != DefaultDockerVersion {
-		t.Errorf("expected default docker %q, got %q", DefaultDockerVersion, cfg.Docker)
+	expectedDocker := docker.LatestDocker().Version
+	expectedBuildx := docker.LatestBuildx().Version
+	if cfg.Docker != expectedDocker {
+		t.Errorf("expected default docker %q, got %q", expectedDocker, cfg.Docker)
 	}
-	if cfg.Buildx != DefaultBuildxVersion {
-		t.Errorf("expected default buildx %q, got %q", DefaultBuildxVersion, cfg.Buildx)
+	if cfg.Buildx != expectedBuildx {
+		t.Errorf("expected default buildx %q, got %q", expectedBuildx, cfg.Buildx)
 	}
 }
