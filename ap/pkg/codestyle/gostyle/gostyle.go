@@ -105,12 +105,17 @@ func runGofmt(ctx context.Context, r *repo.Repo, repoRoot string, files []string
 	var dirtyFiles []string
 	if cm != nil {
 		for _, f := range filesToFormat {
-			meta, err := cm.GetOrUpdateMetadata(f)
+			file := r.File(f)
+			if file == nil {
+				dirtyFiles = append(dirtyFiles, f)
+				continue
+			}
+			hash, err := file.Hash()
 			if err != nil {
 				dirtyFiles = append(dirtyFiles, f)
 				continue
 			}
-			if !cm.IsDone(cache.StepGofmt, meta.Hash) {
+			if !cm.IsDone(cache.StepGofmt, hash) {
 				dirtyFiles = append(dirtyFiles, f)
 			}
 		}
@@ -145,16 +150,16 @@ func runGofmt(ctx context.Context, r *repo.Repo, repoRoot string, files []string
 
 	// Update cache for processed files
 	for _, f := range dirtyFiles {
-		if file := r.File(f); file != nil {
+		file := r.File(f)
+		if file != nil {
 			file.Refresh()
-		}
-		if cm != nil {
-			// Re-check metadata. gofmt might have changed it.
-			meta, err := cm.GetOrUpdateMetadata(f)
-			if err != nil {
-				continue
+			if cm != nil {
+				hash, err := file.Hash()
+				if err != nil {
+					continue
+				}
+				cm.MarkDone(cache.StepGofmt, hash)
 			}
-			cm.MarkDone(cache.StepGofmt, meta.Hash)
 		}
 	}
 

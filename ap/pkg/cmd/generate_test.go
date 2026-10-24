@@ -18,8 +18,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 )
 
 func TestBuildGenerateCommand(t *testing.T) {
@@ -261,5 +264,91 @@ func TestRunGenerate_VerifyReportsUntidyGoMod(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "working tree was dirtied by generation") || !strings.Contains(err.Error(), "go.mod") {
 		t.Errorf("expected error to report working tree dirtied with go.mod, got: %v", err)
+	}
+}
+
+func TestRunGenerate_SecondRunOpensNoUnchangedFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	cacheDir := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", cacheDir)
+
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apDir, "ap.yaml"), []byte("version: latest\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apDir, "headers.yaml"), []byte("license: apache-2.0\ncopyrightHolder: Google LLC\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	goModContent := "module example.com/gentest\n\ngo 1.27\n"
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goModContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mainGoContent := "package main\n\nfunc main() {}\n"
+	if err := os.WriteFile(filepath.Join(tempDir, "main.go"), []byte(mainGoContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// First run: cold cache
+	repo.ResetCache()
+	repo.ResetContentReadCount()
+
+	rootOpt1 := &RootOptions{
+		RepoRoot: tempDir,
+		APRoot:   tempDir,
+	}
+	opt1 := GenerateOptions{RootOptions: rootOpt1}
+	if err := opt1.Resolve(nil); err != nil {
+		t.Fatalf("Resolve 1 failed: %v", err)
+	}
+	if err := RunGenerate(t.Context(), opt1); err != nil {
+		t.Fatalf("RunGenerate 1 failed: %v", err)
+	}
+
+	// Verify cold run performed some content reads
+	if repo.ContentReadCount() == 0 {
+		t.Errorf("expected cold run to open and read files for hashing, got 0")
+	}
+
+	// Second run: warm cache
+	repo.ResetCache()
+	repo.ResetContentReadCount()
+
+	rootOpt2 := &RootOptions{
+		RepoRoot: tempDir,
+		APRoot:   tempDir,
+	}
+	opt2 := GenerateOptions{RootOptions: rootOpt2}
+	if err := opt2.Resolve(nil); err != nil {
+		t.Fatalf("Resolve 2 failed: %v", err)
+	}
+	if err := RunGenerate(t.Context(), opt2); err != nil {
+		t.Fatalf("RunGenerate 2 failed: %v", err)
+	}
+
+	// Second generate should open NO unchanged files for hashing
+	if count := repo.ContentReadCount(); count != 0 {
+		t.Errorf("expected second ap generate to perform 0 content reads for unchanged files, got %d", count)
+	}
+
+	// Check cache directory: only done.bin and hashes.bin should exist
+	codestyleDir := filepath.Join(cacheDir, "codestyle")
+	entries, err := os.ReadDir(codestyleDir)
+	if err != nil {
+		t.Fatalf("failed to read codestyle cache dir: %v", err)
+	}
+
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	slices.Sort(names)
+
+	expectedNames := []string{"done.bin", "hashes.bin"}
+	if !slices.Equal(names, expectedNames) {
+		t.Errorf("expected codestyle cache to contain only %v, got %v", expectedNames, names)
 	}
 }

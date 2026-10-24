@@ -152,13 +152,24 @@ func TestFile_IsGenerated(t *testing.T) {
 
 func TestFile_HashAndRefresh(t *testing.T) {
 	tempDir := t.TempDir()
+	cacheDir := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", cacheDir)
+
 	filePath := filepath.Join(tempDir, "sample.txt")
 	if err := os.WriteFile(filePath, []byte("version 1"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	f := &File{Path: filePath, Name: "sample.txt"}
+	r, err := Open(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := r.File(filePath)
+	if f == nil {
+		t.Fatal("file not found in repo")
+	}
 
+	ResetContentReadCount()
 	hash1, err := f.Hash()
 	if err != nil {
 		t.Fatalf("f.Hash() failed: %v", err)
@@ -166,8 +177,17 @@ func TestFile_HashAndRefresh(t *testing.T) {
 	if hash1 == "" {
 		t.Fatalf("expected non-empty hash")
 	}
+	if ContentReadCount() != 1 {
+		t.Fatalf("expected 1 content read on first hash, got %d", ContentReadCount())
+	}
 
-	// Second call should return the exact same memoized hash
+	// Save hash cache to hashes.bin
+	if err := r.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Second call with same stat: should hit memo (no additional content read)
+	ResetContentReadCount()
 	hash2, err := f.Hash()
 	if err != nil {
 		t.Fatalf("second f.Hash() failed: %v", err)
@@ -175,26 +195,45 @@ func TestFile_HashAndRefresh(t *testing.T) {
 	if hash1 != hash2 {
 		t.Errorf("expected memoized hash to match, got %q vs %q", hash1, hash2)
 	}
+	if ContentReadCount() != 0 {
+		t.Errorf("expected 0 content reads on stat match, got %d", ContentReadCount())
+	}
 
-	// Modify file
+	// Fresh repo view with same file on disk: still hits memo in hashes.bin
+	ResetCache()
+	ResetContentReadCount()
+	r2, err := Open(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f2 := r2.File(filePath)
+	hash2b, err := f2.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hash2b != hash1 {
+		t.Errorf("expected persistent hash to match %q, got %q", hash1, hash2b)
+	}
+	if ContentReadCount() != 0 {
+		t.Errorf("expected 0 content reads on persistent memo hit, got %d", ContentReadCount())
+	}
+
+	// Modify file on disk (changes mtime/size): should miss memo and re-read
 	if err := os.WriteFile(filePath, []byte("version 2 modified"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	// Without refresh, memoized hash remains
-	hash3, _ := f.Hash()
-	if hash3 != hash1 {
-		t.Errorf("expected memoized hash before refresh, got %q", hash3)
-	}
-
-	// After refresh, hash should update
-	f.Refresh()
-	hash4, err := f.Hash()
+	ResetContentReadCount()
+	f2.Refresh()
+	hash3, err := f2.Hash()
 	if err != nil {
-		t.Fatalf("f.Hash() after refresh failed: %v", err)
+		t.Fatal(err)
 	}
-	if hash4 == hash1 {
-		t.Errorf("expected different hash after modification and refresh, got %q", hash4)
+	if hash3 == hash1 {
+		t.Errorf("expected different hash after modification, got %q", hash3)
+	}
+	if ContentReadCount() != 1 {
+		t.Errorf("expected 1 content read when mtime/content changes, got %d", ContentReadCount())
 	}
 }
 

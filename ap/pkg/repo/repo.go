@@ -15,6 +15,7 @@
 package repo
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -23,7 +24,18 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/recordfile"
+	"k8s.io/klog/v2"
 )
+
+// HashesConfig is the recordfile configuration for hashes.bin.
+var HashesConfig = recordfile.Config{
+	Magic:      [8]byte{'a', 'p', 'h', 'a', 's', 'h', 'e', '\n'},
+	Version:    1,
+	RecordSize: 88, // 32 bytes path hash key + 56 bytes payload (size, mtime, inode, content hash)
+}
 
 var (
 	walkCounter int64
@@ -60,8 +72,9 @@ type DirFilter func(string) bool
 type Option func(*options)
 
 type options struct {
-	skips   []string
-	ignores []string
+	skips    []string
+	ignores  []string
+	cacheDir string
 }
 
 // WithSkip adds skip globs (such as from .ap/go.yaml).
@@ -75,6 +88,13 @@ func WithSkip(skips ...string) Option {
 func WithIgnore(patterns ...string) Option {
 	return func(o *options) {
 		o.ignores = append(o.ignores, patterns...)
+	}
+}
+
+// WithCacheDir sets the cache directory used for persistent memoization (such as hashes.bin).
+func WithCacheDir(dir string) Option {
+	return func(o *options) {
+		o.cacheDir = dir
 	}
 }
 
@@ -97,6 +117,9 @@ type Repo struct {
 	modules []string // sorted
 
 	ignoreList *IgnoreList
+
+	hashIndex *recordfile.File
+	hashPath  string
 }
 
 // Open opens an in-memory snapshot of the repository. If root has already been opened,
@@ -212,7 +235,7 @@ func loadRepo(root string, opts ...Option) (*Repo, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Directory does not exist on disk, return empty repo
-			return newRepo(root, root, nil, nil, nil, nil, ignoreList), nil
+			return newRepo(root, root, nil, nil, nil, nil, ignoreList, nil, ""), nil
 		}
 		return nil, fmt.Errorf("failed to walk repository %s: %w", root, err)
 	}
@@ -225,16 +248,51 @@ func loadRepo(root string, opts ...Option) (*Repo, error) {
 		apRoots = []string{root}
 	}
 
+	cacheDir := opt.cacheDir
+	if cacheDir == "" {
+		cDir, err := fileutils.CacheDir()
+		if err != nil {
+			klog.V(2).Infof("failed to determine cache dir: %v", err)
+		} else {
+			cacheDir = cDir
+		}
+	}
+
+	var hashIndex *recordfile.File
+	var hashPath string
+	if cacheDir != "" {
+		var codestyleDir string
+		if filepath.Base(cacheDir) == "codestyle" {
+			codestyleDir = cacheDir
+		} else {
+			codestyleDir = filepath.Join(cacheDir, "codestyle")
+		}
+		// Delete legacy metadata and done JSON files if found
+		for _, name := range []string{"metadata.json", "done.json", "gofmt.json"} {
+			if err := os.Remove(filepath.Join(codestyleDir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				klog.V(2).Infof("failed to remove legacy cache file %s: %v", name, err)
+			}
+		}
+
+		hashPath = filepath.Join(codestyleDir, "hashes.bin")
+		rf, err := recordfile.Open(hashPath, HashesConfig)
+		if err != nil {
+			klog.V(2).Infof("falling back to empty hash cache for %s: %v", hashPath, err)
+			rf = recordfile.New(HashesConfig)
+		}
+		hashIndex = rf
+	}
+
 	// Classify each file's enclosing APRoot and Module
 	for _, f := range files {
 		f.apRoot = closestAncestor(f.Path, apRoots)
 		f.module = closestAncestor(f.Path, modules)
 	}
 
-	return newRepo(root, root, files, dirs, apRoots, modules, ignoreList), nil
+	return newRepo(root, root, files, dirs, apRoots, modules, ignoreList, hashIndex, hashPath), nil
 }
 
-func newRepo(root, repoRoot string, files []*File, dirs, apRoots, modules []string, ignoreList *IgnoreList) *Repo {
+func newRepo(root, repoRoot string, files []*File, dirs, apRoots, modules []string, ignoreList *IgnoreList, hashIndex *recordfile.File, hashPath string) *Repo {
 	filesByPath := make(map[string]*File, len(files))
 	filesByDir := make(map[string][]*File)
 	hasTestsDirs := make(map[string]bool)
@@ -273,7 +331,7 @@ func newRepo(root, repoRoot string, files []*File, dirs, apRoots, modules []stri
 	})
 	sort.Strings(dirs)
 
-	return &Repo{
+	r := &Repo{
 		root:         root,
 		repoRoot:     repoRoot,
 		files:        files,
@@ -285,7 +343,13 @@ func newRepo(root, repoRoot string, files []*File, dirs, apRoots, modules []stri
 		apRoots:      apRoots,
 		modules:      modules,
 		ignoreList:   ignoreList,
+		hashIndex:    hashIndex,
+		hashPath:     hashPath,
 	}
+	for _, f := range files {
+		f.repo = r
+	}
+	return r
 }
 
 func closestAncestor(path string, ancestors []string) string {
@@ -400,6 +464,7 @@ func (r *Repo) TrackFile(path string) *File {
 		return nil
 	}
 	f := &File{
+		repo:    r,
 		Path:    clean,
 		RelPath: relPath,
 		Name:    filepath.Base(clean),
@@ -534,7 +599,15 @@ func (r *Repo) Under(dir string) *Repo {
 		}
 	}
 
-	return newRepo(cleanDir, r.repoRoot, subFiles, subDirs, subAPRoots, subModules, r.ignoreList)
+	return newRepo(cleanDir, r.repoRoot, subFiles, subDirs, subAPRoots, subModules, r.ignoreList, r.hashIndex, r.hashPath)
+}
+
+// Save persists pending record entries (such as hashes.bin) atomically.
+func (r *Repo) Save() error {
+	if r == nil || r.hashIndex == nil || r.hashPath == "" {
+		return nil
+	}
+	return r.hashIndex.Save(r.hashPath)
 }
 
 // Glob returns absolute file paths matching the given glob pattern.

@@ -293,6 +293,13 @@ func Run(ctx context.Context, scope *APScope, ts []Task, opts RunOptions) error 
 		}
 		return nil
 	}
+	defer func() {
+		if scope != nil && scope.Repo != nil {
+			if saveErr := scope.Repo.Save(); saveErr != nil {
+				klog.V(2).Infof("failed to save repo hash cache: %v", saveErr)
+			}
+		}
+	}()
 	var errs []error
 	for _, task := range ts {
 		if err := task.Run(ctx, scope); err != nil {

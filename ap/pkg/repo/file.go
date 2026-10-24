@@ -17,15 +17,21 @@ package repo
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"go/build/constraint"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/recordfile"
+	"k8s.io/klog/v2"
 )
 
 var knownOS = map[string]bool{
@@ -78,6 +84,7 @@ var knownArch = map[string]bool{
 
 // File represents a file in the repository tree.
 type File struct {
+	repo    *Repo
 	Path    string // Absolute path on disk
 	RelPath string // Path relative to view root (forward slash separated)
 	Name    string // File base name
@@ -95,10 +102,9 @@ type File struct {
 	referencedGOOSOnce sync.Once
 	referencedGOOS     []string
 
-	hashOnce sync.Once
-	hash     string
-	hashErr  error
-
+	mu        sync.Mutex
+	hash      string
+	hashErr   error
 	metaSize  int64
 	metaMtime int64
 	metaInode uint64
@@ -252,11 +258,25 @@ func CheckIsGenerated(path string) bool {
 
 // Hash returns a hex-encoded SHA-256 hash of the file content, memoized in the tree.
 // It uses a fast path keyed on size, mtime (nanoseconds), and inode.
+var contentReadCounter int64
+
+// ContentReadCount returns the total number of files opened and read for hashing.
+func ContentReadCount() int64 {
+	return atomic.LoadInt64(&contentReadCounter)
+}
+
+// ResetContentReadCount resets the content read counter to zero.
+func ResetContentReadCount() {
+	atomic.StoreInt64(&contentReadCounter, 0)
+}
+
+// Hash returns a hex-encoded SHA-256 hash of the file content, memoized in the tree
+// and backed by the persistent hashes.bin cache.
+// It uses a fast path keyed on size, mtime (nanoseconds), and inode.
 func (f *File) Hash() (string, error) {
-	f.hashOnce.Do(func() {
-		f.hash, f.hashErr = f.computeHash()
-	})
-	return f.hash, f.hashErr
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.computeHash()
 }
 
 func (f *File) computeHash() (string, error) {
@@ -277,18 +297,61 @@ func (f *File) computeHash() (string, error) {
 		return f.hash, nil
 	}
 
+	// Consult persistent hashes.bin cache if available
+	if f.repo != nil && f.repo.hashIndex != nil {
+		relPath, err := filepath.Rel(f.repo.repoRoot, f.Path)
+		if err == nil && !strings.HasPrefix(relPath, "..") {
+			key := sha256.Sum256([]byte(filepath.ToSlash(relPath)))
+			if payload, ok := f.repo.hashIndex.Lookup(key); ok && len(payload) == 56 {
+				recSize := int64(binary.LittleEndian.Uint64(payload[0:8]))
+				recMtime := int64(binary.LittleEndian.Uint64(payload[8:16]))
+				recInode := binary.LittleEndian.Uint64(payload[16:24])
+				if recSize == size && recMtime == mtime && recInode == ino {
+					contentHash := hex.EncodeToString(payload[24:56])
+					f.hash = contentHash
+					f.metaSize = size
+					f.metaMtime = mtime
+					f.metaInode = ino
+					return contentHash, nil
+				}
+			}
+		}
+	}
+
 	h, err := hashFilePath(f.Path)
 	if err != nil {
 		return "", err
 	}
 
+	f.hash = h
 	f.metaSize = size
 	f.metaMtime = mtime
 	f.metaInode = ino
+
+	// Store pending in hashes.bin
+	if f.repo != nil && f.repo.hashIndex != nil {
+		relPath, err := filepath.Rel(f.repo.repoRoot, f.Path)
+		if err == nil && !strings.HasPrefix(relPath, "..") {
+			key := sha256.Sum256([]byte(filepath.ToSlash(relPath)))
+			var rawHash [32]byte
+			if recordfile.DecodeHex32(&rawHash, h) {
+				var payload [56]byte
+				binary.LittleEndian.PutUint64(payload[0:8], uint64(size))
+				binary.LittleEndian.PutUint64(payload[8:16], uint64(mtime))
+				binary.LittleEndian.PutUint64(payload[16:24], ino)
+				copy(payload[24:56], rawHash[:])
+				if setErr := f.repo.hashIndex.Set(key, payload[:]); setErr != nil {
+					klog.V(2).Infof("failed to set hash cache for %s: %v", relPath, setErr)
+				}
+			}
+		}
+	}
+
 	return h, nil
 }
 
 func hashFilePath(path string) (retHash string, retErr error) {
+	atomic.AddInt64(&contentReadCounter, 1)
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -317,9 +380,14 @@ func (f *File) Refresh() {
 	f.hasGoGenerate = false
 	f.referencedGOOSOnce = sync.Once{}
 	f.referencedGOOS = nil
-	f.hashOnce = sync.Once{}
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.hash = ""
 	f.hashErr = nil
+	f.metaSize = 0
+	f.metaMtime = 0
+	f.metaInode = 0
 }
 
 // ReferencedGOOS returns any known GOOS values referenced by this Go file
