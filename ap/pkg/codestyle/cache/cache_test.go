@@ -15,18 +15,17 @@
 package cache
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-func TestManager_Load_CorruptCache(t *testing.T) {
+func TestManager_Load_CorruptMetadata(t *testing.T) {
 	tmpDir := t.TempDir()
-	// Write invalid JSON to metadata.json and done.json
+	// Write invalid JSON to metadata.json
 	if err := os.WriteFile(filepath.Join(tmpDir, "metadata.json"), []byte("invalid json"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "done.json"), []byte("{corrupt"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -34,13 +33,38 @@ func TestManager_Load_CorruptCache(t *testing.T) {
 		dir: tmpDir,
 		caches: &Caches{
 			Metadata: make(map[string]*FileMetadata),
-			Done:     make(map[string]map[string]bool),
 		},
+		done: NewDoneIndex(),
 	}
 
 	err := m.load()
 	if err == nil {
-		t.Fatal("expected error from load() on corrupt files, got nil")
+		t.Fatal("expected error from load() on corrupt metadata.json, got nil")
+	}
+}
+
+func TestManager_Load_CorruptDoneBinTreatAsEmpty(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Write corrupt binary to done.bin
+	if err := os.WriteFile(filepath.Join(tmpDir, "done.bin"), []byte("corrupt binary data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &Manager{
+		dir: tmpDir,
+		caches: &Caches{
+			Metadata: make(map[string]*FileMetadata),
+		},
+		done: NewDoneIndex(),
+	}
+
+	// Corrupt done.bin must be logged at V(2) and treated as empty without returning an error
+	err := m.load()
+	if err != nil {
+		t.Fatalf("expected nil error from load() on corrupt done.bin, got: %v", err)
+	}
+	if m.done == nil || len(m.done.records) != 0 {
+		t.Errorf("expected empty done cache after corrupt done.bin")
 	}
 }
 
@@ -50,8 +74,8 @@ func TestManager_Load_NotExist(t *testing.T) {
 		dir: tmpDir,
 		caches: &Caches{
 			Metadata: make(map[string]*FileMetadata),
-			Done:     make(map[string]map[string]bool),
 		},
+		done: NewDoneIndex(),
 	}
 
 	err := m.load()
@@ -62,33 +86,59 @@ func TestManager_Load_NotExist(t *testing.T) {
 
 func TestManager_DoneCache(t *testing.T) {
 	tmpDir := t.TempDir()
+
+	// Write legacy files to verify they are deleted
+	legacyDone := filepath.Join(tmpDir, "done.json")
+	legacyGofmt := filepath.Join(tmpDir, "gofmt.json")
+	if err := os.WriteFile(legacyDone, []byte(`{"legacy": true}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyGofmt, []byte(`{"legacy": true}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	m, err := NewManagerWithDir(tmpDir)
 	if err != nil {
 		t.Fatalf("NewManagerWithDir failed: %v", err)
 	}
 
-	gofmtHash := "abcd1234ef5678"
-	tidyHash := "9876fedcba"
-
-	if m.IsDone("gofmt", gofmtHash) {
-		t.Errorf("expected IsDone(gofmt) to be false initially")
+	// Legacy files should have been removed on load
+	if _, err := os.Stat(legacyDone); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected legacy done.json to be deleted after load, err: %v", err)
 	}
-	if m.IsDone("tidy", tidyHash) {
-		t.Errorf("expected IsDone(tidy) to be false initially")
+	if _, err := os.Stat(legacyGofmt); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected legacy gofmt.json to be deleted after load, err: %v", err)
 	}
 
-	m.MarkDone("gofmt", gofmtHash)
-	m.MarkDone("tidy", tidyHash)
+	gofmtHash := makeHexHash(0xab, 1)
+	tidyHash := makeHexHash(0xcd, 2)
+	otherHash := makeHexHash(0xef, 3)
 
-	if !m.IsDone("gofmt", gofmtHash) {
-		t.Errorf("expected IsDone(gofmt) to be true after MarkDone")
+	if m.IsDone(StepGofmt, gofmtHash) {
+		t.Errorf("expected IsDone(StepGofmt) to be false initially")
 	}
-	if !m.IsDone("tidy", tidyHash) {
-		t.Errorf("expected IsDone(tidy) to be true after MarkDone")
+	if m.IsDone(StepTidy, tidyHash) {
+		t.Errorf("expected IsDone(StepTidy) to be false initially")
+	}
+
+	m.MarkDone(StepGofmt, gofmtHash)
+	m.MarkDone(StepTidy, tidyHash)
+
+	if !m.IsDone(StepGofmt, gofmtHash) {
+		t.Errorf("expected IsDone(StepGofmt) to be true after MarkDone")
+	}
+	if !m.IsDone(StepTidy, tidyHash) {
+		t.Errorf("expected IsDone(StepTidy) to be true after MarkDone")
 	}
 
 	if err := m.Save(); err != nil {
 		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Verify done.bin exists
+	doneBinPath := filepath.Join(tmpDir, "done.bin")
+	if _, err := os.Stat(doneBinPath); err != nil {
+		t.Fatalf("expected done.bin to exist after Save: %v", err)
 	}
 
 	// Reload in a new manager
@@ -96,13 +146,13 @@ func TestManager_DoneCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManagerWithDir reload failed: %v", err)
 	}
-	if !m2.IsDone("gofmt", gofmtHash) {
-		t.Errorf("expected IsDone(gofmt) to persist after reload")
+	if !m2.IsDone(StepGofmt, gofmtHash) {
+		t.Errorf("expected IsDone(StepGofmt) to persist after reload")
 	}
-	if !m2.IsDone("tidy", tidyHash) {
-		t.Errorf("expected IsDone(tidy) to persist after reload")
+	if !m2.IsDone(StepTidy, tidyHash) {
+		t.Errorf("expected IsDone(StepTidy) to persist after reload")
 	}
-	if m2.IsDone("gofmt", "other") {
+	if m2.IsDone(StepGofmt, otherHash) {
 		t.Errorf("expected IsDone for other hash to be false")
 	}
 }
