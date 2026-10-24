@@ -170,9 +170,22 @@ buildx: "0.38.1"
 - Pinned binaries are downloaded and cached in `~/.cache/ap/tools/`.
 - `ap deploy` and `ap build` automatically use these pinned versions rather than whatever version happens to be on the system PATH.
 
+### kind.yaml
+
+Configures `kind` pinning for `ap tool kind` and the e2e test harness.
+
+Example `.ap/kind.yaml`:
+```yaml
+kind: "v0.33.0"
+```
+
+- `kind`: Pinned version of the kind binary (defaults to the newest version in `versions.yaml`, e.g. `"v0.33.0"`).
+- Pinned binaries are downloaded and cached in `~/.cache/ap/tools/kind/<tag>/bin/kind`.
+- `ap tool kind` and the e2e test harness automatically use this tool-managed binary rather than relying on system PATH.
+
 ### Updating Tool Versions
 
-Run `ap tool update-versions` to refresh baked-in release tables (`ap/pkg/tool/protoc/versions.yaml` and `ap/pkg/tool/docker/versions.yaml`) with verified checksums. Flags allow skipping individual tools (all default to `true`): `--protoc`, `--docker`, and `--buildx` (e.g. `ap tool update-versions --docker=false` skips the slower Docker tarball downloads).
+Run `ap tool update-versions` to refresh baked-in release tables (`ap/pkg/tool/protoc/versions.yaml`, `ap/pkg/tool/docker/versions.yaml`, and `ap/pkg/tool/kind/versions.yaml`) with verified checksums. Flags allow skipping individual tools (all default to `true`): `--protoc`, `--docker`, `--buildx`, and `--kind` (e.g. `ap tool update-versions --docker=false` skips the slower Docker tarball downloads).
 
 ### ap.yaml
 

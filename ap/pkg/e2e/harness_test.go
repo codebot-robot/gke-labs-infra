@@ -16,7 +16,12 @@ package e2e
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 )
 
 func TestNewHarness(t *testing.T) {
@@ -42,4 +47,37 @@ data:
 `)
 
 	h.runCmd("kubectl", "get", "configmap", "test-cm", "-n", h.Namespace())
+}
+
+func TestHarness_KindPointsToCache(t *testing.T) {
+	tempCache := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", tempCache)
+
+	rel := kind.Latest()
+	if rel == nil {
+		t.Fatal("expected at least one kind release in table")
+	}
+	tag := rel.Version
+	binDir := filepath.Join(tempCache, "tools", "kind", tag, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	binName := "kind"
+	if runtime.GOOS == "windows" {
+		binName = "kind.exe"
+	}
+	binPath := filepath.Join(binDir, binName)
+	if err := os.WriteFile(binPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &Harness{t: t}
+	h.setupKind()
+
+	if h.KindCommand() != binPath {
+		t.Errorf("expected KindCommand %q, got %q", binPath, h.KindCommand())
+	}
+	if !strings.HasPrefix(h.KindCommand(), tempCache) {
+		t.Errorf("expected command path %q to point into cache %q", h.KindCommand(), tempCache)
+	}
 }

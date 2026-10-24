@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 )
 
 // Options specifies configuration for the test harness.
@@ -47,6 +48,12 @@ type Harness struct {
 	clusterName string
 	namespace   string
 	skipCleanup bool
+	kindBin     string
+}
+
+// KindCommand returns the path to the kind binary used by the harness.
+func (h *Harness) KindCommand() string {
+	return h.kindBin
 }
 
 // NewHarness creates a new e2e test harness.
@@ -66,25 +73,40 @@ func NewHarness(t *testing.T, opts ...Options) *Harness {
 		skipCleanup: opt.SkipCleanup || os.Getenv("SKIP_CLEANUP") != "",
 	}
 
+	h.setupKind()
 	h.setupCluster(opt.SkipClusterCreation)
 	h.setupNamespace()
 
 	return h
 }
 
+func (h *Harness) setupKind() {
+	h.t.Helper()
+	repoRoot := h.FindRepoRoot()
+	cfg, err := kind.LoadConfig(repoRoot)
+	if err != nil {
+		h.t.Fatalf("failed to load kind config: %v", err)
+	}
+	var kindVersion string
+	if cfg != nil {
+		kindVersion = cfg.Kind
+	}
+	kindBin, err := kind.EnsureKind(h.t.Context(), kindVersion)
+	if err != nil {
+		h.t.Fatalf("failed to ensure kind: %v", err)
+	}
+	h.kindBin = kindBin
+}
+
 func (h *Harness) setupCluster(skipCreation bool) {
 	h.t.Helper()
-	// Check if kind is installed
-	if _, err := exec.LookPath("kind"); err != nil {
-		h.t.Fatalf("kind not found in PATH: %v", err)
-	}
 	// Check if kubectl is installed
 	if _, err := exec.LookPath("kubectl"); err != nil {
 		h.t.Fatalf("kubectl not found in PATH: %v", err)
 	}
 
 	if !skipCreation {
-		clusters := h.runCmd("kind", "get", "clusters")
+		clusters := h.runCmd(h.kindBin, "get", "clusters")
 		exists := false
 		for _, cluster := range strings.Split(clusters, "\n") {
 			if strings.TrimSpace(cluster) == h.clusterName {
@@ -95,7 +117,7 @@ func (h *Harness) setupCluster(skipCreation bool) {
 
 		if !exists {
 			h.t.Logf("Creating kind cluster %s", h.clusterName)
-			h.runCmd("kind", "create", "cluster", "--name", h.clusterName)
+			h.runCmd(h.kindBin, "create", "cluster", "--name", h.clusterName)
 		}
 	}
 
@@ -177,8 +199,11 @@ func (h *Harness) DockerBuild(tag, dockerfile, context string) {
 // KindLoad loads a docker image into the kind cluster.
 func (h *Harness) KindLoad(tag string) {
 	h.t.Helper()
+	if h.kindBin == "" {
+		h.setupKind()
+	}
 	h.t.Logf("Loading image %s into kind cluster %s", tag, h.clusterName)
-	h.runCmd("kind", "load", "docker-image", tag, "--name", h.clusterName)
+	h.runCmd(h.kindBin, "load", "docker-image", tag, "--name", h.clusterName)
 }
 
 // SetupRegistry deploys an in-cluster registry and waits for it to be ready.
