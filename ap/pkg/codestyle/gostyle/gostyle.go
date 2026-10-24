@@ -40,7 +40,7 @@ var tidyRunner = func(ctx context.Context, r *repo.Repo, dir string) error {
 		return fmt.Errorf("go mod tidy failed in %s: %w\n%s", dir, err, strings.TrimSpace(string(out)))
 	}
 	if r != nil {
-		r.AfterGoModTidy(dir)
+		r.Track(filepath.Join(dir, "go.mod"), filepath.Join(dir, "go.sum"))
 	}
 	return nil
 }
@@ -147,7 +147,9 @@ func runGofmt(ctx context.Context, r *repo.Repo, repoRoot string, files []string
 	}
 
 	// Update cache for processed files
-	r.AfterGofmt(dirtyFiles...)
+	if r != nil {
+		r.Track(dirtyFiles...)
+	}
 	for _, f := range dirtyFiles {
 		if cm != nil {
 			// Re-check metadata. gofmt might have changed it.

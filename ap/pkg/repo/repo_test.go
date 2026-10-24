@@ -529,7 +529,7 @@ func TestRepo_Invalidate(t *testing.T) {
 	}
 }
 
-func TestRepo_AfterGoModTidy(t *testing.T) {
+func TestRepo_Track(t *testing.T) {
 	dir := setupTestRepo(t)
 	r, err := Open(dir)
 	if err != nil {
@@ -545,7 +545,7 @@ func TestRepo_AfterGoModTidy(t *testing.T) {
 		t.Fatal("expected go.sum to not exist initially")
 	}
 
-	// Simulate go mod tidy modifying go.mod and creating go.sum
+	// Simulate external tool modifying go.mod and creating go.sum
 	if err := os.WriteFile(goModPath, []byte("module example.com/root/sub\n\ngo 1.26\n// tidied\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -553,10 +553,10 @@ func TestRepo_AfterGoModTidy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r.AfterGoModTidy(modDir)
+	r.Track(goModPath, goSumPath)
 
 	if r.File(goSumPath) == nil {
-		t.Errorf("expected AfterGoModTidy to track new go.sum")
+		t.Errorf("expected Track to track new go.sum")
 	}
 	modF := r.File(goModPath)
 	if modF == nil {

@@ -723,20 +723,11 @@ func (r *Repo) Invalidate(dir string) error {
 	return nil
 }
 
-// AfterGoModTidy refreshes go.mod and go.sum in modDir (and tracks go.sum if newly created).
-func (r *Repo) AfterGoModTidy(modDir string) {
-	cleanDir := filepath.Clean(modDir)
-	if !filepath.IsAbs(cleanDir) {
-		cleanDir = filepath.Join(r.root, cleanDir)
-	}
-	r.TrackFile(filepath.Join(cleanDir, "go.mod"))
-	r.TrackFile(filepath.Join(cleanDir, "go.sum"))
-}
-
-// AfterGofmt refreshes the memoized state of each formatted file in the repo tree.
-func (r *Repo) AfterGofmt(files ...string) {
-	for _, f := range files {
-		r.TrackFile(f)
+// Track ensures that each file in paths is known to the Repo tree, adding it if not already
+// present, refreshing it if modified, or untracking it if deleted on disk.
+func (r *Repo) Track(paths ...string) {
+	for _, p := range paths {
+		r.TrackFile(p)
 	}
 }
 
