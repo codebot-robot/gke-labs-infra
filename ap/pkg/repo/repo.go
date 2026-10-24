@@ -380,6 +380,40 @@ func (r *Repo) FileExists(path string) bool {
 	return r.File(path) != nil
 }
 
+// TrackFile ensures that a file at path is known to the Repo tree, adding it if not already present.
+// If the file already exists in the tree, its memoized state is refreshed.
+func (r *Repo) TrackFile(path string) *File {
+	clean := filepath.Clean(path)
+	if !filepath.IsAbs(clean) {
+		clean = filepath.Join(r.root, clean)
+	}
+	if f, ok := r.filesByPath[clean]; ok {
+		f.Refresh()
+		return f
+	}
+	fi, err := os.Stat(clean)
+	if err != nil {
+		return nil
+	}
+	relPath, err := filepath.Rel(r.repoRoot, clean)
+	if err != nil {
+		return nil
+	}
+	f := &File{
+		Path:    clean,
+		RelPath: relPath,
+		Name:    filepath.Base(clean),
+		apRoot:  closestAncestor(clean, r.apRoots),
+		module:  closestAncestor(clean, r.modules),
+		info:    fi,
+	}
+	r.files = append(r.files, f)
+	r.filesByPath[clean] = f
+	parentDir := filepath.Dir(clean)
+	r.filesByDir[parentDir] = append(r.filesByDir[parentDir], f)
+	return f
+}
+
 // FilesInDir returns all files located directly within dir (non-recursive).
 func (r *Repo) FilesInDir(dir string) []*File {
 	clean := filepath.Clean(dir)

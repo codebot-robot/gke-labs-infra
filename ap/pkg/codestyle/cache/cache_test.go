@@ -22,11 +22,11 @@ import (
 
 func TestManager_Load_CorruptCache(t *testing.T) {
 	tmpDir := t.TempDir()
-	// Write invalid JSON to metadata.json and gofmt.json
+	// Write invalid JSON to metadata.json and done.json
 	if err := os.WriteFile(filepath.Join(tmpDir, "metadata.json"), []byte("invalid json"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "gofmt.json"), []byte("{corrupt"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmpDir, "done.json"), []byte("{corrupt"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -34,7 +34,7 @@ func TestManager_Load_CorruptCache(t *testing.T) {
 		dir: tmpDir,
 		caches: &Caches{
 			Metadata: make(map[string]*FileMetadata),
-			Gofmt:    make(map[string]bool),
+			Done:     make(map[string]map[string]bool),
 		},
 	}
 
@@ -50,12 +50,59 @@ func TestManager_Load_NotExist(t *testing.T) {
 		dir: tmpDir,
 		caches: &Caches{
 			Metadata: make(map[string]*FileMetadata),
-			Gofmt:    make(map[string]bool),
+			Done:     make(map[string]map[string]bool),
 		},
 	}
 
 	err := m.load()
 	if err != nil {
 		t.Fatalf("expected nil error when cache files do not exist, got: %v", err)
+	}
+}
+
+func TestManager_DoneCache(t *testing.T) {
+	tmpDir := t.TempDir()
+	m, err := NewManagerWithDir(tmpDir)
+	if err != nil {
+		t.Fatalf("NewManagerWithDir failed: %v", err)
+	}
+
+	gofmtHash := "abcd1234ef5678"
+	tidyHash := "9876fedcba"
+
+	if m.IsDone("gofmt", gofmtHash) {
+		t.Errorf("expected IsDone(gofmt) to be false initially")
+	}
+	if m.IsDone("tidy", tidyHash) {
+		t.Errorf("expected IsDone(tidy) to be false initially")
+	}
+
+	m.MarkDone("gofmt", gofmtHash)
+	m.MarkDone("tidy", tidyHash)
+
+	if !m.IsDone("gofmt", gofmtHash) {
+		t.Errorf("expected IsDone(gofmt) to be true after MarkDone")
+	}
+	if !m.IsDone("tidy", tidyHash) {
+		t.Errorf("expected IsDone(tidy) to be true after MarkDone")
+	}
+
+	if err := m.Save(); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Reload in a new manager
+	m2, err := NewManagerWithDir(tmpDir)
+	if err != nil {
+		t.Fatalf("NewManagerWithDir reload failed: %v", err)
+	}
+	if !m2.IsDone("gofmt", gofmtHash) {
+		t.Errorf("expected IsDone(gofmt) to persist after reload")
+	}
+	if !m2.IsDone("tidy", tidyHash) {
+		t.Errorf("expected IsDone(tidy) to persist after reload")
+	}
+	if m2.IsDone("gofmt", "other") {
+		t.Errorf("expected IsDone for other hash to be false")
 	}
 }

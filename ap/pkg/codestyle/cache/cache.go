@@ -31,8 +31,8 @@ import (
 )
 
 type Caches struct {
-	Metadata map[string]*FileMetadata `json:"metadata"`
-	Gofmt    map[string]bool          `json:"gofmt"`
+	Metadata map[string]*FileMetadata   `json:"metadata"`
+	Done     map[string]map[string]bool `json:"done"`
 }
 
 type Manager struct {
@@ -47,6 +47,10 @@ func NewManager() (*Manager, error) {
 		return nil, err
 	}
 	dir := filepath.Join(cacheDir, "codestyle")
+	return NewManagerWithDir(dir)
+}
+
+func NewManagerWithDir(dir string) (*Manager, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
@@ -55,7 +59,7 @@ func NewManager() (*Manager, error) {
 		dir: dir,
 		caches: &Caches{
 			Metadata: make(map[string]*FileMetadata),
-			Gofmt:    make(map[string]bool),
+			Done:     make(map[string]map[string]bool),
 		},
 	}
 	if err := m.load(); err != nil {
@@ -78,15 +82,18 @@ func (m *Manager) load() error {
 		errs = append(errs, fmt.Errorf("failed to parse metadata cache %s: %w", metaPath, err))
 	}
 
-	gofmtPath := filepath.Join(m.dir, "gofmt.json")
-	if data, err := os.ReadFile(gofmtPath); err != nil {
+	donePath := filepath.Join(m.dir, "done.json")
+	if data, err := os.ReadFile(donePath); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			klog.Warningf("failed to read gofmt cache %s: %v", gofmtPath, err)
-			errs = append(errs, fmt.Errorf("failed to read gofmt cache %s: %w", gofmtPath, err))
+			klog.Warningf("failed to read done cache %s: %v", donePath, err)
+			errs = append(errs, fmt.Errorf("failed to read done cache %s: %w", donePath, err))
 		}
-	} else if err := json.Unmarshal(data, &m.caches.Gofmt); err != nil {
-		klog.Warningf("failed to parse gofmt cache %s: %v", gofmtPath, err)
-		errs = append(errs, fmt.Errorf("failed to parse gofmt cache %s: %w", gofmtPath, err))
+	} else if err := json.Unmarshal(data, &m.caches.Done); err != nil {
+		klog.Warningf("failed to parse done cache %s: %v", donePath, err)
+		errs = append(errs, fmt.Errorf("failed to parse done cache %s: %w", donePath, err))
+	}
+	if m.caches.Done == nil {
+		m.caches.Done = make(map[string]map[string]bool)
 	}
 
 	return errors.Join(errs...)
@@ -105,12 +112,12 @@ func (m *Manager) Save() error {
 		return err
 	}
 
-	gofmtPath := filepath.Join(m.dir, "gofmt.json")
-	gofmtData, err := json.MarshalIndent(m.caches.Gofmt, "", "  ")
+	donePath := filepath.Join(m.dir, "done.json")
+	doneData, err := json.MarshalIndent(m.caches.Done, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(gofmtPath, gofmtData, 0644); err != nil {
+	if err := os.WriteFile(donePath, doneData, 0644); err != nil {
 		return err
 	}
 	return nil
@@ -144,16 +151,29 @@ func (m *Manager) GetOrUpdateMetadata(path string) (*FileMetadata, error) {
 	return current, nil
 }
 
-func (m *Manager) IsGofmtDone(hash string) bool {
+func (m *Manager) IsDone(step, hash string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.caches.Gofmt[hash]
+	if m.caches.Done == nil {
+		return false
+	}
+	stepMap := m.caches.Done[step]
+	if stepMap == nil {
+		return false
+	}
+	return stepMap[hash]
 }
 
-func (m *Manager) MarkGofmtDone(hash string) {
+func (m *Manager) MarkDone(step, hash string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.caches.Gofmt[hash] = true
+	if m.caches.Done == nil {
+		m.caches.Done = make(map[string]map[string]bool)
+	}
+	if m.caches.Done[step] == nil {
+		m.caches.Done[step] = make(map[string]bool)
+	}
+	m.caches.Done[step][hash] = true
 }
 
 func hashFile(path string) (retHash string, retErr error) {

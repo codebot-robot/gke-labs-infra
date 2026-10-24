@@ -42,6 +42,8 @@ govet:
   enabled: true
 govulncheck:
   enabled: false
+tidy:
+  enabled: false
 skip:
   - vendor/
 `
@@ -62,6 +64,9 @@ skip:
 	}
 	if cfg.IsGovulncheckEnabled() != false {
 		t.Errorf("expected govulncheck enabled to be false")
+	}
+	if cfg.IsTidyEnabled() != false {
+		t.Errorf("expected tidy enabled to be false")
 	}
 	if len(cfg.Skip) != 1 || cfg.Skip[0] != "vendor/" {
 		t.Errorf("unexpected skip list: %v", cfg.Skip)
@@ -88,6 +93,9 @@ func TestLoadDefault(t *testing.T) {
 	}
 	if cfg.IsGovulncheckEnabled() != true {
 		t.Errorf("expected default govulncheck enabled to be true")
+	}
+	if cfg.IsTidyEnabled() != true {
+		t.Errorf("expected default tidy enabled to be true")
 	}
 	if cfg.IsDroppedErrorsEnabled() != true {
 		t.Errorf("expected default droppederrors enabled to be true")

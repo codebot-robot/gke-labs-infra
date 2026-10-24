@@ -16,9 +16,12 @@ package gostyle
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/cache"
@@ -27,6 +30,17 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"k8s.io/klog/v2"
 )
+
+var tidyRunner = func(ctx context.Context, dir string) error {
+	cmd := exec.CommandContext(ctx, "go", "mod", "tidy")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GOWORK=off")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("go mod tidy failed in %s: %w\n%s", dir, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
 
 func Run(ctx context.Context, r *repo.Repo, repoRoot string, files []string) error {
 	log := klog.FromContext(ctx)
@@ -48,8 +62,22 @@ func Run(ctx context.Context, r *repo.Repo, repoRoot string, files []string) err
 		return err
 	}
 
+	if r == nil {
+		var openErr error
+		r, openErr = repo.Open(repoRoot, repo.WithSkip(cfg.Skip...))
+		if openErr != nil {
+			return openErr
+		}
+	}
+
 	if cfg.IsGofmtEnabled() {
 		if err := runGofmt(ctx, r, repoRoot, files, cfg.Skip, cm); err != nil {
+			return err
+		}
+	}
+
+	if cfg.IsTidyEnabled() {
+		if err := runGoModTidy(ctx, r, repoRoot, files, cfg.Skip, cm); err != nil {
 			return err
 		}
 	}
@@ -82,7 +110,7 @@ func runGofmt(ctx context.Context, r *repo.Repo, repoRoot string, files []string
 				dirtyFiles = append(dirtyFiles, f)
 				continue
 			}
-			if !cm.IsGofmtDone(meta.Hash) {
+			if !cm.IsDone("gofmt", meta.Hash) {
 				dirtyFiles = append(dirtyFiles, f)
 			}
 		}
@@ -116,16 +144,132 @@ func runGofmt(ctx context.Context, r *repo.Repo, repoRoot string, files []string
 	}
 
 	// Update cache for processed files
-	if cm != nil {
-		for _, f := range dirtyFiles {
+	for _, f := range dirtyFiles {
+		if file := r.File(f); file != nil {
+			file.Refresh()
+		}
+		if cm != nil {
 			// Re-check metadata. gofmt might have changed it.
 			meta, err := cm.GetOrUpdateMetadata(f)
 			if err != nil {
 				continue
 			}
-			cm.MarkGofmtDone(meta.Hash)
+			cm.MarkDone("gofmt", meta.Hash)
 		}
 	}
 
 	return nil
+}
+
+func runGoModTidy(ctx context.Context, r *repo.Repo, repoRoot string, files []string, skip []string, cm *cache.Manager) error {
+	log := klog.FromContext(ctx)
+
+	ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
+	expandedFiles, err := walker.ExpandPaths(r, repoRoot, files, ignoreList)
+	if err != nil {
+		return err
+	}
+
+	inScopeModules := make(map[string]bool)
+	for _, f := range expandedFiles {
+		if mod := r.ModuleFor(f); mod != "" {
+			inScopeModules[mod] = true
+		}
+	}
+
+	for _, modDir := range r.Modules() {
+		if !inScopeModules[modDir] {
+			continue
+		}
+
+		relMod, err := filepath.Rel(repoRoot, modDir)
+		if err != nil {
+			continue
+		}
+
+		goFiles := r.Under(modDir).Files(func(f *repo.File) bool {
+			if !strings.HasSuffix(f.Name, ".go") || f.Module() != modDir {
+				return false
+			}
+			rel, err := filepath.Rel(repoRoot, f.Path)
+			if err != nil {
+				return false
+			}
+			return !ignoreList.ShouldIgnore(filepath.ToSlash(rel), false)
+		})
+
+		key, err := computeModuleKey(modDir, r, goFiles)
+		if err != nil {
+			return err
+		}
+
+		if cm != nil && cm.IsDone("tidy", key) {
+			log.V(2).Info("Module is tidy (cached)", "module", relMod)
+			continue
+		}
+
+		log.Info("Running go mod tidy", "module", relMod)
+
+		// In multi-module repositories or repositories with a go.work file, running
+		// `go mod tidy` in workspace mode can cause dependencies to be resolved
+		// across workspace siblings or lead to discrepancies between local workspace
+		// builds and external/isolated builds. Disabling workspace mode with GOWORK=off
+		// ensures that each module is tidied strictly on its own terms as an independent module.
+		if err := tidyRunner(ctx, modDir); err != nil {
+			return err
+		}
+
+		goModPath := filepath.Join(modDir, "go.mod")
+		goSumPath := filepath.Join(modDir, "go.sum")
+		if f := r.File(goModPath); f != nil {
+			f.Refresh()
+		}
+		if f := r.File(goSumPath); f != nil {
+			f.Refresh()
+		} else {
+			r.TrackFile(goSumPath)
+		}
+
+		if cm != nil {
+			postKey, err := computeModuleKey(modDir, r, goFiles)
+			if err != nil {
+				return err
+			}
+			cm.MarkDone("tidy", postKey)
+		}
+	}
+
+	return nil
+}
+
+func computeModuleKey(modDir string, r *repo.Repo, goFiles []*repo.File) (string, error) {
+	h := sha256.New()
+	if f := r.File(filepath.Join(modDir, "go.mod")); f != nil {
+		hash, err := f.Hash()
+		if err != nil {
+			return "", err
+		}
+		h.Write([]byte("go.mod:" + hash + "\n"))
+	}
+	if f := r.File(filepath.Join(modDir, "go.sum")); f != nil {
+		hash, err := f.Hash()
+		if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		if err == nil {
+			h.Write([]byte("go.sum:" + hash + "\n"))
+		}
+	}
+	for _, f := range goFiles {
+		hash, err := f.Hash()
+		if err != nil {
+			return "", err
+		}
+		rel, err := filepath.Rel(modDir, f.Path)
+		if err != nil {
+			return "", err
+		}
+		h.Write([]byte(filepath.ToSlash(rel) + ":" + hash + "\n"))
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

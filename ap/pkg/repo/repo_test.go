@@ -326,3 +326,32 @@ func TestFilesInDir(t *testing.T) {
 		t.Errorf("expected 0 files for nonexistent dir, got %d", len(emptyFiles))
 	}
 }
+
+func TestRepo_TrackFile(t *testing.T) {
+	dir := setupTestRepo(t)
+	r, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newPath := filepath.Join(dir, "newfile.txt")
+	if r.File(newPath) != nil {
+		t.Fatal("expected newfile.txt to not exist in repo initially")
+	}
+
+	if err := os.WriteFile(newPath, []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	f := r.TrackFile(newPath)
+	if f == nil {
+		t.Fatal("expected TrackFile to return *File, got nil")
+	}
+	if r.File(newPath) != f {
+		t.Errorf("expected r.File(newPath) to return tracked file")
+	}
+	h, err := f.Hash()
+	if err != nil || h == "" {
+		t.Errorf("expected valid hash from tracked file, got err=%v", err)
+	}
+}
