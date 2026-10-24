@@ -85,6 +85,8 @@ type File struct {
 	apRoot string // Enclosing AP root directory path
 	module string // Enclosing Go module directory path
 
+	mu sync.Mutex
+
 	isGeneratedOnce sync.Once
 	isGenerated     bool
 	generatedHeader string
@@ -95,9 +97,8 @@ type File struct {
 	referencedGOOSOnce sync.Once
 	referencedGOOS     []string
 
-	hashOnce sync.Once
-	hash     string
-	hashErr  error
+	hash    string
+	hashErr error
 
 	metaSize  int64
 	metaMtime int64
@@ -251,17 +252,19 @@ func CheckIsGenerated(path string) bool {
 }
 
 // Hash returns a hex-encoded SHA-256 hash of the file content, memoized in the tree.
-// It uses a fast path keyed on size, mtime (nanoseconds), and inode.
+// It uses a fast path keyed on size, mtime (nanoseconds), and inode, re-stating on each
+// call and recomputing only when they changed.
 func (f *File) Hash() (string, error) {
-	f.hashOnce.Do(func() {
-		f.hash, f.hashErr = f.computeHash()
-	})
-	return f.hash, f.hashErr
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.computeHashLocked()
 }
 
-func (f *File) computeHash() (string, error) {
+func (f *File) computeHashLocked() (string, error) {
 	fi, err := os.Lstat(f.Path)
 	if err != nil {
+		f.hash = ""
+		f.hashErr = err
 		return "", err
 	}
 
@@ -277,14 +280,31 @@ func (f *File) computeHash() (string, error) {
 		return f.hash, nil
 	}
 
+	// Content changed; invalidate memoized file attributes
+	if f.hash != "" {
+		f.infoOnce = sync.Once{}
+		f.info = nil
+		f.isGeneratedOnce = sync.Once{}
+		f.isGenerated = false
+		f.generatedHeader = ""
+		f.hasGoGenerateOnce = sync.Once{}
+		f.hasGoGenerate = false
+		f.referencedGOOSOnce = sync.Once{}
+		f.referencedGOOS = nil
+	}
+
 	h, err := hashFilePath(f.Path)
 	if err != nil {
+		f.hash = ""
+		f.hashErr = err
 		return "", err
 	}
 
 	f.metaSize = size
 	f.metaMtime = mtime
 	f.metaInode = ino
+	f.hash = h
+	f.hashErr = nil
 	return h, nil
 }
 
@@ -308,6 +328,8 @@ func hashFilePath(path string) (retHash string, retErr error) {
 
 // Refresh clears memoized metadata, IsGenerated, and Hash, forcing them to re-evaluate.
 func (f *File) Refresh() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.infoOnce = sync.Once{}
 	f.info = nil
 	f.isGeneratedOnce = sync.Once{}
@@ -317,9 +339,11 @@ func (f *File) Refresh() {
 	f.hasGoGenerate = false
 	f.referencedGOOSOnce = sync.Once{}
 	f.referencedGOOS = nil
-	f.hashOnce = sync.Once{}
 	f.hash = ""
 	f.hashErr = nil
+	f.metaSize = 0
+	f.metaMtime = 0
+	f.metaInode = 0
 }
 
 // ReferencedGOOS returns any known GOOS values referenced by this Go file

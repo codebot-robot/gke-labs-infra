@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 )
 
 var (
@@ -80,6 +82,8 @@ func WithIgnore(patterns ...string) Option {
 
 // Repo represents an in-memory snapshot of a repository directory tree.
 type Repo struct {
+	mu sync.RWMutex
+
 	root     string // root directory of this view
 	repoRoot string // anchor root of the entire repository
 
@@ -329,6 +333,8 @@ func (r *Repo) RepoRoot() string {
 
 // Files returns all files matching the given filters.
 func (r *Repo) Files(filters ...Filter) []*File {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if len(filters) == 0 {
 		res := make([]*File, len(r.files))
 		copy(res, r.files)
@@ -362,6 +368,8 @@ func (r *Repo) FilePaths(filters ...Filter) []string {
 
 // File looks up a file by absolute path or path relative to the repo root / view root.
 func (r *Repo) File(path string) *File {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	clean := filepath.Clean(path)
 	if f, ok := r.filesByPath[clean]; ok {
 		return f
@@ -382,13 +390,28 @@ func (r *Repo) FileExists(path string) bool {
 
 // TrackFile ensures that a file at path is known to the Repo tree, adding it if not already present.
 // If the file already exists in the tree, its memoized state is refreshed.
+// If the file no longer exists on disk, it is untracked from the tree.
 func (r *Repo) TrackFile(path string) *File {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
 		clean = filepath.Join(r.root, clean)
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.trackFileLocked(clean)
+}
+
+func (r *Repo) trackFileLocked(clean string) *File {
 	if f, ok := r.filesByPath[clean]; ok {
+		fi, err := os.Stat(clean)
+		if err != nil {
+			if os.IsNotExist(err) {
+				r.untrackFileLocked(clean)
+			}
+			return nil
+		}
 		f.Refresh()
+		f.info = fi
 		return f
 	}
 	fi, err := os.Stat(clean)
@@ -399,6 +422,14 @@ func (r *Repo) TrackFile(path string) *File {
 	if err != nil {
 		return nil
 	}
+	relSlash := filepath.ToSlash(relPath)
+	if r.ignoreList != nil && r.ignoreList.ShouldIgnore(relSlash, false) {
+		return nil
+	}
+
+	parentDir := filepath.Dir(clean)
+	r.ensureDirs(parentDir)
+
 	f := &File{
 		Path:    clean,
 		RelPath: relPath,
@@ -408,10 +439,305 @@ func (r *Repo) TrackFile(path string) *File {
 		info:    fi,
 	}
 	r.files = append(r.files, f)
+	sort.Slice(r.files, func(i, j int) bool {
+		return r.files[i].Path < r.files[j].Path
+	})
 	r.filesByPath[clean] = f
-	parentDir := filepath.Dir(clean)
+	if r.filesByDir == nil {
+		r.filesByDir = make(map[string][]*File)
+	}
 	r.filesByDir[parentDir] = append(r.filesByDir[parentDir], f)
+	sort.Slice(r.filesByDir[parentDir], func(i, j int) bool {
+		return r.filesByDir[parentDir][i].Path < r.filesByDir[parentDir][j].Path
+	})
+
+	if f.IsTest() {
+		if r.hasTestsDirs == nil {
+			r.hasTestsDirs = make(map[string]bool)
+		}
+		for curr := parentDir; ; {
+			r.hasTestsDirs[curr] = true
+			if curr == r.root || curr == filepath.Dir(curr) {
+				break
+			}
+			curr = filepath.Dir(curr)
+		}
+	}
+
+	if f.Name == "go.mod" {
+		r.modules = uniqueSorted(append(r.modules, parentDir))
+	}
+	if f.Name == ".ap" || filepath.Base(parentDir) == ".ap" {
+		apCandidate := parentDir
+		if f.Name != ".ap" {
+			apCandidate = filepath.Dir(parentDir)
+		}
+		r.apRoots = uniqueSorted(append(r.apRoots, apCandidate))
+	}
+
 	return f
+}
+
+func (r *Repo) ensureDirs(dir string) {
+	if r.dirsSet == nil {
+		r.dirsSet = make(map[string]bool)
+	}
+	for curr := dir; ; {
+		if r.dirsSet[curr] {
+			break
+		}
+		r.dirsSet[curr] = true
+		r.dirs = append(r.dirs, curr)
+		if curr == r.root || curr == filepath.Dir(curr) {
+			break
+		}
+		curr = filepath.Dir(curr)
+	}
+	sort.Strings(r.dirs)
+}
+
+func (r *Repo) untrackFileLocked(clean string) {
+	f, ok := r.filesByPath[clean]
+	if !ok {
+		return
+	}
+	delete(r.filesByPath, clean)
+
+	for i, file := range r.files {
+		if file.Path == clean {
+			r.files = append(r.files[:i], r.files[i+1:]...)
+			break
+		}
+	}
+
+	parentDir := filepath.Dir(clean)
+	dirFiles := r.filesByDir[parentDir]
+	for i, file := range dirFiles {
+		if file.Path == clean {
+			r.filesByDir[parentDir] = append(dirFiles[:i], dirFiles[i+1:]...)
+			break
+		}
+	}
+	if len(r.filesByDir[parentDir]) == 0 {
+		delete(r.filesByDir, parentDir)
+	}
+
+	if f.IsTest() {
+		r.recomputeHasTestsDirs()
+	}
+}
+
+func (r *Repo) recomputeHasTestsDirs() {
+	r.hasTestsDirs = make(map[string]bool)
+	for _, f := range r.files {
+		if f.IsTest() {
+			for curr := filepath.Dir(f.Path); ; {
+				r.hasTestsDirs[curr] = true
+				if curr == r.root || curr == filepath.Dir(curr) {
+					break
+				}
+				curr = filepath.Dir(curr)
+			}
+		}
+	}
+}
+
+// UntrackFile removes path from the repo tree if present.
+func (r *Repo) UntrackFile(path string) {
+	clean := filepath.Clean(path)
+	if !filepath.IsAbs(clean) {
+		clean = filepath.Join(r.root, clean)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.untrackFileLocked(clean)
+}
+
+// Remove removes the named file from disk and untracks it from the repo tree.
+func (r *Repo) Remove(path string) error {
+	clean := filepath.Clean(path)
+	if !filepath.IsAbs(clean) {
+		clean = filepath.Join(r.root, clean)
+	}
+	if err := os.Remove(clean); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	r.UntrackFile(clean)
+	return nil
+}
+
+// WriteFileAtomic writes data to path atomically and ensures the file is refreshed and tracked in the repo tree.
+func (r *Repo) WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	clean := filepath.Clean(path)
+	if !filepath.IsAbs(clean) {
+		clean = filepath.Join(r.root, clean)
+	}
+	if err := fileutils.WriteFileAtomic(clean, data, perm); err != nil {
+		return err
+	}
+	r.TrackFile(clean)
+	return nil
+}
+
+// CopyFile copies a file from src to dst atomically and ensures dst is refreshed and tracked in the repo tree.
+func (r *Repo) CopyFile(src, dst string, perm os.FileMode) error {
+	cleanDst := filepath.Clean(dst)
+	if !filepath.IsAbs(cleanDst) {
+		cleanDst = filepath.Join(r.root, cleanDst)
+	}
+	if err := fileutils.CopyFile(src, cleanDst, perm); err != nil {
+		return err
+	}
+	r.TrackFile(cleanDst)
+	return nil
+}
+
+// Invalidate drops memoized state for every file under dir, re-stats lazily,
+// and picks up newly created and deleted files.
+func (r *Repo) Invalidate(dir string) error {
+	cleanDir := filepath.Clean(dir)
+	if !filepath.IsAbs(cleanDir) {
+		cleanDir = filepath.Join(r.root, cleanDir)
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	dirPrefix := cleanDir + string(filepath.Separator)
+	isUnder := func(p string) bool {
+		return p == cleanDir || strings.HasPrefix(p, dirPrefix)
+	}
+
+	diskFiles := make(map[string]fs.DirEntry)
+	diskDirs := make(map[string]bool)
+
+	if fi, err := os.Stat(cleanDir); err == nil && fi.IsDir() {
+		diskDirs[cleanDir] = true
+		if walkErr := filepath.WalkDir(cleanDir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			relPath, err := filepath.Rel(r.repoRoot, path)
+			if err != nil {
+				return nil
+			}
+			if relPath == "." {
+				return nil
+			}
+			relSlash := filepath.ToSlash(relPath)
+			if d.IsDir() {
+				if d.Name() == ".git" {
+					return filepath.SkipDir
+				}
+				if r.ignoreList != nil && r.ignoreList.ShouldIgnore(relSlash, true) {
+					return filepath.SkipDir
+				}
+				diskDirs[path] = true
+				return nil
+			}
+			if r.ignoreList != nil && r.ignoreList.ShouldIgnore(relSlash, false) {
+				return nil
+			}
+			diskFiles[path] = d
+			return nil
+		}); walkErr != nil {
+			return fmt.Errorf("failed to walk %s for invalidation: %w", cleanDir, walkErr)
+		}
+	}
+
+	// 1. Untrack deleted files and refresh existing files under cleanDir
+	var toUntrack []string
+	for _, f := range r.files {
+		if isUnder(f.Path) {
+			if _, ok := diskFiles[f.Path]; !ok {
+				toUntrack = append(toUntrack, f.Path)
+			} else {
+				f.Refresh()
+			}
+		}
+	}
+	for _, path := range toUntrack {
+		r.untrackFileLocked(path)
+	}
+
+	// 2. Track new files discovered on disk
+	for path, d := range diskFiles {
+		if _, ok := r.filesByPath[path]; !ok {
+			relPath, err := filepath.Rel(r.repoRoot, path)
+			if err != nil {
+				continue
+			}
+			parentDir := filepath.Dir(path)
+			r.ensureDirs(parentDir)
+
+			f := &File{
+				Path:    path,
+				RelPath: relPath,
+				Name:    d.Name(),
+				apRoot:  closestAncestor(path, r.apRoots),
+				module:  closestAncestor(path, r.modules),
+			}
+			r.files = append(r.files, f)
+			r.filesByPath[path] = f
+			if r.filesByDir == nil {
+				r.filesByDir = make(map[string][]*File)
+			}
+			r.filesByDir[parentDir] = append(r.filesByDir[parentDir], f)
+
+			if d.Name() == "go.mod" {
+				r.modules = uniqueSorted(append(r.modules, parentDir))
+			}
+			if d.Name() == ".ap" {
+				r.apRoots = uniqueSorted(append(r.apRoots, parentDir))
+			}
+		}
+	}
+
+	// Sort files
+	sort.Slice(r.files, func(i, j int) bool {
+		return r.files[i].Path < r.files[j].Path
+	})
+	for _, list := range r.filesByDir {
+		sort.Slice(list, func(i, j int) bool {
+			return list[i].Path < list[j].Path
+		})
+	}
+
+	// 3. Update dirs
+	for d := range diskDirs {
+		r.ensureDirs(d)
+	}
+	var activeDirs []string
+	for _, d := range r.dirs {
+		if isUnder(d) && !diskDirs[d] {
+			delete(r.dirsSet, d)
+			continue
+		}
+		activeDirs = append(activeDirs, d)
+	}
+	r.dirs = activeDirs
+
+	// 4. Recompute test directories
+	r.recomputeHasTestsDirs()
+
+	return nil
+}
+
+// AfterGoModTidy refreshes go.mod and go.sum in modDir (and tracks go.sum if newly created).
+func (r *Repo) AfterGoModTidy(modDir string) {
+	cleanDir := filepath.Clean(modDir)
+	if !filepath.IsAbs(cleanDir) {
+		cleanDir = filepath.Join(r.root, cleanDir)
+	}
+	r.TrackFile(filepath.Join(cleanDir, "go.mod"))
+	r.TrackFile(filepath.Join(cleanDir, "go.sum"))
+}
+
+// AfterGofmt refreshes the memoized state of each formatted file in the repo tree.
+func (r *Repo) AfterGofmt(files ...string) {
+	for _, f := range files {
+		r.TrackFile(f)
+	}
 }
 
 // FilesInDir returns all files located directly within dir (non-recursive).

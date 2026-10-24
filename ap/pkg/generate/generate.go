@@ -67,6 +67,13 @@ func (t *LegacyScriptTask) Run(ctx context.Context, scope *tasks.APScope) error 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to run %s: %w", t.Name, err)
 	}
+	if scope != nil {
+		if r, err := scope.GetRepo(); err == nil && r != nil {
+			if err := r.Invalidate(t.Dir); err != nil {
+				return fmt.Errorf("failed to invalidate repo tree after %s: %w", t.Name, err)
+			}
+		}
+	}
 	return nil
 }
 
@@ -92,6 +99,13 @@ func (t *GoGenerateTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	cmd.Env = append(os.Environ(), "GOTOOLCHAIN=auto")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go generate failed in %s: %w", t.Dir, err)
+	}
+	if scope != nil {
+		if r, err := scope.GetRepo(); err == nil && r != nil {
+			if err := r.Invalidate(t.Dir); err != nil {
+				return fmt.Errorf("failed to invalidate repo tree after go generate in %s: %w", t.Dir, err)
+			}
+		}
 	}
 	return nil
 }
@@ -229,7 +243,22 @@ func Run(ctx context.Context, repoRoot string, scopes []*tasks.APScope) error {
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: repoRoot, Dir: repoRoot})
+	var r *repo.Repo
+	if len(scopes) > 0 {
+		var scopeErr error
+		r, scopeErr = scopes[0].GetRepo()
+		if scopeErr != nil {
+			return scopeErr
+		}
+	}
+	if r == nil {
+		var openErr error
+		r, openErr = repo.Open(repoRoot)
+		if openErr != nil {
+			return openErr
+		}
+	}
+	return t.Run(ctx, &tasks.APScope{RepoRoot: repoRoot, Dir: repoRoot, Repo: r})
 }
 
 func getSuffix(repoRoot, apRoot string) string {
@@ -298,7 +327,11 @@ if [[ -n $(git status --porcelain) ]]; then
   exit 1
 fi
 `, headerBlock, skipGuard, apCmd, apCmd, apCmd)
-	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
+	r, err := repo.Open(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to open repo at %s: %w", repoRoot, err)
+	}
+	if err := writeFileIfChanged(r, targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -312,10 +345,14 @@ func runAuditGeneratedGenerator(_ context.Context, repoRoot string) error {
 	}
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 	targetFile := filepath.Join(presubmitsDir, "ap-audit-generated")
+	r, err := repo.Open(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to open repo at %s: %w", repoRoot, err)
+	}
 
 	if rootCfg == nil || rootCfg.Generate == nil || !rootCfg.Generate.AuditGenerated {
 		// If not opted in, remove stale ap-audit-generated if present
-		if err := os.Remove(targetFile); err != nil && !os.IsNotExist(err) {
+		if err := removeFile(r, targetFile); err != nil {
 			return fmt.Errorf("failed to remove %s: %w", targetFile, err)
 		}
 		return nil
@@ -364,7 +401,7 @@ cd "${REPO_ROOT}"
 # Run audit mode (strict in CI)
 %s generate --audit-generated --strict //...
 `, headerBlock, skipGuard, apCmd)
-	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
+	if err := writeFileIfChanged(r, targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -418,7 +455,11 @@ cd "${REPO_ROOT}"
 # Run tests
 %s test //...
 `, headerBlock, skipGuard, apCmd)
-	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
+	r, err := repo.Open(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to open repo at %s: %w", repoRoot, err)
+	}
+	if err := writeFileIfChanged(r, targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -472,7 +513,11 @@ cd "${REPO_ROOT}"
 # Run linting
 %s lint //...
 `, headerBlock, skipGuard, apCmd)
-	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
+	r, err := repo.Open(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to open repo at %s: %w", repoRoot, err)
+	}
+	if err := writeFileIfChanged(r, targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -503,6 +548,10 @@ func runApBuildGenerator(_ context.Context, repoRoot string, scopes []*tasks.APS
 
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 	targetFile := filepath.Join(presubmitsDir, "ap-build")
+	r, err := repo.Open(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to open repo at %s: %w", repoRoot, err)
+	}
 
 	// If no images or build scripts, we should remove the file if it exists
 	if !hasBuild {
@@ -512,7 +561,7 @@ func runApBuildGenerator(_ context.Context, repoRoot string, scopes []*tasks.APS
 		}
 		if exists {
 			klog.Infof("Removing %s as no build tasks found", targetFile)
-			if err := os.Remove(targetFile); err != nil {
+			if err := removeFile(r, targetFile); err != nil {
 				return fmt.Errorf("failed to remove %s: %w", targetFile, err)
 			}
 		}
@@ -562,7 +611,7 @@ cd "${REPO_ROOT}"
 # Run build
 %s build //...
 `, headerBlock, skipGuard, apCmd)
-	if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
+	if err := writeFileIfChanged(r, targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -571,6 +620,10 @@ cd "${REPO_ROOT}"
 
 func runApE2eGenerator(_ context.Context, repoRoot string, scopes []*tasks.APScope) error {
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
+	r, err := repo.Open(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to open repo at %s: %w", repoRoot, err)
+	}
 
 	// Remove the global ap-e2e script if it exists
 	globalTargetFile := filepath.Join(presubmitsDir, "ap-e2e")
@@ -580,7 +633,7 @@ func runApE2eGenerator(_ context.Context, repoRoot string, scopes []*tasks.APSco
 	}
 	if exists {
 		klog.Infof("Removing global %s", globalTargetFile)
-		if err := os.Remove(globalTargetFile); err != nil {
+		if err := removeFile(r, globalTargetFile); err != nil {
 			return fmt.Errorf("failed to remove %s: %w", globalTargetFile, err)
 		}
 	}
@@ -599,7 +652,7 @@ func runApE2eGenerator(_ context.Context, repoRoot string, scopes []*tasks.APSco
 			}
 			if exists {
 				klog.Infof("Removing %s as no e2e tasks found", targetFile)
-				if err := os.Remove(targetFile); err != nil {
+				if err := removeFile(r, targetFile); err != nil {
 					return fmt.Errorf("failed to remove %s: %w", targetFile, err)
 				}
 			}
@@ -653,7 +706,7 @@ cd "${REPO_ROOT}"
 # Run e2e tests
 %s e2e %s
 `, headerBlock, skipGuard, apCmd, relApRoot)
-		if err := writeFileIfChanged(targetFile, []byte(content), 0755); err != nil {
+		if err := writeFileIfChanged(r, targetFile, []byte(content), 0755); err != nil {
 			return fmt.Errorf("failed to write %s: %w", targetFile, err)
 		}
 	}
@@ -664,6 +717,10 @@ cd "${REPO_ROOT}"
 func runGithubActionsGenerator(_ context.Context, repoRoot string, scopes []*tasks.APScope) error {
 	workflowsDir := filepath.Join(repoRoot, ".github", "workflows")
 	outputFile := filepath.Join(workflowsDir, "ci-presubmits.yaml")
+	r, err := repo.Open(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to open repo at %s: %w", repoRoot, err)
+	}
 
 	klog.Infof("Generating %s", outputFile)
 
@@ -798,7 +855,7 @@ jobs:
 		return fmt.Errorf("failed to create workflows dir: %w", err)
 	}
 
-	if err := writeFileIfChanged(outputFile, []byte(sb.String()), 0644); err != nil {
+	if err := writeFileIfChanged(r, outputFile, []byte(sb.String()), 0644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", outputFile, err)
 	}
 
@@ -933,10 +990,23 @@ fi
 `, strings.Join(patterns, "|"))
 }
 
-func writeFileIfChanged(path string, content []byte, perm os.FileMode) error {
+func writeFileIfChanged(r *repo.Repo, path string, content []byte, perm os.FileMode) error {
 	existing, err := os.ReadFile(path)
 	if err == nil && bytes.Equal(existing, content) {
 		return nil
 	}
+	if r != nil {
+		return r.WriteFileAtomic(path, content, perm)
+	}
 	return fileutils.WriteFileAtomic(path, content, perm)
+}
+
+func removeFile(r *repo.Repo, path string) error {
+	if r != nil {
+		return r.Remove(path)
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }

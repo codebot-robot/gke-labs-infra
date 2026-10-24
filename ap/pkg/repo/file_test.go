@@ -181,20 +181,23 @@ func TestFile_HashAndRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Without refresh, memoized hash remains
-	hash3, _ := f.Hash()
-	if hash3 != hash1 {
-		t.Errorf("expected memoized hash before refresh, got %q", hash3)
+	// With staleness guard, Hash() re-stats and detects the modification automatically
+	hash3, err := f.Hash()
+	if err != nil {
+		t.Fatalf("f.Hash() after modification failed: %v", err)
+	}
+	if hash3 == hash1 {
+		t.Errorf("expected hash to update after file modification, got %q", hash3)
 	}
 
-	// After refresh, hash should update
+	// After refresh, hash is recomputed and remains consistent
 	f.Refresh()
 	hash4, err := f.Hash()
 	if err != nil {
 		t.Fatalf("f.Hash() after refresh failed: %v", err)
 	}
-	if hash4 == hash1 {
-		t.Errorf("expected different hash after modification and refresh, got %q", hash4)
+	if hash4 != hash3 {
+		t.Errorf("expected hash after refresh to match %q, got %q", hash3, hash4)
 	}
 }
 
