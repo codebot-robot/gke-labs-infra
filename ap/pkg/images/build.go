@@ -37,12 +37,12 @@ var execCommandContext = exec.CommandContext
 var ensureBuildx = defaultEnsureBuildx
 
 func defaultEnsureBuildx(ctx context.Context, repoRoot string) (string, error) {
-	cfg, err := config.LoadDockerConfig(repoRoot)
+	cfg, err := toolDocker.LoadConfig(repoRoot)
 	if err != nil {
 		return "", err
 	}
 	if cfg == nil {
-		cfg = config.DefaultDockerConfig()
+		cfg = toolDocker.DefaultConfig()
 	}
 	return toolDocker.EnsureDockerBuildx(ctx, cfg.Buildx)
 }

@@ -21,7 +21,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
 	"github.com/spf13/cobra"
 )
@@ -82,18 +81,18 @@ func RunToolDocker(ctx context.Context, opt ToolDockerOptions) error {
 		}
 	}
 
-	cfg, err := config.LoadDockerConfig(workDir)
+	cfg, err := docker.LoadConfig(workDir)
 	if err != nil {
 		return err
 	}
 	if cfg == nil && opt.RepoRoot != "" && opt.RepoRoot != workDir {
-		cfg, err = config.LoadDockerConfig(opt.RepoRoot)
+		cfg, err = docker.LoadConfig(opt.RepoRoot)
 		if err != nil {
 			return err
 		}
 	}
 	if cfg == nil {
-		cfg = config.DefaultDockerConfig()
+		cfg = docker.DefaultConfig()
 	}
 
 	stdout := opt.Stdout

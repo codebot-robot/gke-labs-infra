@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -262,5 +263,37 @@ func TestPrependPath(t *testing.T) {
 	}
 	if !foundExisting {
 		t.Error("expected PATH to be updated")
+	}
+}
+
+func TestIsExecutable(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Nonexistent file
+	if IsExecutable(filepath.Join(tempDir, "nonexistent")) {
+		t.Error("expected nonexistent file to return false")
+	}
+
+	// Directory
+	if IsExecutable(tempDir) {
+		t.Error("expected directory to return false")
+	}
+
+	// Regular non-executable file
+	nonExec := filepath.Join(tempDir, "file.txt")
+	if err := os.WriteFile(nonExec, []byte("hello"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && IsExecutable(nonExec) {
+		t.Error("expected 0644 file to return false")
+	}
+
+	// Executable file
+	execFile := filepath.Join(tempDir, "script.sh")
+	if err := os.WriteFile(execFile, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if !IsExecutable(execFile) {
+		t.Error("expected 0755 file to return true")
 	}
 }

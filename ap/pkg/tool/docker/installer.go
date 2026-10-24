@@ -19,11 +19,8 @@ import (
 	"archive/zip"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -31,7 +28,7 @@ import (
 	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/fetch"
 	"k8s.io/klog/v2"
 )
 
@@ -39,22 +36,6 @@ var (
 	dockerMu sync.Mutex
 	buildxMu sync.Mutex
 )
-
-// CacheDir returns the root cache directory for ap tools.
-func CacheDir() (string, error) {
-	return fileutils.CacheDir()
-}
-
-func isExecutable(path string) bool {
-	fi, err := os.Stat(path)
-	if err != nil || fi.IsDir() {
-		return false
-	}
-	if runtime.GOOS == "windows" {
-		return true
-	}
-	return fi.Mode().Perm()&0111 != 0
-}
 
 // ResolvePlatform maps runtime.GOOS and runtime.GOARCH to the supported platform identifier.
 func ResolvePlatform(goos, goarch string) (string, error) {
@@ -155,7 +136,7 @@ func EnsureDocker(ctx context.Context, version string) (string, error) {
 	dockerMu.Lock()
 	defer dockerMu.Unlock()
 
-	cacheRoot, err := CacheDir()
+	cacheRoot, err := fileutils.CacheDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to determine cache dir: %w", err)
 	}
@@ -176,7 +157,7 @@ func EnsureDocker(ctx context.Context, version string) (string, error) {
 
 	installDir := filepath.Join(cacheRoot, "tools", "docker", resolvedVer)
 	binPath := filepath.Join(installDir, "bin", binName)
-	if isExecutable(binPath) {
+	if fileutils.IsExecutable(binPath) {
 		klog.Infof("Using docker %s", resolvedVer)
 		return binPath, nil
 	}
@@ -203,7 +184,7 @@ func EnsureDocker(ctx context.Context, version string) (string, error) {
 		return "", err
 	}
 
-	tmpArchive, err := downloadFile(ctx, downloadURL, expectedDigest, cacheRoot, "docker-*.tmp")
+	tmpArchive, err := fetch.Download(ctx, downloadURL, expectedDigest, cacheRoot)
 	if err != nil {
 		return "", fmt.Errorf("failed to download docker from %s: %w", downloadURL, err)
 	}
@@ -241,7 +222,7 @@ func EnsureDockerBuildx(ctx context.Context, version string) (string, error) {
 	buildxMu.Lock()
 	defer buildxMu.Unlock()
 
-	cacheRoot, err := CacheDir()
+	cacheRoot, err := fileutils.CacheDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to determine cache dir: %w", err)
 	}
@@ -263,7 +244,7 @@ func EnsureDockerBuildx(ctx context.Context, version string) (string, error) {
 
 	installDir := filepath.Join(cacheRoot, "tools", "docker-buildx", "v"+normVer)
 	binPath := filepath.Join(installDir, "bin", binName)
-	if isExecutable(binPath) {
+	if fileutils.IsExecutable(binPath) {
 		klog.Infof("Using docker-buildx v%s", normVer)
 		return binPath, nil
 	}
@@ -290,7 +271,7 @@ func EnsureDockerBuildx(ctx context.Context, version string) (string, error) {
 		return "", err
 	}
 
-	tmpFile, err := downloadFile(ctx, downloadURL, expectedDigest, cacheRoot, "docker-buildx-*.tmp")
+	tmpFile, err := fetch.Download(ctx, downloadURL, expectedDigest, cacheRoot)
 	if err != nil {
 		return "", fmt.Errorf("failed to download docker-buildx from %s: %w", downloadURL, err)
 	}
@@ -325,70 +306,6 @@ func EnsureDockerWithBuildx(ctx context.Context, dockerVer, buildxVer string) (d
 	}
 
 	return dockerBin, buildxBin, nil
-}
-
-func downloadFile(ctx context.Context, downloadURL, expectedDigest, cacheRoot, tempPattern string) (string, error) {
-	if err := os.MkdirAll(cacheRoot, 0755); err != nil {
-		return "", fmt.Errorf("failed to create cache directory %s: %w", cacheRoot, err)
-	}
-
-	tmpFile, err := os.CreateTemp(cacheRoot, tempPattern)
-	if err != nil {
-		return "", fmt.Errorf("failed to create temporary file: %w", err)
-	}
-	tmpName := tmpFile.Name()
-	var closed bool
-	defer func() {
-		if !closed {
-			if closeErr := tmpFile.Close(); closeErr != nil {
-				klog.V(2).Infof("failed to close temporary file: %v", closeErr)
-			}
-		}
-	}()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("failed to create request for %s: %w", downloadURL, err)
-	}
-
-	resp, err := scoped.HTTPClient(ctx).Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to download from %s: %w", downloadURL, err)
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			klog.V(2).Infof("failed to close response body: %v", closeErr)
-		}
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download from %s: HTTP status %s", downloadURL, resp.Status)
-	}
-
-	hasher := sha256.New()
-	writer := io.MultiWriter(tmpFile, hasher)
-
-	if _, err := io.Copy(writer, resp.Body); err != nil {
-		return "", fmt.Errorf("failed writing downloaded file: %w", err)
-	}
-
-	closed = true
-	if err := tmpFile.Close(); err != nil {
-		return "", fmt.Errorf("failed closing downloaded file: %w", err)
-	}
-
-	if expectedDigest != "" {
-		expectedHash := strings.TrimPrefix(expectedDigest, "sha256:")
-		actualHash := hex.EncodeToString(hasher.Sum(nil))
-		if !strings.EqualFold(actualHash, expectedHash) {
-			if rmErr := os.Remove(tmpName); rmErr != nil && !os.IsNotExist(rmErr) {
-				klog.V(2).Infof("failed to remove temporary file %s: %v", tmpName, rmErr)
-			}
-			return "", fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
-		}
-	}
-
-	return tmpName, nil
 }
 
 func extractTarEntry(tr io.Reader, dstBin string) error {

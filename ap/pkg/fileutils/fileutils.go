@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"k8s.io/klog/v2"
@@ -163,4 +164,16 @@ func PrependPath(env []string, dir string) []string {
 	}
 	result = append(result, pathKey+"="+newPath)
 	return result
+}
+
+// IsExecutable reports whether the file at path exists and is an executable file.
+func IsExecutable(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true
+	}
+	return fi.Mode().Perm()&0111 != 0
 }

@@ -20,14 +20,14 @@ import (
 )
 
 func TestVersionsYAML_Structure(t *testing.T) {
-	if len(parsedVersions.Docker) == 0 {
+	if len(parsedDockerReleases) == 0 {
 		t.Fatal("no docker releases parsed from versions.yaml")
 	}
-	if len(parsedVersions.Buildx) == 0 {
+	if len(parsedBuildxReleases) == 0 {
 		t.Fatal("no buildx releases parsed from versions.yaml")
 	}
 
-	for _, rel := range parsedVersions.Docker {
+	for _, rel := range parsedDockerReleases {
 		if rel.Version == "" {
 			t.Errorf("empty docker version in release")
 		}
@@ -46,7 +46,7 @@ func TestVersionsYAML_Structure(t *testing.T) {
 		}
 	}
 
-	for _, rel := range parsedVersions.Buildx {
+	for _, rel := range parsedBuildxReleases {
 		if rel.Version == "" {
 			t.Errorf("empty buildx version in release")
 		}

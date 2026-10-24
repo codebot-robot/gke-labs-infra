@@ -12,19 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package config
+package docker
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
 )
 
-func TestLoadDockerConfig_NotFound(t *testing.T) {
+func TestLoadConfig_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
-	cfg, err := LoadDockerConfig(tmpDir)
+	cfg, err := LoadConfig(tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -33,7 +31,7 @@ func TestLoadDockerConfig_NotFound(t *testing.T) {
 	}
 }
 
-func TestLoadDockerConfig_Valid(t *testing.T) {
+func TestLoadConfig_Valid(t *testing.T) {
 	tmpDir := t.TempDir()
 	apDir := filepath.Join(tmpDir, ".ap")
 	if err := os.MkdirAll(apDir, 0755); err != nil {
@@ -48,7 +46,7 @@ buildx: "v0.21.1"
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadDockerConfig(tmpDir)
+	cfg, err := LoadConfig(tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,7 +61,7 @@ buildx: "v0.21.1"
 	}
 }
 
-func TestLoadDockerConfig_DisallowAlias(t *testing.T) {
+func TestLoadConfig_DisallowAlias(t *testing.T) {
 	tmpDir := t.TempDir()
 	apDir := filepath.Join(tmpDir, ".ap")
 	if err := os.MkdirAll(apDir, 0755); err != nil {
@@ -79,13 +77,13 @@ docker-buildx: "0.38.1"
 	}
 
 	// Strict unmarshal must reject the unapproved key docker-buildx
-	_, err := LoadDockerConfig(tmpDir)
+	_, err := LoadConfig(tmpDir)
 	if err == nil {
 		t.Fatal("expected error parsing docker.yaml with unknown field docker-buildx, got nil")
 	}
 }
 
-func TestLoadDockerConfig_Defaults(t *testing.T) {
+func TestLoadConfig_Defaults(t *testing.T) {
 	tmpDir := t.TempDir()
 	apDir := filepath.Join(tmpDir, ".ap")
 	if err := os.MkdirAll(apDir, 0755); err != nil {
@@ -96,15 +94,15 @@ func TestLoadDockerConfig_Defaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadDockerConfig(tmpDir)
+	cfg, err := LoadConfig(tmpDir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cfg == nil {
 		t.Fatal("expected non-nil config")
 	}
-	expectedDocker := docker.LatestDocker().Version
-	expectedBuildx := docker.LatestBuildx().Version
+	expectedDocker := LatestDocker().Version
+	expectedBuildx := LatestBuildx().Version
 	if cfg.Docker != expectedDocker {
 		t.Errorf("expected default docker %q, got %q", expectedDocker, cfg.Docker)
 	}

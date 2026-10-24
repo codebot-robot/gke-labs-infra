@@ -17,9 +17,8 @@ package docker
 import (
 	_ "embed"
 	"fmt"
-	"strings"
 
-	"gopkg.in/yaml.v3"
+	toolversions "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/versions"
 )
 
 //go:embed versions.yaml
@@ -33,59 +32,40 @@ var supportedPlatforms = []string{
 	"windows-amd64",
 }
 
-type versionsData struct {
-	Docker []Release `yaml:"docker"`
-	Buildx []Release `yaml:"buildx"`
-}
+var (
+	parsedDockerReleases = func() []toolversions.Release {
+		rels, err := toolversions.Parse(embeddedVersionsYAML, "docker")
+		if err != nil {
+			panic(fmt.Sprintf("failed to parse embedded versions.yaml docker: %v", err))
+		}
+		return rels
+	}()
 
-// Release represents a known tool release and its per-platform checksum digests.
-type Release struct {
-	Version string            `yaml:"version"`
-	Assets  map[string]string `yaml:"assets"`
-}
-
-var parsedVersions = func() versionsData {
-	var v versionsData
-	if err := yaml.Unmarshal(embeddedVersionsYAML, &v); err != nil {
-		panic(fmt.Sprintf("failed to parse embedded versions.yaml: %v", err))
-	}
-	return v
-}()
+	parsedBuildxReleases = func() []toolversions.Release {
+		rels, err := toolversions.Parse(embeddedVersionsYAML, "buildx")
+		if err != nil {
+			panic(fmt.Sprintf("failed to parse embedded versions.yaml buildx: %v", err))
+		}
+		return rels
+	}()
+)
 
 // LatestDocker returns the newest known docker release from the table, or nil if empty.
-func LatestDocker() *Release {
-	if len(parsedVersions.Docker) == 0 {
-		return nil
-	}
-	return &parsedVersions.Docker[0]
+func LatestDocker() *toolversions.Release {
+	return toolversions.Latest(parsedDockerReleases)
 }
 
 // LookupDocker finds a docker release by version string (with or without 'v' prefix).
-func LookupDocker(version string) (*Release, bool) {
-	norm := strings.TrimPrefix(strings.TrimSpace(version), "v")
-	for i := range parsedVersions.Docker {
-		if parsedVersions.Docker[i].Version == norm {
-			return &parsedVersions.Docker[i], true
-		}
-	}
-	return nil, false
+func LookupDocker(version string) (*toolversions.Release, bool) {
+	return toolversions.Lookup(parsedDockerReleases, version)
 }
 
 // LatestBuildx returns the newest known buildx release from the table, or nil if empty.
-func LatestBuildx() *Release {
-	if len(parsedVersions.Buildx) == 0 {
-		return nil
-	}
-	return &parsedVersions.Buildx[0]
+func LatestBuildx() *toolversions.Release {
+	return toolversions.Latest(parsedBuildxReleases)
 }
 
 // LookupBuildx finds a buildx release by version string (with or without 'v' prefix).
-func LookupBuildx(version string) (*Release, bool) {
-	norm := strings.TrimPrefix(strings.TrimSpace(version), "v")
-	for i := range parsedVersions.Buildx {
-		if strings.TrimPrefix(parsedVersions.Buildx[i].Version, "v") == norm {
-			return &parsedVersions.Buildx[i], true
-		}
-	}
-	return nil, false
+func LookupBuildx(version string) (*toolversions.Release, bool) {
+	return toolversions.Lookup(parsedBuildxReleases, version)
 }

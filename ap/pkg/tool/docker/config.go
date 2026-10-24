@@ -12,40 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package config
+package docker
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 )
 
-// DockerConfig represents the docker and buildx configuration loaded from .ap/docker.yaml.
-type DockerConfig struct {
+// Config represents the docker and buildx configuration loaded from .ap/docker.yaml.
+type Config struct {
 	Docker string `json:"docker"`
 	Buildx string `json:"buildx"`
 }
 
-// DefaultDockerConfig returns a DockerConfig with default docker and buildx versions from the table.
-func DefaultDockerConfig() *DockerConfig {
+// DefaultConfig returns a Config with default docker and buildx versions from the table.
+func DefaultConfig() *Config {
 	var dockerVer, buildxVer string
-	if rel := docker.LatestDocker(); rel != nil {
+	if rel := LatestDocker(); rel != nil {
 		dockerVer = rel.Version
 	}
-	if rel := docker.LatestBuildx(); rel != nil {
+	if rel := LatestBuildx(); rel != nil {
 		buildxVer = rel.Version
 	}
-	return &DockerConfig{
+	return &Config{
 		Docker: dockerVer,
 		Buildx: buildxVer,
 	}
 }
 
-// LoadDockerConfig loads and validates the docker configuration from .ap/docker.yaml in the specified directory.
+// LoadConfig loads and validates the docker configuration from .ap/docker.yaml in the specified directory.
 // If the configuration file does not exist, it returns nil, nil.
-func LoadDockerConfig(root string) (*DockerConfig, error) {
+func LoadConfig(root string) (*Config, error) {
 	configFile := filepath.Join(root, ".ap/docker.yaml")
 
 	data, err := os.ReadFile(configFile)
@@ -56,8 +56,8 @@ func LoadDockerConfig(root string) (*DockerConfig, error) {
 		return nil, fmt.Errorf("error reading %s: %w", configFile, err)
 	}
 
-	var cfg DockerConfig
-	if err := UnmarshalStrict(data, &cfg); err != nil {
+	var cfg Config
+	if err := config.UnmarshalStrict(data, &cfg); err != nil {
 		return nil, fmt.Errorf("error parsing %s: %w", configFile, err)
 	}
 
@@ -69,14 +69,14 @@ func LoadDockerConfig(root string) (*DockerConfig, error) {
 }
 
 // ApplyDefaultsAndValidate fills in defaults and validates configuration fields.
-func (c *DockerConfig) ApplyDefaultsAndValidate() error {
+func (c *Config) ApplyDefaultsAndValidate() error {
 	if c.Docker == "" || c.Docker == "latest" {
-		if rel := docker.LatestDocker(); rel != nil {
+		if rel := LatestDocker(); rel != nil {
 			c.Docker = rel.Version
 		}
 	}
 	if c.Buildx == "" || c.Buildx == "latest" {
-		if rel := docker.LatestBuildx(); rel != nil {
+		if rel := LatestBuildx(); rel != nil {
 			c.Buildx = rel.Version
 		}
 	}

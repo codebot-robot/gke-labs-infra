@@ -27,6 +27,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 )
 
 func TestResolvePlatform(t *testing.T) {
@@ -216,7 +218,7 @@ func TestEnsureDocker_DownloadAndExtract(t *testing.T) {
 		t.Errorf("binary content mismatch: got %q, want %q", string(data), string(binContent))
 	}
 
-	if !isExecutable(binPath) {
+	if !fileutils.IsExecutable(binPath) {
 		t.Errorf("expected binary %s to be executable", binPath)
 	}
 }
@@ -321,10 +323,10 @@ func TestColdRun_DoesNotMutateHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnsureDockerWithBuildx failed: %v", err)
 	}
-	if !isExecutable(dockerPath) {
+	if !fileutils.IsExecutable(dockerPath) {
 		t.Errorf("expected docker %s to be executable", dockerPath)
 	}
-	if !isExecutable(buildxPath) {
+	if !fileutils.IsExecutable(buildxPath) {
 		t.Errorf("expected buildx %s to be executable", buildxPath)
 	}
 
