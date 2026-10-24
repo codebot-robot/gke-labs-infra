@@ -22,27 +22,6 @@ import (
 	"testing"
 )
 
-func TestManager_Load_CorruptMetadata(t *testing.T) {
-	tmpDir := t.TempDir()
-	// Write invalid JSON to metadata.json
-	if err := os.WriteFile(filepath.Join(tmpDir, "metadata.json"), []byte("invalid json"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	m := &Manager{
-		dir: tmpDir,
-		caches: &Caches{
-			Metadata: make(map[string]*FileMetadata),
-		},
-		done: NewDoneIndex(),
-	}
-
-	err := m.load()
-	if err == nil {
-		t.Fatal("expected error from load() on corrupt metadata.json, got nil")
-	}
-}
-
 func TestManager_Load_CorruptDoneBinTreatAsEmpty(t *testing.T) {
 	tmpDir := t.TempDir()
 	// Write corrupt binary to done.bin
@@ -51,10 +30,7 @@ func TestManager_Load_CorruptDoneBinTreatAsEmpty(t *testing.T) {
 	}
 
 	m := &Manager{
-		dir: tmpDir,
-		caches: &Caches{
-			Metadata: make(map[string]*FileMetadata),
-		},
+		dir:  tmpDir,
 		done: NewDoneIndex(),
 	}
 
@@ -71,10 +47,7 @@ func TestManager_Load_CorruptDoneBinTreatAsEmpty(t *testing.T) {
 func TestManager_Load_NotExist(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := &Manager{
-		dir: tmpDir,
-		caches: &Caches{
-			Metadata: make(map[string]*FileMetadata),
-		},
+		dir:  tmpDir,
 		done: NewDoneIndex(),
 	}
 
@@ -88,8 +61,12 @@ func TestManager_DoneCache(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Write legacy files to verify they are deleted
+	legacyMeta := filepath.Join(tmpDir, "metadata.json")
 	legacyDone := filepath.Join(tmpDir, "done.json")
 	legacyGofmt := filepath.Join(tmpDir, "gofmt.json")
+	if err := os.WriteFile(legacyMeta, []byte(`{"legacy": true}`), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(legacyDone, []byte(`{"legacy": true}`), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -103,6 +80,9 @@ func TestManager_DoneCache(t *testing.T) {
 	}
 
 	// Legacy files should have been removed on load
+	if _, err := os.Stat(legacyMeta); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected legacy metadata.json to be deleted after load, err: %v", err)
+	}
 	if _, err := os.Stat(legacyDone); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("expected legacy done.json to be deleted after load, err: %v", err)
 	}

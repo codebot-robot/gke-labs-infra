@@ -152,10 +152,7 @@ func TestDoneIndex_TreatAsEmpty(t *testing.T) {
 				t.Fatal(err)
 			}
 			m := &Manager{
-				dir: tmpDir,
-				caches: &Caches{
-					Metadata: make(map[string]*FileMetadata),
-				},
+				dir:  tmpDir,
 				done: NewDoneIndex(),
 			}
 			if err := m.load(); err != nil {

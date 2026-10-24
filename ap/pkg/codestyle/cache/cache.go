@@ -15,12 +15,7 @@
 package cache
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -30,15 +25,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type Caches struct {
-	Metadata map[string]*FileMetadata `json:"metadata"`
-}
-
 type Manager struct {
-	dir    string
-	caches *Caches
-	done   *DoneIndex
-	mu     sync.Mutex
+	dir  string
+	done *DoneIndex
+	mu   sync.Mutex
 }
 
 func NewManager() (*Manager, error) {
@@ -56,10 +46,7 @@ func NewManagerWithDir(dir string) (*Manager, error) {
 	}
 
 	m := &Manager{
-		dir: dir,
-		caches: &Caches{
-			Metadata: make(map[string]*FileMetadata),
-		},
+		dir:  dir,
 		done: NewDoneIndex(),
 	}
 	if err := m.load(); err != nil {
@@ -78,19 +65,9 @@ func (m *Manager) load() error {
 	var errs []error
 
 	// Ignore and delete legacy JSON caches
+	removeLegacyFile(filepath.Join(m.dir, "metadata.json"))
 	removeLegacyFile(filepath.Join(m.dir, "done.json"))
 	removeLegacyFile(filepath.Join(m.dir, "gofmt.json"))
-
-	metaPath := filepath.Join(m.dir, "metadata.json")
-	if data, err := os.ReadFile(metaPath); err != nil {
-		if !errors.Is(err, fs.ErrNotExist) {
-			klog.Warningf("failed to read metadata cache %s: %v", metaPath, err)
-			errs = append(errs, fmt.Errorf("failed to read metadata cache %s: %w", metaPath, err))
-		}
-	} else if err := json.Unmarshal(data, &m.caches.Metadata); err != nil {
-		klog.Warningf("failed to parse metadata cache %s: %v", metaPath, err)
-		errs = append(errs, fmt.Errorf("failed to parse metadata cache %s: %w", metaPath, err))
-	}
 
 	doneBinPath := filepath.Join(m.dir, "done.bin")
 	if data, err := os.ReadFile(doneBinPath); err != nil {
@@ -113,51 +90,15 @@ func (m *Manager) Save() error {
 	defer m.mu.Unlock()
 
 	// Clean up legacy JSON caches
+	removeLegacyFile(filepath.Join(m.dir, "metadata.json"))
 	removeLegacyFile(filepath.Join(m.dir, "done.json"))
 	removeLegacyFile(filepath.Join(m.dir, "gofmt.json"))
-
-	metaPath := filepath.Join(m.dir, "metadata.json")
-	metaData, err := json.MarshalIndent(m.caches.Metadata, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := fileutils.WriteFileAtomic(metaPath, metaData, 0644); err != nil {
-		return err
-	}
 
 	doneBinPath := filepath.Join(m.dir, "done.bin")
 	if err := m.done.Save(doneBinPath); err != nil {
 		return err
 	}
 	return nil
-}
-
-// GetOrUpdateMetadata returns the FileMetadata with Hash populated.
-// If the file on disk matches the cached metadata (Size, Mtime, Inode), the cached Hash is used.
-// Otherwise, the file is read and hashed, and the cache is updated.
-func (m *Manager) GetOrUpdateMetadata(path string) (*FileMetadata, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Get current stat
-	current, err := GetMetadata(path)
-	if err != nil {
-		return nil, err
-	}
-
-	cached, ok := m.caches.Metadata[path]
-	if ok && cached.Size == current.Size && cached.Mtime == current.Mtime && cached.Inode == current.Inode {
-		return cached, nil
-	}
-
-	// Hash the file
-	hash, err := hashFile(path)
-	if err != nil {
-		return nil, err
-	}
-	current.Hash = hash
-	m.caches.Metadata[path] = current
-	return current, nil
 }
 
 func (m *Manager) IsDone(step Step, hash string) bool {
@@ -178,22 +119,4 @@ func (m *Manager) MarkDone(step Step, hash string) {
 	if err := m.done.MarkDone(step, hash); err != nil {
 		klog.V(2).Infof("failed to mark done for step %d: %v", step, err)
 	}
-}
-
-func hashFile(path string) (retHash string, retErr error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		if err := f.Close(); err != nil && retErr == nil {
-			retErr = err
-		}
-	}()
-
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
