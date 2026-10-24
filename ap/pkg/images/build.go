@@ -24,13 +24,28 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	toolDocker "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
 	"k8s.io/klog/v2"
 )
 
 var execCommandContext = exec.CommandContext
+
+var ensureDocker = defaultEnsureDocker
+
+func defaultEnsureDocker(ctx context.Context, repoRoot string) (string, error) {
+	cfg, err := config.LoadDockerConfig(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	if cfg == nil {
+		cfg = config.DefaultDockerConfig()
+	}
+	return toolDocker.EnsureDockerWithBuildx(ctx, cfg.Docker, cfg.Buildx)
+}
 
 // DefaultK8sBuildkitHost is the default buildkit host used for the k8s shorthand.
 const DefaultK8sBuildkitHost = "k8s://autodeploy-system/buildkit"
@@ -59,6 +74,7 @@ type DockerBuildTask struct {
 	Root         string
 	Push         bool
 	BuildkitHost string
+	DockerBin    string
 }
 
 func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
@@ -99,6 +115,15 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 		return t.runBuildctl(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix, platforms)
 	}
 
+	dockerBin := t.DockerBin
+	if dockerBin == "" {
+		var err error
+		dockerBin, err = ensureDocker(ctx, scope.RepoRoot)
+		if err != nil {
+			return fmt.Errorf("failed to ensure docker: %w", err)
+		}
+	}
+
 	// If we are pushing and have requested multiple platforms, but the current Docker driver
 	// doesn't support multi-platform builds (e.g., standard default docker driver), we first
 	// attempt to use or create a multi-platform capable buildx builder (ap-builder).
@@ -106,12 +131,12 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	// If we are building locally without pushing, we fall back to the host's native platform
 	// so local developer builds don't fail due to repository-wide multi-platform settings.
 	if t.Push && len(platforms) > 1 {
-		if !t.supportsMultiPlatform(ctx) {
-			if err := t.ensureMultiPlatformBuilder(ctx); err != nil {
+		if !t.supportsMultiPlatform(ctx, dockerBin) {
+			if err := t.ensureMultiPlatformBuilder(ctx, dockerBin); err != nil {
 				return fmt.Errorf("failed to ensure multi-platform builder: %w", err)
 			}
 		}
-		if !t.supportsMultiPlatform(ctx) {
+		if !t.supportsMultiPlatform(ctx, dockerBin) {
 			return fmt.Errorf("multi-platform build (platforms: %v) is not supported for the default docker driver. "+
 				"To build for multiple platforms, please switch to a different driver (e.g., docker-container, kubernetes) "+
 				"by running 'docker buildx create --use', or configure a single platform in '.ap/images.yaml'", platforms)
@@ -121,28 +146,31 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 		platforms = nil
 	}
 
-	return t.runDocker(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix, platforms)
+	return t.runDocker(ctx, dockerBin, t.Root, fullImageName, t.Dockerfile, imagePrefix, platforms)
 }
 
-func (t *DockerBuildTask) ensureMultiPlatformBuilder(ctx context.Context) error {
-	if t.supportsMultiPlatform(ctx) {
+func (t *DockerBuildTask) ensureMultiPlatformBuilder(ctx context.Context, dockerBin string) error {
+	if t.supportsMultiPlatform(ctx, dockerBin) {
 		return nil
 	}
 	// Try to use existing ap-builder
-	useCmd := execCommandContext(ctx, "docker", "buildx", "use", "ap-builder")
-	if err := useCmd.Run(); err == nil && t.supportsMultiPlatform(ctx) {
+	useCmd := execCommandContext(ctx, dockerBin, "buildx", "use", "ap-builder")
+	useCmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBin))
+	if err := useCmd.Run(); err == nil && t.supportsMultiPlatform(ctx, dockerBin) {
 		return nil
 	}
 	// Create new ap-builder with docker-container driver and host networking
-	createCmd := execCommandContext(ctx, "docker", "buildx", "create", "--name", "ap-builder", "--driver", "docker-container", "--driver-opt", "network=host", "--use")
+	createCmd := execCommandContext(ctx, dockerBin, "buildx", "create", "--name", "ap-builder", "--driver", "docker-container", "--driver-opt", "network=host", "--use")
+	createCmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBin))
 	if err := createCmd.Run(); err != nil {
 		return fmt.Errorf("failed to create multi-platform builder: %w", err)
 	}
 	return nil
 }
 
-func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context) bool {
-	cmd := execCommandContext(ctx, "docker", "buildx", "inspect")
+func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, dockerBin string) bool {
+	cmd := execCommandContext(ctx, dockerBin, "buildx", "inspect")
+	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBin))
 	out, err := cmd.Output()
 	if err != nil {
 		return false
@@ -238,7 +266,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 	return nil
 }
 
-func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, relDockerfilePath, imagePrefix string, platforms []string) error {
+func (t *DockerBuildTask) runDocker(ctx context.Context, dockerBin, root, fullImageName, relDockerfilePath, imagePrefix string, platforms []string) error {
 	klog.Infof("Building image %s from %s using docker buildx", fullImageName, root)
 
 	tag := os.Getenv("IMAGE_TAG")
@@ -270,10 +298,11 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, root, fullImageName, re
 	}
 	args = append(args, ".")
 
-	cmd := execCommandContext(ctx, "docker", args...)
+	cmd := execCommandContext(ctx, dockerBin, args...)
 	cmd.Dir = root
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(dockerBin))
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
 	}

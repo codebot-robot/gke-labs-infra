@@ -224,3 +224,43 @@ exit 0
 		t.Errorf("script content mismatch after rewrite:\ngot:  %q\nwant: %q", string(gotContent), newContent)
 	}
 }
+
+func TestPrependPath(t *testing.T) {
+	// Empty dir returns unchanged env
+	env := []string{"FOO=BAR"}
+	if got := PrependPath(env, ""); len(got) != 1 || got[0] != "FOO=BAR" {
+		t.Errorf("expected unchanged env, got %v", got)
+	}
+
+	// PATH not previously set
+	got := PrependPath(env, "/custom/bin")
+	found := false
+	for _, e := range got {
+		if strings.HasPrefix(e, "PATH=") {
+			found = true
+			if e != "PATH=/custom/bin" {
+				t.Errorf("expected PATH=/custom/bin, got %s", e)
+			}
+		}
+	}
+	if !found {
+		t.Error("expected PATH to be added")
+	}
+
+	// Existing PATH
+	envWithExisting := []string{"FOO=BAR", "PATH=/usr/bin:/bin"}
+	gotExisting := PrependPath(envWithExisting, "/custom/bin")
+	foundExisting := false
+	for _, e := range gotExisting {
+		if strings.HasPrefix(e, "PATH=") {
+			foundExisting = true
+			expected := fmt.Sprintf("PATH=/custom/bin%c/usr/bin:/bin", os.PathListSeparator)
+			if e != expected {
+				t.Errorf("expected %s, got %s", expected, e)
+			}
+		}
+	}
+	if !foundExisting {
+		t.Error("expected PATH to be updated")
+	}
+}

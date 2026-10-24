@@ -28,6 +28,8 @@ func BuildToolCommand(rootOpt *RootOptions) *cobra.Command {
 
 	cmd.AddCommand(BuildToolProtocCommand(rootOpt))
 	cmd.AddCommand(BuildToolUpdateProtocVersionsCommand(rootOpt))
+	cmd.AddCommand(BuildToolDockerCommand(rootOpt))
+	cmd.AddCommand(BuildToolDockerBuildxCommand(rootOpt))
 
 	return cmd
 }

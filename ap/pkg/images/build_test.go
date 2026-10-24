@@ -418,6 +418,12 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 	origExec := execCommandContext
 	defer func() { execCommandContext = origExec }()
 
+	origEnsureDocker := ensureDocker
+	defer func() { ensureDocker = origEnsureDocker }()
+	ensureDocker = func(ctx context.Context, repoRoot string) (string, error) {
+		return "docker", nil
+	}
+
 	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		if name == "docker" && len(args) > 1 && args[0] == "buildx" && args[1] == "inspect" {
 			// Mock 'docker buildx inspect' to simulate support/lack of support for multi-platform
@@ -728,4 +734,73 @@ func TestResolveBuildkitHost(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDockerBuildTask_ToolDocker(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	var executedCmd string
+	var executedEnv []string
+	origExec := execCommandContext
+	defer func() { execCommandContext = origExec }()
+
+	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		executedCmd = name
+		cmd := exec.CommandContext(ctx, "echo", "mocked")
+		return cmd
+	}
+
+	mockDockerBin := "/custom/tools/docker/bin/docker"
+	ensureCalled := false
+	origEnsureDocker := ensureDocker
+	defer func() { ensureDocker = origEnsureDocker }()
+	ensureDocker = func(ctx context.Context, repoRoot string) (string, error) {
+		ensureCalled = true
+		return mockDockerBin, nil
+	}
+
+	task := &DockerBuildTask{
+		ImageName:  "test-img",
+		Dockerfile: "images/test-img/Dockerfile",
+		Root:       tmpDir,
+		Push:       false,
+	}
+
+	scope := &tasks.APScope{
+		RepoRoot: tmpDir,
+		Dir:      tmpDir,
+	}
+
+	if err := task.Run(t.Context(), scope); err != nil {
+		t.Fatalf("unexpected error running task: %v", err)
+	}
+
+	if !ensureCalled {
+		t.Error("expected ensureDocker to be called")
+	}
+	if executedCmd != mockDockerBin {
+		t.Errorf("expected command %q, got %q", mockDockerBin, executedCmd)
+	}
+
+	// Now test with explicit DockerBin override on task
+	ensureCalled = false
+	explicitBin := "/override/bin/docker"
+	taskExplicit := &DockerBuildTask{
+		ImageName:  "test-img-explicit",
+		Dockerfile: "images/test-img/Dockerfile",
+		Root:       tmpDir,
+		Push:       false,
+		DockerBin:  explicitBin,
+	}
+
+	if err := taskExplicit.Run(t.Context(), scope); err != nil {
+		t.Fatalf("unexpected error running taskExplicit: %v", err)
+	}
+	if ensureCalled {
+		t.Error("expected ensureDocker NOT to be called when DockerBin is set")
+	}
+	if executedCmd != explicitBin {
+		t.Errorf("expected command %q, got %q", explicitBin, executedCmd)
+	}
+	_ = executedEnv
 }
