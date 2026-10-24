@@ -30,7 +30,7 @@ go run github.com/gke-labs/gke-labs-infra/ap@latest init --copyright-holder "<Or
 When making changes to an AP-managed project, coding agents should follow this verification sequence:
 
 0.  **Initialize (if onboarding)**: If the repository or component is not yet configured for `ap`, run `ap init`.
-1.  **Generate Code**: Run `ap generate` to update any generated files, CI scripts, or manifests (note: `ap generate` also runs `ap fmt` to format code and stamp license headers).
+1.  **Generate Code**: Run `ap generate` to update any generated files, CI scripts, or manifests (note: `ap generate` also runs `ap fmt` to format code, tidy Go modules, and stamp license headers).
 2.  **Lint**: Run `ap lint` to ensure code follows project style and quality guidelines.
 3.  **Test**:
     -   Run `ap test` for unit and integration tests.

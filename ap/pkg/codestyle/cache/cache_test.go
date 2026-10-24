@@ -35,6 +35,7 @@ func TestManager_Load_CorruptCache(t *testing.T) {
 		caches: &Caches{
 			Metadata: make(map[string]*FileMetadata),
 			Gofmt:    make(map[string]bool),
+			Tidy:     make(map[string]bool),
 		},
 	}
 
@@ -51,11 +52,46 @@ func TestManager_Load_NotExist(t *testing.T) {
 		caches: &Caches{
 			Metadata: make(map[string]*FileMetadata),
 			Gofmt:    make(map[string]bool),
+			Tidy:     make(map[string]bool),
 		},
 	}
 
 	err := m.load()
 	if err != nil {
 		t.Fatalf("expected nil error when cache files do not exist, got: %v", err)
+	}
+}
+
+func TestManager_TidyCache(t *testing.T) {
+	tmpDir := t.TempDir()
+	m, err := NewManagerWithDir(tmpDir)
+	if err != nil {
+		t.Fatalf("NewManagerWithDir failed: %v", err)
+	}
+
+	hash := "abcd1234ef5678"
+	if m.IsTidyDone(hash) {
+		t.Errorf("expected IsTidyDone to be false initially")
+	}
+
+	m.MarkTidyDone(hash)
+	if !m.IsTidyDone(hash) {
+		t.Errorf("expected IsTidyDone to be true after MarkTidyDone")
+	}
+
+	if err := m.Save(); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	// Reload in a new manager
+	m2, err := NewManagerWithDir(tmpDir)
+	if err != nil {
+		t.Fatalf("NewManagerWithDir reload failed: %v", err)
+	}
+	if !m2.IsTidyDone(hash) {
+		t.Errorf("expected IsTidyDone to persist after reload")
+	}
+	if m2.IsTidyDone("other") {
+		t.Errorf("expected IsTidyDone for other hash to be false")
 	}
 }

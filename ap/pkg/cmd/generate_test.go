@@ -16,7 +16,9 @@ package cmd
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -125,5 +127,124 @@ func TestVerifyGenerateDryRun(t *testing.T) {
 
 	if err := RunGenerate(t.Context(), opt); err != nil {
 		t.Fatalf("RunGenerate in verify dry-run mode failed: %v", err)
+	}
+}
+
+func TestRunGenerate_UntidyGoMod(t *testing.T) {
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apDir, "ap.yaml"), []byte("version: latest\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apDir, "headers.yaml"), []byte("license: apache-2.0\ncopyrightHolder: Google LLC\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	goModContent := "module example.com/gentest\n\ngo 1.27\n\nrequire example.com/unused v1.0.0\n"
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goModContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mainGoContent := "package main\n\nfunc main() {}\n"
+	if err := os.WriteFile(filepath.Join(tempDir, "main.go"), []byte(mainGoContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	rootOpt := &RootOptions{
+		RepoRoot: tempDir,
+		APRoot:   tempDir,
+	}
+	opt := GenerateOptions{
+		RootOptions: rootOpt,
+	}
+	if err := opt.Resolve(nil); err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+
+	if err := RunGenerate(t.Context(), opt); err != nil {
+		t.Fatalf("RunGenerate failed: %v", err)
+	}
+
+	updatedMod, err := os.ReadFile(filepath.Join(tempDir, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(updatedMod), "require example.com/unused") {
+		t.Errorf("expected ap generate to tidy go.mod and remove unused requirement, got:\n%s", string(updatedMod))
+	}
+}
+
+func TestRunGenerate_VerifyReportsUntidyGoMod(t *testing.T) {
+	tempDir := t.TempDir()
+
+	// Initialize git repo
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tempDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init failed: %v", err)
+	}
+	for _, args := range [][]string{
+		{"config", "user.name", "Test User"},
+		{"config", "user.email", "test@example.com"},
+	} {
+		c := exec.Command("git", args...)
+		c.Dir = tempDir
+		if err := c.Run(); err != nil {
+			t.Fatalf("git %v failed: %v", args, err)
+		}
+	}
+
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apDir, "ap.yaml"), []byte("version: latest\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apDir, "headers.yaml"), []byte("license: apache-2.0\ncopyrightHolder: Google LLC\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	goModContent := "module example.com/gentest\n\ngo 1.27\n\nrequire example.com/unused v1.0.0\n"
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goModContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+	mainGoContent := "package main\n\nfunc main() {}\n"
+	if err := os.WriteFile(filepath.Join(tempDir, "main.go"), []byte(mainGoContent), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit untidy go.mod
+	addCmd := exec.Command("git", "add", ".")
+	addCmd.Dir = tempDir
+	if err := addCmd.Run(); err != nil {
+		t.Fatalf("git add failed: %v", err)
+	}
+	commitCmd := exec.Command("git", "commit", "-m", "initial commit with untidy go.mod")
+	commitCmd.Dir = tempDir
+	if err := commitCmd.Run(); err != nil {
+		t.Fatalf("git commit failed: %v", err)
+	}
+
+	rootOpt := &RootOptions{
+		RepoRoot: tempDir,
+		APRoot:   tempDir,
+	}
+	opt := GenerateOptions{
+		RootOptions: rootOpt,
+		Verify:      true,
+	}
+	if err := opt.Resolve(nil); err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+
+	err := RunGenerate(t.Context(), opt)
+	if err == nil {
+		t.Fatal("expected RunGenerate with --verify to fail on untidy go.mod, got nil")
+	}
+	if !strings.Contains(err.Error(), "working tree was dirtied by generation") || !strings.Contains(err.Error(), "go.mod") {
+		t.Errorf("expected error to report working tree dirtied with go.mod, got: %v", err)
 	}
 }

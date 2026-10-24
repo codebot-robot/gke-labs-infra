@@ -78,6 +78,9 @@ skip:
 gofmt:
   enabled: true
 
+tidy:
+  enabled: true
+
 govet:
   enabled: true
 
@@ -122,6 +125,7 @@ lint:
 
 `go.yaml` options:
 - `skip`: An optional list of glob patterns to ignore during repository scanning and linting (e.g. `vendor/**`).
+- `tidy.enabled`: Boolean flag (default: `true`). When enabled, `ap generate` and `ap format` run `go mod tidy` alongside `gofmt` for each Go module in scope.
 - `lint.goos`: An optional list of target `GOOS` platforms to check (e.g. `[linux, darwin]`), which overrides automatic detection; omit it for auto (automatically detects non-host GOOS targets referenced by in-scope Go files via filename suffixes and `//go:build` constraints).
 - `lint.skipGenerated`: Cross-cutting boolean flag. When `false` (the default), generated code is linted unless a linter specifies its own default or per-linter override.
 - `lint.skipTests`: Cross-cutting boolean flag. When `false` (the default), test code (`*_test.go`) is linted unless a linter specifies its own default or per-linter override.

@@ -33,6 +33,7 @@ import (
 type Caches struct {
 	Metadata map[string]*FileMetadata `json:"metadata"`
 	Gofmt    map[string]bool          `json:"gofmt"`
+	Tidy     map[string]bool          `json:"tidy"`
 }
 
 type Manager struct {
@@ -47,6 +48,10 @@ func NewManager() (*Manager, error) {
 		return nil, err
 	}
 	dir := filepath.Join(cacheDir, "codestyle")
+	return NewManagerWithDir(dir)
+}
+
+func NewManagerWithDir(dir string) (*Manager, error) {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
@@ -56,6 +61,7 @@ func NewManager() (*Manager, error) {
 		caches: &Caches{
 			Metadata: make(map[string]*FileMetadata),
 			Gofmt:    make(map[string]bool),
+			Tidy:     make(map[string]bool),
 		},
 	}
 	if err := m.load(); err != nil {
@@ -89,6 +95,20 @@ func (m *Manager) load() error {
 		errs = append(errs, fmt.Errorf("failed to parse gofmt cache %s: %w", gofmtPath, err))
 	}
 
+	tidyPath := filepath.Join(m.dir, "tidy.json")
+	if data, err := os.ReadFile(tidyPath); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			klog.Warningf("failed to read tidy cache %s: %v", tidyPath, err)
+			errs = append(errs, fmt.Errorf("failed to read tidy cache %s: %w", tidyPath, err))
+		}
+	} else if err := json.Unmarshal(data, &m.caches.Tidy); err != nil {
+		klog.Warningf("failed to parse tidy cache %s: %v", tidyPath, err)
+		errs = append(errs, fmt.Errorf("failed to parse tidy cache %s: %w", tidyPath, err))
+	}
+	if m.caches.Tidy == nil {
+		m.caches.Tidy = make(map[string]bool)
+	}
+
 	return errors.Join(errs...)
 }
 
@@ -111,6 +131,15 @@ func (m *Manager) Save() error {
 		return err
 	}
 	if err := os.WriteFile(gofmtPath, gofmtData, 0644); err != nil {
+		return err
+	}
+
+	tidyPath := filepath.Join(m.dir, "tidy.json")
+	tidyData, err := json.MarshalIndent(m.caches.Tidy, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(tidyPath, tidyData, 0644); err != nil {
 		return err
 	}
 	return nil
@@ -154,6 +183,18 @@ func (m *Manager) MarkGofmtDone(hash string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.caches.Gofmt[hash] = true
+}
+
+func (m *Manager) IsTidyDone(hash string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.caches.Tidy[hash]
+}
+
+func (m *Manager) MarkTidyDone(hash string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.caches.Tidy[hash] = true
 }
 
 func hashFile(path string) (retHash string, retErr error) {

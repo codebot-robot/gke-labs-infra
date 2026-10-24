@@ -26,6 +26,7 @@ type Config struct {
 	Gofmt       *GofmtConfig       `json:"gofmt"`
 	Govet       *GovetConfig       `json:"govet"`
 	Govulncheck *GovulncheckConfig `json:"govulncheck"`
+	Tidy        *TidyConfig        `json:"tidy"`
 	Skip        []string           `json:"skip"`
 	Lint        *LintConfig        `json:"lint"`
 }
@@ -39,6 +40,10 @@ type GovetConfig struct {
 }
 
 type GovulncheckConfig struct {
+	Enabled *bool `json:"enabled"`
+}
+
+type TidyConfig struct {
 	Enabled *bool `json:"enabled"`
 }
 
@@ -199,6 +204,14 @@ func (c *Config) IsGovetEnabled() bool {
 func (c *Config) IsGovulncheckEnabled() bool {
 	if c.Govulncheck != nil && c.Govulncheck.Enabled != nil {
 		return *c.Govulncheck.Enabled
+	}
+	return true
+}
+
+// IsTidyEnabled returns true if go mod tidy is enabled in the config (defaulting to true).
+func (c *Config) IsTidyEnabled() bool {
+	if c != nil && c.Tidy != nil && c.Tidy.Enabled != nil {
+		return *c.Tidy.Enabled
 	}
 	return true
 }
