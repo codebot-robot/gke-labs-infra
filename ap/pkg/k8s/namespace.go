@@ -81,11 +81,12 @@ type ScopeResolver interface {
 
 // KubectlScopeResolver implements ScopeResolver by querying discovery via "kubectl api-resources".
 type KubectlScopeResolver struct {
-	mu         sync.Mutex
-	loaded     bool
-	namespaced map[GroupKind]bool
-	byKind     map[string]bool
-	execCmd    func(ctx context.Context, name string, args ...string) ([]byte, error)
+	mu          sync.Mutex
+	loaded      bool
+	namespaced  map[GroupKind]bool
+	byKind      map[string]bool
+	execCmd     func(ctx context.Context, name string, args ...string) ([]byte, error)
+	KubeContext string
 }
 
 // NewKubectlScopeResolver creates a new KubectlScopeResolver.
@@ -120,10 +121,15 @@ func (r *KubectlScopeResolver) IsNamespaced(gvk GroupVersionKind) (bool, error) 
 func (r *KubectlScopeResolver) load(ctx context.Context) error {
 	var out []byte
 	var err error
+	var args []string
+	if r.KubeContext != "" {
+		args = append(args, "--context", r.KubeContext)
+	}
+	args = append(args, "api-resources")
 	if r.execCmd != nil {
-		out, err = r.execCmd(ctx, "kubectl", "api-resources")
+		out, err = r.execCmd(ctx, "kubectl", args...)
 	} else {
-		cmd := exec.CommandContext(ctx, "kubectl", "api-resources")
+		cmd := exec.CommandContext(ctx, "kubectl", args...)
 		out, err = cmd.Output()
 	}
 	if err != nil {
@@ -203,8 +209,10 @@ func (r *KubectlScopeResolver) parseOutput(output string) error {
 }
 
 // NewDiscoveryScopeResolver creates a ScopeResolver using discovery from "kubectl api-resources".
-func NewDiscoveryScopeResolver() (ScopeResolver, error) {
-	return NewKubectlScopeResolver(), nil
+func NewDiscoveryScopeResolver(kubeContext string) (ScopeResolver, error) {
+	resolver := NewKubectlScopeResolver()
+	resolver.KubeContext = kubeContext
+	return resolver, nil
 }
 
 // MapScopeResolver implements ScopeResolver using a simple map for testing or static resolution.
@@ -212,49 +220,53 @@ type MapScopeResolver map[GroupVersionKind]bool
 
 var (
 	discoveryResolverMu sync.Mutex
-	cachedDiscovery     ScopeResolver
+	cachedDiscoveryMap  = make(map[string]ScopeResolver)
 
 	verifiedNamespacesMu sync.Mutex
 	verifiedNamespaces   = make(map[string]bool)
 )
 
 // GetDiscoveryScopeResolver returns a cached or newly initialized discovery ScopeResolver.
-func GetDiscoveryScopeResolver() (ScopeResolver, error) {
+func GetDiscoveryScopeResolver(kubeContext string) (ScopeResolver, error) {
 	discoveryResolverMu.Lock()
 	defer discoveryResolverMu.Unlock()
-	if cachedDiscovery != nil {
-		return cachedDiscovery, nil
+	if r, ok := cachedDiscoveryMap[kubeContext]; ok {
+		return r, nil
 	}
-	resolver, err := NewDiscoveryScopeResolver()
+	resolver, err := NewDiscoveryScopeResolver(kubeContext)
 	if err != nil {
 		return nil, err
 	}
-	cachedDiscovery = resolver
-	return cachedDiscovery, nil
+	cachedDiscoveryMap[kubeContext] = resolver
+	return resolver, nil
 }
 
 // ResetDiscoveryScopeResolver resets the cached discovery scope resolver (primarily for testing).
 func ResetDiscoveryScopeResolver() {
 	discoveryResolverMu.Lock()
 	defer discoveryResolverMu.Unlock()
-	cachedDiscovery = nil
+	cachedDiscoveryMap = make(map[string]ScopeResolver)
 }
 
 // DefaultCheckNamespaceCached checks if the target namespace exists in the cluster, caching successful checks.
-func DefaultCheckNamespaceCached(ctx context.Context, namespace string) error {
+func DefaultCheckNamespaceCached(ctx context.Context, namespace, kubeContext string) error {
+	cacheKey := namespace
+	if kubeContext != "" {
+		cacheKey = kubeContext + "/" + namespace
+	}
 	verifiedNamespacesMu.Lock()
-	verified := verifiedNamespaces[namespace]
+	verified := verifiedNamespaces[cacheKey]
 	verifiedNamespacesMu.Unlock()
 	if verified {
 		return nil
 	}
 
-	if err := CheckNamespaceExists(ctx, namespace); err != nil {
+	if err := CheckNamespaceExists(ctx, namespace, kubeContext); err != nil {
 		return err
 	}
 
 	verifiedNamespacesMu.Lock()
-	verifiedNamespaces[namespace] = true
+	verifiedNamespaces[cacheKey] = true
 	verifiedNamespacesMu.Unlock()
 	return nil
 }
@@ -281,7 +293,7 @@ func (m MapScopeResolver) IsNamespaced(gvk GroupVersionKind) (bool, error) {
 var CheckNamespaceExistsFn = checkNamespaceExistsDefault
 
 // SetCheckNamespaceExistsForTest overrides CheckNamespaceExistsFn for tests and returns a restore function.
-func SetCheckNamespaceExistsForTest(fn func(ctx context.Context, namespace string) error) func() {
+func SetCheckNamespaceExistsForTest(fn func(ctx context.Context, namespace, kubeContext string) error) func() {
 	prev := CheckNamespaceExistsFn
 	CheckNamespaceExistsFn = fn
 	return func() {
@@ -291,12 +303,17 @@ func SetCheckNamespaceExistsForTest(fn func(ctx context.Context, namespace strin
 
 // CheckNamespaceExists checks whether the target namespace exists in the cluster.
 // It fails if the namespace does not exist, without creating it implicitly.
-func CheckNamespaceExists(ctx context.Context, namespace string) error {
-	return CheckNamespaceExistsFn(ctx, namespace)
+func CheckNamespaceExists(ctx context.Context, namespace, kubeContext string) error {
+	return CheckNamespaceExistsFn(ctx, namespace, kubeContext)
 }
 
-func checkNamespaceExistsDefault(ctx context.Context, namespace string) error {
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "namespace", namespace, "-o", "name")
+func checkNamespaceExistsDefault(ctx context.Context, namespace, kubeContext string) error {
+	var args []string
+	if kubeContext != "" {
+		args = append(args, "--context", kubeContext)
+	}
+	args = append(args, "get", "namespace", namespace, "-o", "name")
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		trimmed := strings.TrimSpace(string(out))
 		if trimmed != "" {

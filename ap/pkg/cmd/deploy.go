@@ -38,9 +38,11 @@ type DeployOptions struct {
 	SkipPush     bool
 	BuildkitHost string
 	Namespace    string
+	Cluster      string
 	Targets      []string
 
-	kindCluster string
+	TargetCluster TargetCluster
+	kindCluster   string
 
 	plans []deployPlan
 }
@@ -66,6 +68,7 @@ func BuildDeployCommand(rootOpt *RootOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&opt.SkipPush, "skip-push", false, "Skip pushing images to registry")
 	cmd.Flags().StringVar(&opt.BuildkitHost, "buildkit-host", "", "Buildkit host to use (e.g. k8s://namespace/service)")
 	cmd.Flags().StringVarP(&opt.Namespace, "namespace", "n", "", "Target namespace for namespaced manifests")
+	cmd.Flags().StringVar(&opt.Cluster, "cluster", "", "Target cluster (kind://<name> or kubeconfig context)")
 
 	return cmd
 }
@@ -79,6 +82,14 @@ func (opt *DeployOptions) Resolve(args []string) error {
 
 	if err := k8s.ValidateNamespaceName(opt.Namespace); err != nil {
 		return err
+	}
+
+	if opt.Cluster != "" {
+		tc, err := ResolveTargetCluster(opt.Cluster, "")
+		if err != nil {
+			return err
+		}
+		opt.TargetCluster = tc
 	}
 
 	if opt.RootFlag != "" {
@@ -289,6 +300,12 @@ func buildDeployPlans(r *repo.Repo, repoRoot, currentAPRoot string, targets []st
 	return plans, nil
 }
 
+// TargetCluster represents the resolved target Kubernetes cluster.
+type TargetCluster struct {
+	KubeContext string
+	KindCluster string
+}
+
 // ParseKindClusterFromContext extracts the kind cluster name if the context represents a kind cluster.
 // For example, "kind-foo" -> ("foo", true).
 func ParseKindClusterFromContext(contextName string) (string, bool) {
@@ -296,6 +313,45 @@ func ParseKindClusterFromContext(contextName string) (string, bool) {
 		return cluster, true
 	}
 	return "", false
+}
+
+// ParseClusterFlag parses the --cluster flag into a kubeconfig context name.
+// Accepted forms:
+// - empty: unspecified (uses current context)
+// - kind://<name>: target kind cluster <name> (context "kind-<name>")
+// - <context>: target kubeconfig context
+// Anything with an unknown scheme is an error naming the two accepted forms.
+func ParseClusterFlag(val string) (string, error) {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return "", nil
+	}
+	if strings.Contains(val, "://") {
+		if name, ok := strings.CutPrefix(val, "kind://"); ok && name != "" {
+			return "kind-" + name, nil
+		}
+		return "", fmt.Errorf("invalid --cluster %q; expected kind://<name> or <context>", val)
+	}
+	return val, nil
+}
+
+// ResolveTargetCluster resolves the cluster flag and context into a TargetCluster.
+func ResolveTargetCluster(clusterFlag string, currentContext string) (TargetCluster, error) {
+	if clusterFlag != "" {
+		kCtx, err := ParseClusterFlag(clusterFlag)
+		if err != nil {
+			return TargetCluster{}, err
+		}
+		cluster, _ := ParseKindClusterFromContext(kCtx)
+		return TargetCluster{
+			KubeContext: kCtx,
+			KindCluster: cluster,
+		}, nil
+	}
+	cluster, _ := ParseKindClusterFromContext(currentContext)
+	return TargetCluster{
+		KindCluster: cluster,
+	}, nil
 }
 
 var execCommandContext = exec.CommandContext
@@ -314,14 +370,25 @@ type KindLoadTask = kindload.KindLoadTask
 
 // BuildDeployPlan constructs the task tree for deploying artifacts according to DeployOptions.
 func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string, naming images.ImageNaming) ([]tasks.Task, error) {
-	if opt.kindCluster != "" {
+	tc := opt.TargetCluster
+	if opt.Cluster != "" && tc.KubeContext == "" {
+		resolved, err := ResolveTargetCluster(opt.Cluster, "")
+		if err != nil {
+			return nil, err
+		}
+		tc = resolved
+	}
+	if opt.kindCluster != "" && tc.KindCluster == "" {
+		tc.KindCluster = opt.kindCluster
+	}
+	if tc.KindCluster != "" {
 		naming.KindMode = true
 	}
-	push := !opt.SkipPush && opt.kindCluster == ""
-	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, opt.kindCluster, naming)
+	push := !opt.SkipPush && tc.KindCluster == ""
+	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, tc, naming)
 }
 
-func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string, kindCluster string, naming images.ImageNaming) ([]tasks.Task, error) {
+func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster TargetCluster, naming images.ImageNaming) ([]tasks.Task, error) {
 	var allTasks []tasks.Task
 
 	var originalNamespace string
@@ -344,14 +411,14 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 		}
 		group.Tasks = append(group.Tasks, buildTasks)
 
-		if kindCluster != "" && len(plan.imageNames) > 0 {
+		if targetCluster.KindCluster != "" && len(plan.imageNames) > 0 {
 			var imageRefs []*imageref.ImageRef
 			for _, img := range plan.imageNames {
 				imageRefs = append(imageRefs, naming.Ref(img))
 			}
 			group.Tasks = append(group.Tasks, &KindLoadTask{
 				RepoRoot:    plan.apRoot,
-				ClusterName: kindCluster,
+				ClusterName: targetCluster.KindCluster,
 				Images:      imageRefs,
 			})
 		}
@@ -360,6 +427,7 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 			Namespace:         namespace,
 			OriginalNamespace: originalNamespace,
 			Naming:            naming,
+			KubeContext:       targetCluster.KubeContext,
 		})
 		group.Tasks = append(group.Tasks, deployTasks)
 
@@ -375,8 +443,25 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
+	if opt.Cluster != "" && opt.TargetCluster.KubeContext == "" {
+		tc, err := ResolveTargetCluster(opt.Cluster, "")
+		if err != nil {
+			return err
+		}
+		opt.TargetCluster = tc
+	} else if opt.Cluster == "" && opt.TargetCluster.KindCluster == "" && opt.kindCluster == "" {
+		tc, err := ResolveTargetCluster("", getCurrentKubeContext(ctx))
+		if err != nil {
+			return err
+		}
+		opt.TargetCluster = tc
+	}
+	if opt.kindCluster != "" && opt.TargetCluster.KindCluster == "" {
+		opt.TargetCluster.KindCluster = opt.kindCluster
+	}
+
 	if !opt.DryRun && opt.Namespace != "" {
-		if err := k8s.DefaultCheckNamespaceCached(ctx, opt.Namespace); err != nil {
+		if err := k8s.DefaultCheckNamespaceCached(ctx, opt.Namespace, opt.TargetCluster.KubeContext); err != nil {
 			return err
 		}
 	}
@@ -389,12 +474,6 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 	r, err := opt.GetRepo()
 	if err != nil {
 		return err
-	}
-
-	if opt.kindCluster == "" {
-		if cluster, ok := ParseKindClusterFromContext(getCurrentKubeContext(ctx)); ok {
-			opt.kindCluster = cluster
-		}
 	}
 
 	cfg, err := config.Load(opt.RepoRoot)

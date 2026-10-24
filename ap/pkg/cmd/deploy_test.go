@@ -387,6 +387,320 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 	})
 }
 
+func TestParseClusterFlag(t *testing.T) {
+	tests := []struct {
+		name        string
+		flag        string
+		wantContext string
+		wantErr     bool
+	}{
+		{
+			name:        "empty",
+			flag:        "",
+			wantContext: "",
+			wantErr:     false,
+		},
+		{
+			name:        "kind://name",
+			flag:        "kind://foo",
+			wantContext: "kind-foo",
+			wantErr:     false,
+		},
+		{
+			name:        "plain context",
+			flag:        "my-context",
+			wantContext: "my-context",
+			wantErr:     false,
+		},
+		{
+			name:        "plain context with kind prefix",
+			flag:        "kind-bar",
+			wantContext: "kind-bar",
+			wantErr:     false,
+		},
+		{
+			name:    "bad scheme",
+			flag:    "unknown://foo",
+			wantErr: true,
+		},
+		{
+			name:    "kind scheme missing name",
+			flag:    "kind://",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotContext, err := ParseClusterFlag(tt.flag)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ParseClusterFlag(%q) error = %v, wantErr %v", tt.flag, err, tt.wantErr)
+			}
+			if err != nil {
+				errMsg := err.Error()
+				if !strings.Contains(errMsg, "kind://<name>") || !strings.Contains(errMsg, "<context>") {
+					t.Errorf("ParseClusterFlag(%q) error = %q, expected error naming 'kind://<name>' and '<context>'", tt.flag, errMsg)
+				}
+				return
+			}
+			if gotContext != tt.wantContext {
+				t.Errorf("ParseClusterFlag(%q) = %q, want %q", tt.flag, gotContext, tt.wantContext)
+			}
+		})
+	}
+}
+
+func TestResolveTargetCluster(t *testing.T) {
+	tests := []struct {
+		name           string
+		clusterFlag    string
+		currentContext string
+		wantContext    string
+		wantKind       string
+		wantErr        bool
+	}{
+		{
+			name:           "empty flag with non-kind current context",
+			clusterFlag:    "",
+			currentContext: "my-context",
+			wantContext:    "",
+			wantKind:       "",
+		},
+		{
+			name:           "empty flag with kind current context",
+			clusterFlag:    "",
+			currentContext: "kind-dev",
+			wantContext:    "",
+			wantKind:       "dev",
+		},
+		{
+			name:           "kind flag",
+			clusterFlag:    "kind://foo",
+			currentContext: "other",
+			wantContext:    "kind-foo",
+			wantKind:       "foo",
+		},
+		{
+			name:           "plain context flag",
+			clusterFlag:    "prod-cluster",
+			currentContext: "kind-dev",
+			wantContext:    "prod-cluster",
+			wantKind:       "",
+		},
+		{
+			name:           "kind prefix context flag",
+			clusterFlag:    "kind-bar",
+			currentContext: "other",
+			wantContext:    "kind-bar",
+			wantKind:       "bar",
+		},
+		{
+			name:        "invalid scheme",
+			clusterFlag: "unknown://foo",
+			wantErr:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tc, err := ResolveTargetCluster(tt.clusterFlag, tt.currentContext)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ResolveTargetCluster(%q, %q) error = %v, wantErr %v", tt.clusterFlag, tt.currentContext, err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if tc.KubeContext != tt.wantContext {
+				t.Errorf("tc.KubeContext = %q, want %q", tc.KubeContext, tt.wantContext)
+			}
+			if tc.KindCluster != tt.wantKind {
+				t.Errorf("tc.KindCluster = %q, want %q", tc.KindCluster, tt.wantKind)
+			}
+		})
+	}
+}
+
+func TestBuildDeployPlan_DryRunClusterKind(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+	t.Setenv("IMAGE_TAG", "v1.0")
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoots:  []string{tempDir},
+			DryRun:   true,
+		},
+		Cluster: "kind://foo",
+	}
+	if err := opt.Resolve(nil); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+	r, err := opt.GetRepo()
+	if err != nil {
+		t.Fatalf("opt.GetRepo failed: %v", err)
+	}
+
+	cfg, err := config.Load(tempDir)
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+	naming := images.ResolveImageNaming(cfg)
+
+	allTasks, err := BuildDeployPlan(opt, r, "", naming)
+	if err != nil {
+		t.Fatalf("BuildDeployPlan failed: %v", err)
+	}
+
+	var kindLoads []*KindLoadTask
+	var buildTasksPush []bool
+	var applyTasks []*k8s.KubectlApplyTask
+
+	for _, task := range allTasks {
+		if group, ok := task.(*tasks.Group); ok {
+			for _, child := range group.Tasks {
+				if pf, ok := child.(*k8s.PortForwardTask); ok {
+					child = pf.Child
+				}
+				if kt, ok := child.(*KindLoadTask); ok {
+					kindLoads = append(kindLoads, kt)
+				}
+				if bg, ok := child.(*tasks.Group); ok && bg.Name == "build-images" {
+					for _, bt := range bg.Tasks {
+						if dbt, ok := bt.(*images.DockerBuildTask); ok {
+							buildTasksPush = append(buildTasksPush, dbt.Push)
+						}
+					}
+				}
+				if dg, ok := child.(*tasks.Group); ok && dg.Name == "deploy-k8s" {
+					for _, dt := range dg.Tasks {
+						if kat, ok := dt.(*k8s.KubectlApplyTask); ok {
+							applyTasks = append(applyTasks, kat)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 1. build (no push in kind mode)
+	if len(buildTasksPush) == 0 {
+		t.Fatal("expected build tasks, got 0")
+	}
+	for i, push := range buildTasksPush {
+		if push {
+			t.Errorf("buildTasksPush[%d] = true, want false (push disabled in kind mode)", i)
+		}
+	}
+
+	// 2. kind-load (cluster: foo)
+	if len(kindLoads) != 1 {
+		t.Fatalf("expected 1 kind load task, got %d", len(kindLoads))
+	}
+	if kindLoads[0].ClusterName != "foo" {
+		t.Errorf("cluster = %q, want 'foo'", kindLoads[0].ClusterName)
+	}
+	if !strings.HasPrefix(kindLoads[0].GetName(), "kind-load (cluster: foo)") {
+		t.Errorf("kindLoad.GetName() = %q, want prefix 'kind-load (cluster: foo)'", kindLoads[0].GetName())
+	}
+
+	// 3. applies with --context kind-foo
+	if len(applyTasks) == 0 {
+		t.Fatal("expected kubectl apply tasks, got 0")
+	}
+	for _, at := range applyTasks {
+		if at.KubeContext != "kind-foo" {
+			t.Errorf("applyTask.KubeContext = %q, want 'kind-foo'", at.KubeContext)
+		}
+	}
+}
+
+func TestBuildDeployPlan_DryRunClusterNonKind(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	opt := DeployOptions{
+		RootOptions: &RootOptions{
+			RepoRoot: tempDir,
+			APRoots:  []string{tempDir},
+			DryRun:   true,
+		},
+		Cluster: "my-custom-context",
+	}
+	if err := opt.Resolve(nil); err != nil {
+		t.Fatalf("opt.Resolve failed: %v", err)
+	}
+	r, err := opt.GetRepo()
+	if err != nil {
+		t.Fatalf("opt.GetRepo failed: %v", err)
+	}
+
+	cfg, err := config.Load(tempDir)
+	if err != nil {
+		t.Fatalf("config.Load failed: %v", err)
+	}
+	naming := images.ResolveImageNaming(cfg)
+
+	allTasks, err := BuildDeployPlan(opt, r, "", naming)
+	if err != nil {
+		t.Fatalf("BuildDeployPlan failed: %v", err)
+	}
+
+	var kindLoads []*KindLoadTask
+	var buildTasksPush []bool
+	var applyTasks []*k8s.KubectlApplyTask
+
+	for _, task := range allTasks {
+		if group, ok := task.(*tasks.Group); ok {
+			for _, child := range group.Tasks {
+				if pf, ok := child.(*k8s.PortForwardTask); ok {
+					child = pf.Child
+				}
+				if kt, ok := child.(*KindLoadTask); ok {
+					kindLoads = append(kindLoads, kt)
+				}
+				if bg, ok := child.(*tasks.Group); ok && bg.Name == "build-images" {
+					for _, bt := range bg.Tasks {
+						if dbt, ok := bt.(*images.DockerBuildTask); ok {
+							buildTasksPush = append(buildTasksPush, dbt.Push)
+						}
+					}
+				}
+				if dg, ok := child.(*tasks.Group); ok && dg.Name == "deploy-k8s" {
+					for _, dt := range dg.Tasks {
+						if kat, ok := dt.(*k8s.KubectlApplyTask); ok {
+							applyTasks = append(applyTasks, kat)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 1. push path is planned (push = true)
+	if len(buildTasksPush) == 0 {
+		t.Fatal("expected build tasks, got 0")
+	}
+	for i, push := range buildTasksPush {
+		if !push {
+			t.Errorf("buildTasksPush[%d] = false, want true (push enabled for non-kind)", i)
+		}
+	}
+
+	// 2. no kind-load
+	if len(kindLoads) != 0 {
+		t.Errorf("expected 0 kind load tasks, got %d", len(kindLoads))
+	}
+
+	// 3. applies with --context my-custom-context
+	if len(applyTasks) == 0 {
+		t.Fatal("expected kubectl apply tasks, got 0")
+	}
+	for _, at := range applyTasks {
+		if at.KubeContext != "my-custom-context" {
+			t.Errorf("applyTask.KubeContext = %q, want 'my-custom-context'", at.KubeContext)
+		}
+	}
+}
+
 func TestDeploy_FixtureRepo_SelectK8s(t *testing.T) {
 	tempDir := setupFixtureRepo(t)
 
@@ -1198,6 +1512,27 @@ func TestDeploy_DryRun_WithoutNamespace_Unchanged(t *testing.T) {
 	}
 }
 
+func TestBuildDeployCommand_ClusterFlag(t *testing.T) {
+	rootOpt := &RootOptions{}
+	cmd := BuildDeployCommand(rootOpt)
+
+	flag := cmd.Flags().Lookup("cluster")
+	if flag == nil {
+		t.Fatal("expected --cluster flag")
+	}
+	if flag.DefValue != "" {
+		t.Errorf("expected default empty, got %q", flag.DefValue)
+	}
+
+	if err := cmd.ParseFlags([]string{"--cluster=kind://dev"}); err != nil {
+		t.Fatalf("ParseFlags failed: %v", err)
+	}
+	val, err := cmd.Flags().GetString("cluster")
+	if err != nil || val != "kind://dev" {
+		t.Errorf("expected cluster=kind://dev, got %q", val)
+	}
+}
+
 func TestDeploy_RunDeploy_NonexistentNamespaceFailsEarly(t *testing.T) {
 	tempDir := setupFixtureRepo(t)
 
@@ -1214,7 +1549,7 @@ func TestDeploy_RunDeploy_NonexistentNamespaceFailsEarly(t *testing.T) {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
-	restore := k8s.SetCheckNamespaceExistsForTest(func(ctx context.Context, ns string) error {
+	restore := k8s.SetCheckNamespaceExistsForTest(func(ctx context.Context, ns, kubeContext string) error {
 		return fmt.Errorf("target namespace %q does not exist: not found", ns)
 	})
 	defer restore()
