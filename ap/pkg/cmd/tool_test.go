@@ -170,8 +170,54 @@ func TestToolUpdateVersions_Command(t *testing.T) {
 	if !strings.Contains(out, "update-versions") {
 		t.Errorf("expected help output to mention update-versions, got: %s", out)
 	}
-	if !strings.Contains(out, "--protoc") || !strings.Contains(out, "--docker") || !strings.Contains(out, "--buildx") {
-		t.Errorf("expected help output to mention --protoc, --docker, and --buildx flags, got: %s", out)
+	if !strings.Contains(out, "--protoc") || !strings.Contains(out, "--docker") || !strings.Contains(out, "--buildx") || !strings.Contains(out, "--kind") {
+		t.Errorf("expected help output to mention --protoc, --docker, --buildx, and --kind flags, got: %s", out)
+	}
+}
+
+func TestToolKind_DryRun(t *testing.T) {
+	tempCache := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", tempCache)
+
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apDir, "kind.yaml"), []byte("kind: \"v0.33.0\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-populate cache for kind
+	kindBinDir := filepath.Join(tempCache, "tools", "kind", "v0.33.0", "bin")
+	if err := os.MkdirAll(kindBinDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kindBinDir, "kind"), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("AP_ROOT", tempDir)
+
+	rootCmd := BuildRootCommand()
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"tool", "kind", "--dry-run", "--", "version"})
+
+	err := rootCmd.ExecuteContext(t.Context())
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error running ap tool kind --dry-run: %v\nOutput: %s", err, output)
+	}
+
+	expectedPrefix := fmt.Sprintf("[dry-run] %s", filepath.Join(tempCache, "tools", "kind", "v0.33.0", "bin", "kind"))
+	if !strings.HasPrefix(output, expectedPrefix) {
+		t.Errorf("expected dry-run output to start with %q, got: %s", expectedPrefix, output)
+	}
+	if !strings.Contains(output, "version") {
+		t.Errorf("expected output to contain 'version', got: %s", output)
 	}
 }
 

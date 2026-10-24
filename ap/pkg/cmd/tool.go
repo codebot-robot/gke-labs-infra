@@ -18,6 +18,7 @@ import (
 	"fmt"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/protoc"
 	"github.com/spf13/cobra"
 )
@@ -32,6 +33,7 @@ func BuildToolCommand(rootOpt *RootOptions) *cobra.Command {
 	cmd.AddCommand(BuildToolProtocCommand(rootOpt))
 	cmd.AddCommand(BuildToolDockerCommand(rootOpt))
 	cmd.AddCommand(BuildToolDockerBuildxCommand(rootOpt))
+	cmd.AddCommand(BuildToolKindCommand(rootOpt))
 	cmd.AddCommand(BuildToolUpdateVersionsCommand(rootOpt))
 
 	return cmd
@@ -42,6 +44,7 @@ type ToolUpdateVersionsOptions struct {
 	Protoc bool
 	Docker bool
 	Buildx bool
+	Kind   bool
 }
 
 // BuildToolUpdateVersionsCommand constructs the cobra command for "tool update-versions".
@@ -50,6 +53,7 @@ func BuildToolUpdateVersionsCommand(rootOpt *RootOptions) *cobra.Command {
 		Protoc: true,
 		Docker: true,
 		Buildx: true,
+		Kind:   true,
 	}
 
 	cmd := &cobra.Command{
@@ -84,6 +88,12 @@ func BuildToolUpdateVersionsCommand(rootOpt *RootOptions) *cobra.Command {
 				}
 			}
 
+			if opts.Kind {
+				if err := kind.Update(cmd.Context(), repoRoot); err != nil {
+					return fmt.Errorf("failed updating kind versions: %w", err)
+				}
+			}
+
 			return nil
 		},
 	}
@@ -91,6 +101,7 @@ func BuildToolUpdateVersionsCommand(rootOpt *RootOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.Protoc, "protoc", true, "Update protoc and plugin versions in ap/pkg/tool/protoc/versions.yaml")
 	cmd.Flags().BoolVar(&opts.Docker, "docker", true, "Update Docker versions in ap/pkg/tool/docker/versions.yaml")
 	cmd.Flags().BoolVar(&opts.Buildx, "buildx", true, "Update Docker Buildx versions in ap/pkg/tool/docker/versions.yaml")
+	cmd.Flags().BoolVar(&opts.Kind, "kind", true, "Update kind versions in ap/pkg/tool/kind/versions.yaml")
 
 	return cmd
 }

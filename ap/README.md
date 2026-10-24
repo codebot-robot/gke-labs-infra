@@ -170,9 +170,22 @@ buildx: "0.38.1"
 - Pinned binaries are downloaded and cached in `~/.cache/ap/tools/`.
 - `ap deploy` and `ap build` automatically use these pinned versions rather than whatever version happens to be on the system PATH.
 
+### kind.yaml
+
+Configures `kind` pinning for `ap tool kind` and test harnesses.
+
+Example `.ap/kind.yaml`:
+```yaml
+kind: "v0.33.0"
+```
+
+- `kind`: Pinned version of the `kind` binary (defaults to the newest version in `versions.yaml`, e.g. `"v0.33.0"`).
+- Pinned binaries are downloaded and cached in `~/.cache/ap/tools/kind/<tag>/bin/`.
+- Test harnesses and `ap tool kind` automatically use this pinned version without requiring a manual download.
+
 ### Updating Tool Versions
 
-Run `ap tool update-versions` to refresh baked-in release tables (`ap/pkg/tool/protoc/versions.yaml` and `ap/pkg/tool/docker/versions.yaml`) with verified checksums. Flags allow skipping individual tools (all default to `true`): `--protoc`, `--docker`, and `--buildx` (e.g. `ap tool update-versions --docker=false` skips the slower Docker tarball downloads).
+Run `ap tool update-versions` to refresh baked-in release tables (`ap/pkg/tool/protoc/versions.yaml`, `ap/pkg/tool/docker/versions.yaml`, and `ap/pkg/tool/kind/versions.yaml`) with verified checksums. Flags allow skipping individual tools (all default to `true`): `--protoc`, `--docker`, `--buildx`, and `--kind` (e.g. `ap tool update-versions --docker=false` skips the slower Docker tarball downloads).
 
 ### ap.yaml
 
@@ -241,4 +254,5 @@ Commands:
 - `alpha`: Experimental commands (e.g. `alpha sandbox`)
 - `version`: Print version information
 - `tool protoc`: Run protoc with pinned binary and language plugins
-- `tool update-versions`: Update baked-in tool release versions and checksums in versions.yaml (supports `--protoc`, `--docker`, `--buildx`)
+- `tool kind`: Run kind with pinned binary
+- `tool update-versions`: Update baked-in tool release versions and checksums in versions.yaml (supports `--protoc`, `--docker`, `--buildx`, `--kind`)
