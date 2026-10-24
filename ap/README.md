@@ -134,8 +134,8 @@ lint:
   - `unusedparameters.mode`: Enables parameter checking in the `unused` analyzer (`error | warn | ignore`).
   - `testOnlyImports.packages`: List of package import paths permitted only in test files (`*_test.go`).
   - `closeWriter.types`: List of type names whose instances must check errors when closed.
-  - `droppedErrors`: Checks for dropped errors (calls whose returned `error` is ignored). Supports `baseline` (path to baseline file), `exclude` (additional functions/methods to exclude), and `useDefaultExcludes` (boolean, defaults to `true` to exclude standard library functions).
-  - Baseline ratchet: `droppedErrors` supports a baseline ratchet using `ap lint droppederrors --write-baseline`, writing to `.ap/droppederrors-baseline.txt` (or the configured `baseline:` path). Existing dropped errors in the baseline are tolerated, but new violations cause lint failures.
+  - `droppedErrors`: Checks for dropped errors (calls whose returned `error` is ignored). Supports `exclude` (additional functions/methods to exclude), and `useDefaultExcludes` (boolean, defaults to `true` to exclude standard library functions).
+  - Baseline ratchet: `baseline:` is accepted on every linter section (`lint.<check>.baseline: <path>`); the default file is `.ap/<analyzer>-baseline.txt`. Every analyzer uses a one-line format (`file:enclosingFunc:detail`, with the optional category field `droppederrors` writes). Running `ap lint --write-baseline` writes a baseline for each enabled analyzer that has findings (`ap lint droppederrors --write-baseline` still works). Matched findings are suppressed, and stale entries are reported so they can be removed and the baseline ratchets toward zero. This is the way to adopt a check at `mode: error` in a repo with existing findings, instead of `mode: warn`.
 
 ### proto.yaml
 
