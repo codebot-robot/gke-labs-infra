@@ -218,22 +218,36 @@ func TestFile_HashAndRefresh(t *testing.T) {
 		t.Errorf("expected 0 content reads on persistent memo hit, got %d", ContentReadCount())
 	}
 
-	// Modify file on disk (changes mtime/size): should miss memo and re-read
+	// Modify file on disk (changes mtime/size): staleness guard detects modification automatically
 	if err := os.WriteFile(filePath, []byte("version 2 modified"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
 	ResetContentReadCount()
-	f2.Refresh()
+	// With staleness guard, Hash() re-stats and detects the modification automatically
 	hash3, err := f2.Hash()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("f2.Hash() after modification failed: %v", err)
 	}
 	if hash3 == hash1 {
 		t.Errorf("expected different hash after modification, got %q", hash3)
 	}
 	if ContentReadCount() != 1 {
 		t.Errorf("expected 1 content read when mtime/content changes, got %d", ContentReadCount())
+	}
+
+	// InvalidateCachedInfo drops in-memory memo; next Hash() consults hashes.bin without re-reading
+	ResetContentReadCount()
+	f2.InvalidateCachedInfo()
+	hash4, err := f2.Hash()
+	if err != nil {
+		t.Fatalf("f2.Hash() after InvalidateCachedInfo failed: %v", err)
+	}
+	if hash4 != hash3 {
+		t.Errorf("expected hash after InvalidateCachedInfo to match %q, got %q", hash3, hash4)
+	}
+	if ContentReadCount() != 0 {
+		t.Errorf("expected 0 content reads on hashes.bin hit after InvalidateCachedInfo, got %d", ContentReadCount())
 	}
 }
 
@@ -354,8 +368,8 @@ func TestFile_ReferencedGOOS(t *testing.T) {
 				t.Errorf("memoized ReferencedGOOS() = %v, want %v", got2, tt.want)
 			}
 
-			// Verify Refresh()
-			f.Refresh()
+			// Verify InvalidateCachedInfo()
+			f.InvalidateCachedInfo()
 			got3 := f.ReferencedGOOS()
 			if !reflect.DeepEqual(got3, tt.want) {
 				t.Errorf("refreshed ReferencedGOOS() = %v, want %v", got3, tt.want)
