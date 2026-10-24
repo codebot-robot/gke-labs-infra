@@ -47,6 +47,21 @@ func TestHarness_KindCommandPointsIntoCache(t *testing.T) {
 	}
 }
 
+func TestLoadImages_RequiresKindBin(t *testing.T) {
+	err := LoadImages(t.Context(), "", "ap-cluster", []string{"test-image:latest"})
+	if err == nil {
+		t.Fatal("expected error when kindBin is empty, got nil")
+	}
+	if !strings.Contains(err.Error(), "kindBin is required") {
+		t.Fatalf("expected error to contain 'kindBin is required', got: %v", err)
+	}
+
+	err = LoadImages(t.Context(), "", "ap-cluster", nil)
+	if err == nil {
+		t.Fatal("expected error when kindBin is empty and images is nil, got nil")
+	}
+}
+
 func TestNewHarness(t *testing.T) {
 	if os.Getenv("RUN_E2E") == "" {
 		t.Skip("Skipping E2E test; set RUN_E2E=1 to run")

@@ -203,11 +203,11 @@ func (h *Harness) DockerBuild(tag, dockerfile, context string) {
 
 // LoadImages loads docker images into the specified kind cluster using the given kind binary.
 func LoadImages(ctx context.Context, kindBin, cluster string, images []string) error {
+	if kindBin == "" {
+		return fmt.Errorf("kindBin is required")
+	}
 	if len(images) == 0 {
 		return nil
-	}
-	if kindBin == "" {
-		kindBin = "kind"
 	}
 	args := []string{"load", "docker-image"}
 	args = append(args, images...)
