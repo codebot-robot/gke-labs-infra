@@ -190,9 +190,9 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 			Mode:          mode,
 			SkipGenerated: &skipGenerated,
 			SkipTests:     &skipTests,
+			Baseline:      configuredBaseline,
 		},
 		Exclude:            exclude,
-		Baseline:           configuredBaseline,
 		UseDefaultExcludes: &useDefaultExcludes,
 	}
 

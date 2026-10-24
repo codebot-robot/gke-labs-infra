@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -26,6 +27,7 @@ import (
 // LintOptions holds the configuration for the "lint" command.
 type LintOptions struct {
 	*RootOptions
+	WriteBaseline bool
 }
 
 // BuildLintCommand constructs the cobra command for "lint".
@@ -45,6 +47,8 @@ func BuildLintCommand(rootOpt *RootOptions) *cobra.Command {
 			return RunLint(cmd.Context(), opt)
 		},
 	}
+
+	cmd.Flags().BoolVar(&opt.WriteBaseline, "write-baseline", false, "Write baseline for linters with findings")
 
 	cmd.AddCommand(BuildAnalyzeCommand())
 	cmd.AddCommand(BuildDroppedErrorsCommand(rootOpt))
@@ -77,6 +81,12 @@ func RunLint(ctx context.Context, opt LintOptions) error {
 				ContinueOnError: true,
 			}
 			allTasks = append(allTasks, group)
+		}
+	}
+
+	if opt.WriteBaseline {
+		for _, task := range allTasks {
+			golang.SetWriteBaseline(task, true)
 		}
 	}
 

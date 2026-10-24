@@ -102,6 +102,7 @@ type LinterConfig interface {
 	GetMode() string
 	SkipGeneratedOverride() *bool
 	SkipTestsOverride() *bool
+	GetBaseline() string
 }
 
 // CommonLinterConfig holds configuration common across linters.
@@ -109,6 +110,7 @@ type CommonLinterConfig struct {
 	Mode          string `json:"mode"`
 	SkipGenerated *bool  `json:"skipGenerated"`
 	SkipTests     *bool  `json:"skipTests"`
+	Baseline      string `json:"baseline"`
 }
 
 var _ LinterConfig = (*CommonLinterConfig)(nil)
@@ -116,7 +118,6 @@ var _ LinterConfig = (*CommonLinterConfig)(nil)
 type DroppedErrorsConfig struct {
 	CommonLinterConfig
 	Exclude            []string `json:"exclude"`
-	Baseline           string   `json:"baseline"`
 	UseDefaultExcludes *bool    `json:"useDefaultExcludes"`
 }
 
@@ -271,6 +272,14 @@ func (c *CommonLinterConfig) GetMode() string {
 		return ""
 	}
 	return c.Mode
+}
+
+// GetBaseline returns the configured baseline file path, or empty string if unset.
+func (c *CommonLinterConfig) GetBaseline() string {
+	if c == nil {
+		return ""
+	}
+	return c.Baseline
 }
 
 // IsEnabled returns true if the linter is enabled (defaulting to true, mode != "ignore").

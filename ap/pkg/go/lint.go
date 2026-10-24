@@ -27,8 +27,8 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/baseline"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/closewriter"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/droppederrors"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/testonlyimports"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
@@ -89,11 +89,6 @@ func (t *GovulncheckTask) GetName() string {
 
 func (t *GovulncheckTask) GetChildren() []tasks.Task {
 	return nil
-}
-
-type positionedDiag struct {
-	diag analysis.Diagnostic
-	fset *token.FileSet
 }
 
 // AnalyzersTask represents a task to run enabled code style analyzers in-process.
@@ -167,9 +162,8 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	}
 	seen := make(map[diagKey]bool)
 	seenFindings := make(map[string]bool)
-	var allDroppedErrorsFindings []droppederrors.Finding
+	findingsByAnalyzer := make(map[string][]baseline.Finding)
 
-	diagsByAnalyzer := make(map[string][]positionedDiag)
 	allCheckedFiles := make(map[string]bool)
 	var actionErrors []error
 
@@ -223,16 +217,14 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 			if !act.IsRoot {
 				continue
 			}
-			if act.Analyzer.Name == "droppederrors" {
-				if fList, ok := act.Result.([]droppederrors.Finding); ok {
-					for _, f := range fList {
-						k := f.Key()
-						if seenFindings[k] {
-							continue
-						}
-						seenFindings[k] = true
-						allDroppedErrorsFindings = append(allDroppedErrorsFindings, f)
+			if fList, ok := act.Result.([]baseline.Finding); ok {
+				for _, f := range fList {
+					k := f.Key()
+					if seenFindings[k] {
+						continue
 					}
+					seenFindings[k] = true
+					findingsByAnalyzer[act.Analyzer.Name] = append(findingsByAnalyzer[act.Analyzer.Name], f)
 				}
 				continue
 			}
@@ -244,9 +236,32 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 					continue
 				}
 				seen[k] = true
-				diagsByAnalyzer[act.Analyzer.Name] = append(diagsByAnalyzer[act.Analyzer.Name], positionedDiag{
-					diag: diag,
-					fset: act.Package.Fset,
+
+				var enclosingFunc string
+				for _, file := range act.Package.Syntax {
+					if act.Package.Fset.Position(file.Pos()).Filename == posn.Filename {
+						enclosingFunc = baseline.FindEnclosingFunc(file, act.Package.Fset, diag.Pos)
+						break
+					}
+				}
+				if enclosingFunc == "" {
+					enclosingFunc = "<init>"
+				}
+
+				var related []baseline.RelatedInfo
+				for _, rel := range diag.Related {
+					related = append(related, baseline.RelatedInfo{
+						Pos:     act.Package.Fset.Position(rel.Pos),
+						Message: rel.Message,
+					})
+				}
+
+				findingsByAnalyzer[act.Analyzer.Name] = append(findingsByAnalyzer[act.Analyzer.Name], baseline.Finding{
+					Pos:           posn,
+					EnclosingFunc: enclosingFunc,
+					Detail:        diag.Message,
+					Message:       diag.Message,
+					Related:       related,
 				})
 			}
 		}
@@ -254,43 +269,139 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 
 	var errs []error
 	for _, a := range t.Analyzers {
-		if a.Name == "droppederrors" {
-			if err := t.processDroppedErrors(a, allDroppedErrorsFindings, allCheckedFiles); err != nil {
-				errs = append(errs, err)
-			}
-			continue
+		findings := findingsByAnalyzer[a.Name]
+
+		baselineRoot := t.RepoRoot
+		if baselineRoot == "" {
+			baselineRoot = t.Dir
 		}
 
-		diags := diagsByAnalyzer[a.Name]
-		if len(diags) == 0 {
-			continue
+		configured := ""
+		if lc := t.Settings[a.Name]; lc != nil {
+			configured = lc.GetBaseline()
 		}
-		sort.Slice(diags, func(i, j int) bool {
-			pi := diags[i].fset.Position(diags[i].diag.Pos)
-			pj := diags[j].fset.Position(diags[j].diag.Pos)
-			if pi.Filename != pj.Filename {
-				return pi.Filename < pj.Filename
+		if configured == "" && (len(t.Analyzers) == 1 || a.Name == "droppederrors") {
+			configured = t.BaselinePath
+		}
+
+		baselinePath := baseline.ResolveBaselinePath(t.RepoRoot, t.Dir, a.Name, configured, t.WriteBaseline)
+		if baselinePath != "" {
+			bDir := filepath.Dir(baselinePath)
+			if filepath.Base(bDir) == ".ap" {
+				baselineRoot = filepath.Dir(bDir)
 			}
-			if pi.Line != pj.Line {
-				return pi.Line < pj.Line
+		}
+
+		for i := range findings {
+			findings[i].RelFile = relPath(baselineRoot, findings[i].Pos.Filename)
+			findings[i].RepoRel = relPath(t.RepoRoot, findings[i].Pos.Filename)
+			findings[i].ModRel = relPath(t.Dir, findings[i].Pos.Filename)
+		}
+
+		sort.Slice(findings, func(i, j int) bool {
+			if findings[i].RelFile != findings[j].RelFile {
+				return findings[i].RelFile < findings[j].RelFile
 			}
-			return pi.Column < pj.Column
+			if findings[i].Pos.Line != findings[j].Pos.Line {
+				return findings[i].Pos.Line < findings[j].Pos.Line
+			}
+			if findings[i].Pos.Column != findings[j].Pos.Column {
+				return findings[i].Pos.Column < findings[j].Pos.Column
+			}
+			if findings[i].Category != findings[j].Category {
+				return findings[i].Category < findings[j].Category
+			}
+			return findings[i].Detail < findings[j].Detail
 		})
 
-		for _, pd := range diags {
-			posn := pd.fset.Position(pd.diag.Pos)
-			fmt.Fprintf(os.Stderr, "%s: %s\n", posn, pd.diag.Message)
-			for _, rel := range pd.diag.Related {
-				relPosn := pd.fset.Position(rel.Pos)
-				fmt.Fprintf(os.Stderr, "%s:\t%s\n", relPosn, rel.Message)
+		if t.WriteBaseline {
+			var existingEntries []baseline.Entry
+			if baselinePath != "" {
+				entries, err := baseline.Load(baselinePath)
+				if err != nil {
+					errs = append(errs, err)
+					continue
+				}
+				existingEntries = entries
+			}
+
+			hasChanges := false
+			if len(findings) > 0 {
+				hasChanges = true
+			}
+			var finalEntries []baseline.Entry
+			for _, e := range existingEntries {
+				entryFile := filepath.ToSlash(e.File)
+				if !allCheckedFiles[entryFile] {
+					finalEntries = append(finalEntries, e)
+				} else {
+					hasChanges = true
+				}
+			}
+
+			if !hasChanges {
+				continue
+			}
+
+			for _, f := range findings {
+				relFile := relPath(baselineRoot, f.Pos.Filename)
+				finalEntries = append(finalEntries, baseline.Entry{
+					File:          relFile,
+					EnclosingFunc: f.EnclosingFunc,
+					Category:      f.Category,
+					Detail:        f.Detail,
+					Callee:        f.Detail,
+				})
+			}
+
+			if baselinePath != "" {
+				if err := baseline.Write(baselinePath, a.Name, finalEntries); err != nil {
+					errs = append(errs, fmt.Errorf("failed to write baseline to %s: %w", baselinePath, err))
+					continue
+				}
+			}
+			fmt.Printf("Wrote %d baseline entries to %s\n", len(finalEntries), baselinePath)
+			continue
+		}
+
+		var baselineEntries []baseline.Entry
+		if baselinePath != "" {
+			entries, err := baseline.Load(baselinePath)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			baselineEntries = entries
+		}
+
+		newFindings, staleEntries := baseline.Match(findings, baselineEntries, allCheckedFiles, baselineRoot)
+		for _, stale := range staleEntries {
+			fmt.Printf("stale baseline entry: %s (remove from baseline)\n", stale)
+		}
+
+		findingsToReport := newFindings
+		if len(baselineEntries) == 0 {
+			findingsToReport = findings
+		}
+
+		for _, f := range findingsToReport {
+			msg := f.Message
+			if msg == "" {
+				msg = f.Detail
+			}
+			fmt.Fprintf(os.Stderr, "%s: %s\n", f.Pos, msg)
+			for _, rel := range f.Related {
+				fmt.Fprintf(os.Stderr, "%s:\t%s\n", rel.Pos, rel.Message)
 			}
 		}
 
 		mode := t.Enabled[a.Name]
-		if mode == codestyle.ModeError {
-			errs = append(errs, fmt.Errorf("%s check failed in %s", a.Name, t.Dir))
-		} else if mode == codestyle.ModeWarn {
-			klog.Warningf("%s check failed in %s: %d diagnostics found", a.Name, t.Dir, len(diags))
+		if len(findingsToReport) > 0 {
+			if mode == codestyle.ModeError {
+				errs = append(errs, fmt.Errorf("%s check failed in %s", a.Name, t.Dir))
+			} else if mode == codestyle.ModeWarn {
+				klog.Warningf("%s check failed in %s: %d diagnostics found", a.Name, t.Dir, len(findingsToReport))
+			}
 		}
 	}
 
@@ -298,118 +409,14 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	return errors.Join(errs...)
 }
 
-func (t *AnalyzersTask) processDroppedErrors(a *analysis.Analyzer, findings []droppederrors.Finding, allCheckedFiles map[string]bool) error {
-	baselineRoot := t.RepoRoot
-	if baselineRoot == "" {
-		baselineRoot = t.Dir
+// SetWriteBaseline recursively sets WriteBaseline on any AnalyzersTask in the task tree.
+func SetWriteBaseline(t tasks.Task, writeBaseline bool) {
+	if at, ok := t.(*AnalyzersTask); ok {
+		at.WriteBaseline = writeBaseline
 	}
-
-	baselinePath := t.BaselinePath
-	if baselinePath == "" {
-		configured := ""
-		if de, ok := t.Settings["droppederrors"].(*config.DroppedErrorsConfig); ok && de != nil {
-			configured = de.Baseline
-		}
-		baselinePath = droppederrors.ResolveBaselinePath(t.RepoRoot, t.Dir, configured, t.WriteBaseline)
+	for _, child := range t.GetChildren() {
+		SetWriteBaseline(child, writeBaseline)
 	}
-
-	if baselinePath != "" {
-		bDir := filepath.Dir(baselinePath)
-		if filepath.Base(bDir) == ".ap" {
-			baselineRoot = filepath.Dir(bDir)
-		}
-	}
-
-	for i := range findings {
-		findings[i].RelFile = relPath(baselineRoot, findings[i].Pos.Filename)
-		findings[i].RepoRel = relPath(t.RepoRoot, findings[i].Pos.Filename)
-		findings[i].ModRel = relPath(t.Dir, findings[i].Pos.Filename)
-	}
-
-	sort.Slice(findings, func(i, j int) bool {
-		if findings[i].RelFile != findings[j].RelFile {
-			return findings[i].RelFile < findings[j].RelFile
-		}
-		if findings[i].Pos.Line != findings[j].Pos.Line {
-			return findings[i].Pos.Line < findings[j].Pos.Line
-		}
-		if findings[i].Pos.Column != findings[j].Pos.Column {
-			return findings[i].Pos.Column < findings[j].Pos.Column
-		}
-		if findings[i].Category != findings[j].Category {
-			return findings[i].Category < findings[j].Category
-		}
-		return findings[i].Callee < findings[j].Callee
-	})
-
-	if t.WriteBaseline {
-		var finalEntries []droppederrors.BaselineEntry
-		if baselinePath != "" {
-			existingEntries, err := droppederrors.LoadBaseline(baselinePath)
-			if err != nil {
-				return err
-			}
-			for _, e := range existingEntries {
-				entryFile := filepath.ToSlash(e.File)
-				if !allCheckedFiles[entryFile] {
-					finalEntries = append(finalEntries, e)
-				}
-			}
-		}
-		for _, f := range findings {
-			relFile := relPath(baselineRoot, f.Pos.Filename)
-			finalEntries = append(finalEntries, droppederrors.BaselineEntry{
-				File:          relFile,
-				EnclosingFunc: f.EnclosingFunc,
-				Category:      f.Category,
-				Callee:        f.Callee,
-			})
-		}
-		if baselinePath != "" {
-			if err := droppederrors.WriteBaseline(baselinePath, finalEntries); err != nil {
-				return fmt.Errorf("failed to write baseline to %s: %w", baselinePath, err)
-			}
-		}
-		fmt.Printf("Wrote %d baseline entries to %s\n", len(finalEntries), baselinePath)
-		return nil
-	}
-
-	var baselineEntries []droppederrors.BaselineEntry
-	if baselinePath != "" {
-		entries, err := droppederrors.LoadBaseline(baselinePath)
-		if err != nil {
-			return err
-		}
-		baselineEntries = entries
-	}
-
-	newFindings, staleEntries := droppederrors.MatchFindings(findings, baselineEntries, allCheckedFiles, baselineRoot)
-	for _, stale := range staleEntries {
-		fmt.Printf("stale baseline entry: %s (remove from baseline)\n", stale)
-	}
-
-	findingsToReport := newFindings
-	if len(baselineEntries) == 0 {
-		findingsToReport = findings
-	}
-
-	for _, f := range findingsToReport {
-		desc := "unchecked error"
-		if f.Category == droppederrors.CategoryErrorOnlyCheckedForSuccess {
-			desc = "error only checked for success"
-		}
-		fmt.Fprintf(os.Stderr, "%s:%d:%d: %s in %s: %s\n", f.Pos.Filename, f.Pos.Line, f.Pos.Column, desc, f.EnclosingFunc, f.Callee)
-	}
-
-	mode := t.Enabled[a.Name]
-	if len(findingsToReport) > 0 {
-		if mode == codestyle.ModeError {
-			return fmt.Errorf("%s check failed in %s: %d new unchecked errors found", a.Name, t.Dir, len(findingsToReport))
-		} else if mode == codestyle.ModeWarn {
-			klog.Warningf("%s check failed in %s: %d diagnostics found", a.Name, t.Dir, len(findingsToReport))
-		}
-	}
-	return nil
 }
 
 func relPath(base, target string) string {

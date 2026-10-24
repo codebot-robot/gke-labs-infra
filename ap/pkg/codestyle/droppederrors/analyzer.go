@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/baseline"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"golang.org/x/tools/go/analysis"
@@ -53,23 +54,28 @@ func NewAnalyzer(cfg Config) *analysis.Analyzer {
 				rawFindings := findDroppedErrorsInFile(file, pass.TypesInfo, matcher)
 				for _, raw := range rawFindings {
 					callee := formatCallee(raw.expr, pass.TypesInfo)
-					enclosingFunc := findEnclosingFunc(file, pass.Fset, raw.pos)
+					enclosingFunc := baseline.FindEnclosingFunc(file, pass.Fset, raw.pos)
 					posn := pass.Fset.Position(raw.pos)
+
+					desc := "unchecked error"
+					if raw.category == CategoryErrorOnlyCheckedForSuccess {
+						desc = "error only checked for success"
+					}
+					msg := fmt.Sprintf("%s in %s: %s", desc, enclosingFunc, callee)
+					diagMsg := fmt.Sprintf("%s: %s", desc, callee)
 
 					findings = append(findings, Finding{
 						Pos:           posn,
 						Category:      raw.category,
+						Detail:        callee,
 						Callee:        callee,
 						EnclosingFunc: enclosingFunc,
+						Message:       msg,
 					})
 
-					msg := fmt.Sprintf("unchecked error: %s", callee)
-					if raw.category == CategoryErrorOnlyCheckedForSuccess {
-						msg = fmt.Sprintf("error only checked for success: %s", callee)
-					}
 					pass.Report(analysis.Diagnostic{
 						Pos:      raw.pos,
-						Message:  msg,
+						Message:  diagMsg,
 						Category: "droppederrors",
 					})
 				}

@@ -22,6 +22,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/baseline"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileset"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/checker"
@@ -167,7 +168,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	if opts.WriteBaseline {
 		var finalEntries []BaselineEntry
 		if opts.BaselinePath != "" {
-			existingEntries, err := LoadBaseline(opts.BaselinePath)
+			existingEntries, err := baseline.Load(opts.BaselinePath)
 			if err != nil {
 				return nil, err
 			}
@@ -185,11 +186,12 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 				File:          relFile,
 				EnclosingFunc: f.EnclosingFunc,
 				Category:      f.Category,
+				Detail:        f.Callee,
 				Callee:        f.Callee,
 			})
 		}
 		if opts.BaselinePath != "" {
-			if err := WriteBaseline(opts.BaselinePath, finalEntries); err != nil {
+			if err := baseline.Write(opts.BaselinePath, "droppederrors", finalEntries); err != nil {
 				return nil, fmt.Errorf("failed to write baseline to %s: %w", opts.BaselinePath, err)
 			}
 		}
@@ -200,14 +202,14 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	var baselineEntries []BaselineEntry
 	if opts.BaselinePath != "" {
 		var err error
-		baselineEntries, err = LoadBaseline(opts.BaselinePath)
+		baselineEntries, err = baseline.Load(opts.BaselinePath)
 		if err != nil {
 			return nil, err
 		}
 	}
 	res.BaselineEntries = baselineEntries
 
-	newFindings, staleEntries := MatchFindings(allFindings, baselineEntries, allCheckedFiles, baselineRoot)
+	newFindings, staleEntries := baseline.Match(allFindings, baselineEntries, allCheckedFiles, baselineRoot)
 	res.NewFindings = newFindings
 	res.StaleEntries = staleEntries
 
