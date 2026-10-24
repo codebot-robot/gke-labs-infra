@@ -16,8 +16,36 @@ package e2e
 
 import (
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestHarness_KindCommandPointsIntoCache(t *testing.T) {
+	tempCache := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", tempCache)
+
+	// Pre-populate cache so test runs without network requests
+	version := "v0.33.0"
+	binDir := filepath.Join(tempCache, "tools", "kind", version, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := filepath.Join(binDir, "kind")
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &Harness{t: t}
+	cmdPath := h.KindCommand()
+	if !strings.HasPrefix(cmdPath, tempCache) {
+		t.Errorf("expected kind command path %q to point into cache dir %q", cmdPath, tempCache)
+	}
+	expectedSuffix := filepath.Join("tools", "kind", version, "bin", "kind")
+	if !strings.HasSuffix(cmdPath, expectedSuffix) {
+		t.Errorf("expected kind command path %q to end with %q", cmdPath, expectedSuffix)
+	}
+}
 
 func TestNewHarness(t *testing.T) {
 	if os.Getenv("RUN_E2E") == "" {

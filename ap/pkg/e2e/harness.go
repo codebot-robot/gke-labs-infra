@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 )
 
 // Options specifies configuration for the test harness.
@@ -47,6 +48,7 @@ type Harness struct {
 	clusterName string
 	namespace   string
 	skipCleanup bool
+	kindBin     string
 }
 
 // NewHarness creates a new e2e test harness.
@@ -66,25 +68,49 @@ func NewHarness(t *testing.T, opts ...Options) *Harness {
 		skipCleanup: opt.SkipCleanup || os.Getenv("SKIP_CLEANUP") != "",
 	}
 
+	h.ensureKind()
 	h.setupCluster(opt.SkipClusterCreation)
 	h.setupNamespace()
 
 	return h
 }
 
+// KindCommand returns the path to the kind executable used by the harness.
+func (h *Harness) KindCommand() string {
+	if h.kindBin == "" {
+		h.ensureKind()
+	}
+	return h.kindBin
+}
+
+// KindBin returns the path to the kind executable used by the harness.
+func (h *Harness) KindBin() string {
+	return h.KindCommand()
+}
+
+func (h *Harness) ensureKind() {
+	h.t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		h.t.Fatalf("failed to get current working directory: %v", err)
+	}
+	repoRoot := findRepoRoot(dir)
+	bin, err := kind.EnsureKindForRepo(h.t.Context(), repoRoot)
+	if err != nil {
+		h.t.Fatalf("failed to prepare kind tool: %v", err)
+	}
+	h.kindBin = bin
+}
+
 func (h *Harness) setupCluster(skipCreation bool) {
 	h.t.Helper()
-	// Check if kind is installed
-	if _, err := exec.LookPath("kind"); err != nil {
-		h.t.Fatalf("kind not found in PATH: %v", err)
-	}
 	// Check if kubectl is installed
 	if _, err := exec.LookPath("kubectl"); err != nil {
 		h.t.Fatalf("kubectl not found in PATH: %v", err)
 	}
 
 	if !skipCreation {
-		clusters := h.runCmd("kind", "get", "clusters")
+		clusters := h.runCmd(h.KindCommand(), "get", "clusters")
 		exists := false
 		for _, cluster := range strings.Split(clusters, "\n") {
 			if strings.TrimSpace(cluster) == h.clusterName {
@@ -95,7 +121,7 @@ func (h *Harness) setupCluster(skipCreation bool) {
 
 		if !exists {
 			h.t.Logf("Creating kind cluster %s", h.clusterName)
-			h.runCmd("kind", "create", "cluster", "--name", h.clusterName)
+			h.runCmd(h.KindCommand(), "create", "cluster", "--name", h.clusterName)
 		}
 	}
 
@@ -178,7 +204,7 @@ func (h *Harness) DockerBuild(tag, dockerfile, context string) {
 func (h *Harness) KindLoad(tag string) {
 	h.t.Helper()
 	h.t.Logf("Loading image %s into kind cluster %s", tag, h.clusterName)
-	h.runCmd("kind", "load", "docker-image", tag, "--name", h.clusterName)
+	h.runCmd(h.KindCommand(), "load", "docker-image", tag, "--name", h.clusterName)
 }
 
 // SetupRegistry deploys an in-cluster registry and waits for it to be ready.
@@ -201,6 +227,21 @@ func (h *Harness) RunCmd(name string, args ...string) string {
 	return h.runCmd(name, args...)
 }
 
+func findRepoRoot(startDir string) string {
+	dir := startDir
+	for {
+		hasGit, err := fileutils.FileExists(filepath.Join(dir, ".git"))
+		if err == nil && hasGit {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
+
 // FindRepoRoot finds the root of the git repository.
 func (h *Harness) FindRepoRoot() string {
 	h.t.Helper()
@@ -208,20 +249,11 @@ func (h *Harness) FindRepoRoot() string {
 	if err != nil {
 		h.t.Fatalf("failed to get current working directory: %v", err)
 	}
-	for {
-		hasGit, err := fileutils.FileExists(filepath.Join(dir, ".git"))
-		if err != nil {
-			h.t.Fatalf("failed to check for .git in %s: %v", dir, err)
-		}
-		if hasGit {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			h.t.Fatalf("failed to find repo root")
-		}
-		dir = parent
+	root := findRepoRoot(dir)
+	if root == "" {
+		h.t.Fatalf("failed to find repo root")
 	}
+	return root
 }
 
 func (h *Harness) runCmd(name string, args ...string) string {
