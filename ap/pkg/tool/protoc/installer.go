@@ -15,28 +15,19 @@
 package protoc
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"math"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/fetch"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/github"
 	"k8s.io/klog/v2"
 )
 
@@ -112,18 +103,8 @@ func ResolveProtocAsset(version, goos, goarch string) (string, error) {
 	}
 }
 
-type githubRelease struct {
-	TagName    string        `json:"tag_name"`
-	Draft      bool          `json:"draft"`
-	Prerelease bool          `json:"prerelease"`
-	Assets     []githubAsset `json:"assets"`
-}
-
-type githubAsset struct {
-	Name               string `json:"name"`
-	BrowserDownloadURL string `json:"browser_download_url"`
-	Digest             string `json:"digest"`
-}
+type githubRelease = github.Release
+type githubAsset = github.Asset
 
 // EnsureProtoc ensures that protoc is downloaded, verified against the release digest (if available),
 // extracted into the cache directory, and executable.
@@ -235,7 +216,7 @@ func resolveProtocRelease(ctx context.Context, version string) (resolvedVer, dow
 	}
 
 	// On a miss: warn and resolve from GitHub API
-	klog.Warningf("protoc %s is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-protoc-versions' to add it", requestedVer)
+	klog.Warningf("protoc %s is not in versions.yaml; resolving it from the GitHub API, which is rate limited; run 'ap tool update-versions' to add it", requestedVer)
 	return resolvePinnedProtocRelease(ctx, requestedVer)
 }
 
@@ -361,7 +342,7 @@ func EnsurePlugin(ctx context.Context, pluginName, requestedVer string, cfgPlugi
 	} else if yamlVer, ok := PluginVersion(normalizedName); ok {
 		targetVer = yamlVer
 	} else {
-		klog.Warningf("plugin %s is not in versions.yaml; resolving @latest via go install; run 'ap tool update-protoc-versions' to pin it", normalizedName)
+		klog.Warningf("plugin %s is not in versions.yaml; resolving @latest via go install; run 'ap tool update-versions' to pin it", normalizedName)
 		targetVer = "latest"
 	}
 
@@ -465,323 +446,17 @@ func readPluginVersion(ctx context.Context, binPath string) (string, error) {
 	return "", fmt.Errorf("module version not found in build info")
 }
 
-func newGitHubRequest(ctx context.Context, url string) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-
-	token := os.Getenv("GITHUB_TOKEN")
-	if token == "" {
-		token = os.Getenv("GH_TOKEN")
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	return req, nil
-}
-
 // RateLimitError represents a rate limit failure from GitHub API.
-type RateLimitError struct {
-	msg string
-}
-
-func (e *RateLimitError) Error() string {
-	return e.msg
-}
+type RateLimitError = github.RateLimitError
 
 func isRateLimitError(err error) bool {
-	var rle *RateLimitError
-	return errors.As(err, &rle)
-}
-
-func closeResponseBody(resp *http.Response) {
-	if resp != nil && resp.Body != nil {
-		if err := resp.Body.Close(); err != nil {
-			klog.V(2).Infof("failed to close response body: %v", err)
-		}
-	}
-}
-
-var (
-	gitHubRetryBackoffs = []time.Duration{1 * time.Second, 2 * time.Second, 4 * time.Second}
-	nowFunc             = time.Now
-)
-
-func isRateLimitedResponse(resp *http.Response) bool {
-	if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusTooManyRequests {
-		return false
-	}
-	if strings.TrimSpace(resp.Header.Get("X-RateLimit-Remaining")) == "0" {
-		return true
-	}
-	if strings.TrimSpace(resp.Header.Get("Retry-After")) != "" {
-		return true
-	}
-	return false
-}
-
-func computeRateLimitWait(resp *http.Response) (wait time.Duration, resetIn time.Duration, resetTime time.Time) {
-	now := nowFunc()
-	if dateStr := resp.Header.Get("Date"); dateStr != "" {
-		serverTime, err := http.ParseTime(dateStr)
-		if err != nil {
-			klog.V(2).Infof("failed to parse Date header %q: %v", dateStr, err)
-		} else {
-			now = serverTime.UTC()
-		}
-	}
-
-	if resetStr := resp.Header.Get("X-RateLimit-Reset"); resetStr != "" {
-		if resetUnix, err := strconv.ParseInt(strings.TrimSpace(resetStr), 10, 64); err == nil && resetUnix > 0 {
-			resetTime = time.Unix(resetUnix, 0).UTC()
-		}
-	}
-
-	if retryAfterStr := strings.TrimSpace(resp.Header.Get("Retry-After")); retryAfterStr != "" {
-		if secs, err := strconv.Atoi(retryAfterStr); err == nil && secs >= 0 {
-			wait = time.Duration(secs) * time.Second
-			resetIn = wait
-			if resetTime.IsZero() {
-				resetTime = nowFunc().Add(wait)
-			}
-			return wait, resetIn, resetTime
-		}
-	}
-
-	if !resetTime.IsZero() {
-		diff := resetTime.Sub(now)
-		if diff < 0 {
-			diff = 0
-		}
-		resetIn = diff
-		wait = diff + 1*time.Second
-		return wait, resetIn, resetTime
-	}
-
-	return 0, 0, resetTime
-}
-
-func buildRateLimitError(resp *http.Response, reason string) error {
-	var resetInfo string
-	if reason != "" {
-		resetInfo = fmt.Sprintf(" (%s)", reason)
-	} else if resetStr := resp.Header.Get("X-RateLimit-Reset"); resetStr != "" {
-		if resetUnix, err := strconv.ParseInt(strings.TrimSpace(resetStr), 10, 64); err == nil && resetUnix > 0 {
-			resetTime := time.Unix(resetUnix, 0).UTC()
-			now := nowFunc()
-			if dateStr := resp.Header.Get("Date"); dateStr != "" {
-				serverTime, err := http.ParseTime(dateStr)
-				if err != nil {
-					klog.V(2).Infof("failed to parse Date header %q: %v", dateStr, err)
-				} else {
-					now = serverTime.UTC()
-				}
-			}
-			diff := resetTime.Sub(now)
-			mins := int(math.Round(diff.Minutes()))
-			if mins < 0 {
-				mins = 0
-			}
-			resetInfo = fmt.Sprintf(" (resets at %s, in %dm)", resetTime.Format("15:04 UTC"), mins)
-		}
-	}
-	return &RateLimitError{
-		msg: fmt.Sprintf("GitHub API rate limit exceeded%s; pin a protoc version listed in ap/pkg/tool/protoc/versions.yaml, or set GITHUB_TOKEN for this one command", resetInfo),
-	}
-}
-
-type gitHubCacheEntry struct {
-	URL       string          `json:"url"`
-	ETag      string          `json:"etag"`
-	FetchedAt string          `json:"fetched_at"`
-	Status    int             `json:"status"`
-	Body      json.RawMessage `json:"body"`
-}
-
-func (e *gitHubCacheEntry) bodyBytes() []byte {
-	return []byte(e.Body)
-}
-
-func gitHubCachePath(rawURL string) (string, error) {
-	cacheDir, err := fileutils.CacheDir()
-	if err != nil {
-		return "", err
-	}
-	hash := sha256.Sum256([]byte(rawURL))
-	key := hex.EncodeToString(hash[:])
-	return filepath.Join(cacheDir, "github", key+".json"), nil
-}
-
-func readGitHubCacheEntry(rawURL string) (*gitHubCacheEntry, string, error) {
-	cachePath, err := gitHubCachePath(rawURL)
-	if err != nil {
-		return nil, "", err
-	}
-	data, err := os.ReadFile(cachePath)
-	if err != nil {
-		return nil, cachePath, err
-	}
-	var entry gitHubCacheEntry
-	if err := json.Unmarshal(data, &entry); err != nil {
-		return nil, cachePath, err
-	}
-	if entry.ETag == "" || entry.Status != http.StatusOK {
-		return nil, cachePath, nil
-	}
-	return &entry, cachePath, nil
-}
-
-func writeGitHubCacheEntry(cachePath, rawURL, etag string, body []byte) error {
-	entry := gitHubCacheEntry{
-		URL:       rawURL,
-		ETag:      etag,
-		FetchedAt: nowFunc().UTC().Format(time.RFC3339),
-		Status:    http.StatusOK,
-		Body:      json.RawMessage(body),
-	}
-	data, err := json.Marshal(entry)
-	if err != nil {
-		return fmt.Errorf("failed to marshal cache entry: %w", err)
-	}
-	if err := fileutils.WriteFileAtomic(cachePath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write cache file %s: %w", cachePath, err)
-	}
-	return nil
-}
-
-func doGitHubRequest(ctx context.Context, req *http.Request) (*http.Response, error) {
-	isGet := req.Method == http.MethodGet || req.Method == ""
-	var cachePath string
-	var cachedEntry *gitHubCacheEntry
-
-	reqClone := req.Clone(ctx)
-
-	if isGet && req.URL != nil && req.URL.String() != "" {
-		entry, p, err := readGitHubCacheEntry(req.URL.String())
-		cachePath = p
-		if err != nil {
-			klog.V(2).Infof("cache lookup for %s: %v", req.URL.String(), err)
-		} else if entry != nil {
-			cachedEntry = entry
-			if reqClone.Header.Get("If-None-Match") == "" {
-				reqClone.Header.Set("If-None-Match", entry.ETag)
-			}
-		}
-	}
-
-	client := scoped.HTTPClient(ctx)
-	for attempt := 0; ; attempt++ {
-		resp, err := client.Do(reqClone.Clone(ctx))
-
-		rateLimited := err == nil && isRateLimitedResponse(resp)
-		transient := err != nil || (resp != nil && resp.StatusCode >= 500)
-
-		if !rateLimited && !transient {
-			if err != nil {
-				return nil, err
-			}
-			if isGet && resp.StatusCode == http.StatusNotModified && cachedEntry != nil {
-				closeResponseBody(resp)
-				resp.StatusCode = http.StatusOK
-				resp.Status = "200 OK"
-				resp.Body = io.NopCloser(bytes.NewReader(cachedEntry.bodyBytes()))
-				if resp.Header.Get("Content-Type") == "" {
-					resp.Header.Set("Content-Type", "application/json")
-				}
-				return resp, nil
-			}
-			if isGet && cachePath != "" && resp.StatusCode == http.StatusOK {
-				etag := strings.TrimSpace(resp.Header.Get("ETag"))
-				if etag != "" {
-					body, readErr := io.ReadAll(resp.Body)
-					closeResponseBody(resp)
-					if readErr != nil {
-						return nil, fmt.Errorf("failed to read response body: %w", readErr)
-					}
-					resp.Body = io.NopCloser(bytes.NewReader(body))
-
-					if err := writeGitHubCacheEntry(cachePath, req.URL.String(), etag, body); err != nil {
-						klog.V(2).Infof("failed to write github cache: %v", err)
-					}
-				}
-			}
-			return resp, nil
-		}
-
-		if attempt == len(gitHubRetryBackoffs) {
-			if rateLimited {
-				closeResponseBody(resp)
-				return nil, buildRateLimitError(resp, "")
-			}
-			return resp, err
-		}
-
-		var wait time.Duration
-		if rateLimited {
-			var resetIn time.Duration
-			var resetTime time.Time
-			wait, resetIn, resetTime = computeRateLimitWait(resp)
-			if wait == 0 {
-				closeResponseBody(resp)
-				return nil, buildRateLimitError(resp, "")
-			}
-			if deadline, hasDeadline := ctx.Deadline(); hasDeadline && time.Now().Add(wait).After(deadline) {
-				closeResponseBody(resp)
-				remain := time.Until(deadline)
-				if remain < 0 {
-					remain = 0
-				}
-				remainStr := remain.Round(time.Second).String()
-				if remain < time.Second {
-					remainStr = remain.Round(time.Millisecond).String()
-				}
-				reason := fmt.Sprintf("resets in %s, but only %s remain before the deadline", resetIn.Round(time.Second), remainStr)
-				return nil, buildRateLimitError(resp, reason)
-			}
-			klog.Warningf("GitHub API rate limited; waiting %s until %s before retrying", wait, resetTime)
-		} else {
-			wait = gitHubRetryBackoffs[attempt]
-		}
-
-		closeResponseBody(resp)
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(wait):
-		}
-	}
+	return github.IsRateLimitError(err)
 }
 
 func fetchGitHubRelease(ctx context.Context, url string) (*githubRelease, error) {
-	req, err := newGitHubRequest(ctx, url)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := doGitHubRequest(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	defer closeResponseBody(resp)
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s returned status %s", url, resp.Status)
-	}
-
-	var rel githubRelease
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
-		return nil, fmt.Errorf("failed to decode GitHub release response: %w", err)
-	}
-	return &rel, nil
+	return github.FetchRelease(ctx, url)
 }
 
 func findAsset(assets []githubAsset, name string) (githubAsset, bool) {
-	for _, a := range assets {
-		if a.Name == name {
-			return a, true
-		}
-	}
-	return githubAsset{}, false
+	return github.FindAsset(assets, name)
 }

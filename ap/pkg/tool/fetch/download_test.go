@@ -81,3 +81,23 @@ func TestDownload_HTTPError(t *testing.T) {
 		t.Fatal("expected HTTP error, got nil")
 	}
 }
+
+func TestDigest(t *testing.T) {
+	content := []byte("digest test content")
+	hasher := sha256.New()
+	hasher.Write(content)
+	expectedDigest := "sha256:" + hex.EncodeToString(hasher.Sum(nil))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(content)
+	}))
+	defer server.Close()
+
+	d, err := Digest(t.Context(), server.URL)
+	if err != nil {
+		t.Fatalf("Digest failed: %v", err)
+	}
+	if d != expectedDigest {
+		t.Errorf("got digest %q, want %q", d, expectedDigest)
+	}
+}
