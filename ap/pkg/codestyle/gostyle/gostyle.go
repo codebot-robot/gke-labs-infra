@@ -19,18 +19,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
-	"sort"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/cache"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"k8s.io/klog/v2"
 )
@@ -64,6 +60,14 @@ func Run(ctx context.Context, r *repo.Repo, repoRoot string, files []string) err
 	cfg, err := config.Load(repoRoot)
 	if err != nil {
 		return err
+	}
+
+	if r == nil {
+		var openErr error
+		r, openErr = repo.Open(repoRoot, repo.WithSkip(cfg.Skip...))
+		if openErr != nil {
+			return openErr
+		}
 	}
 
 	if cfg.IsGofmtEnabled() {
@@ -106,7 +110,7 @@ func runGofmt(ctx context.Context, r *repo.Repo, repoRoot string, files []string
 				dirtyFiles = append(dirtyFiles, f)
 				continue
 			}
-			if !cm.IsGofmtDone(meta.Hash) {
+			if !cm.IsDone("gofmt", meta.Hash) {
 				dirtyFiles = append(dirtyFiles, f)
 			}
 		}
@@ -140,14 +144,17 @@ func runGofmt(ctx context.Context, r *repo.Repo, repoRoot string, files []string
 	}
 
 	// Update cache for processed files
-	if cm != nil {
-		for _, f := range dirtyFiles {
+	for _, f := range dirtyFiles {
+		if file := r.File(f); file != nil {
+			file.Refresh()
+		}
+		if cm != nil {
 			// Re-check metadata. gofmt might have changed it.
 			meta, err := cm.GetOrUpdateMetadata(f)
 			if err != nil {
 				continue
 			}
-			cm.MarkGofmtDone(meta.Hash)
+			cm.MarkDone("gofmt", meta.Hash)
 		}
 	}
 
@@ -158,34 +165,47 @@ func runGoModTidy(ctx context.Context, r *repo.Repo, repoRoot string, files []st
 	log := klog.FromContext(ctx)
 
 	ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
-	candidateModules := findCandidateModules(r, repoRoot)
+	expandedFiles, err := walker.ExpandPaths(r, repoRoot, files, ignoreList)
+	if err != nil {
+		return err
+	}
 
-	for _, modDir := range candidateModules {
+	inScopeModules := make(map[string]bool)
+	for _, f := range expandedFiles {
+		if mod := r.ModuleFor(f); mod != "" {
+			inScopeModules[mod] = true
+		}
+	}
+
+	for _, modDir := range r.Modules() {
+		if !inScopeModules[modDir] {
+			continue
+		}
+
 		relMod, err := filepath.Rel(repoRoot, modDir)
 		if err != nil {
 			continue
 		}
-		relSlash := filepath.ToSlash(relMod)
-		if relSlash != "." {
-			if ignoreList.ShouldIgnore(relSlash, true) || ignoreList.ShouldIgnore(filepath.ToSlash(filepath.Join(relMod, "go.mod")), false) {
-				continue
+
+		goFiles := r.Under(modDir).Files(func(f *repo.File) bool {
+			if !strings.HasSuffix(f.Name, ".go") || f.Module() != modDir {
+				return false
 			}
+			rel, err := filepath.Rel(repoRoot, f.Path)
+			if err != nil {
+				return false
+			}
+			return !ignoreList.ShouldIgnore(filepath.ToSlash(rel), false)
+		})
+
+		key, err := computeModuleKey(modDir, r, goFiles)
+		if err != nil {
+			return err
 		}
 
-		if !isModuleInScope(modDir, files, repoRoot, r) {
+		if cm != nil && cm.IsDone("tidy", key) {
+			log.V(2).Info("Module is tidy (cached)", "module", relMod)
 			continue
-		}
-
-		goFiles := getModuleGoFiles(r, modDir, repoRoot, ignoreList)
-
-		// Check cache for unchanged module
-		if cm != nil {
-			if hash, ok := computeModuleHash(cm, modDir, repoRoot, goFiles); ok {
-				if cm.IsTidyDone(hash) {
-					log.V(2).Info("Module is tidy (cached)", "module", relMod)
-					continue
-				}
-			}
 		}
 
 		log.Info("Running go mod tidy", "module", relMod)
@@ -199,225 +219,57 @@ func runGoModTidy(ctx context.Context, r *repo.Repo, repoRoot string, files []st
 			return err
 		}
 
-		// Update cache after successful tidy
+		goModPath := filepath.Join(modDir, "go.mod")
+		goSumPath := filepath.Join(modDir, "go.sum")
+		if f := r.File(goModPath); f != nil {
+			f.Refresh()
+		}
+		if f := r.File(goSumPath); f != nil {
+			f.Refresh()
+		} else {
+			r.TrackFile(goSumPath)
+		}
+
 		if cm != nil {
-			goModPath := filepath.Join(modDir, "go.mod")
-			goSumPath := filepath.Join(modDir, "go.sum")
-			if r != nil {
-				if f := r.File(goModPath); f != nil {
-					f.Refresh()
-				}
-				if f := r.File(goSumPath); f != nil {
-					f.Refresh()
-				}
-			}
-
-			// Refresh metadata for go.mod and go.sum
-			if _, err := cm.GetOrUpdateMetadata(goModPath); err != nil {
-				log.V(2).Info("failed to update metadata for go.mod", "error", err)
-			}
-			exists, err := fileutils.FileExists(goSumPath)
+			postKey, err := computeModuleKey(modDir, r, goFiles)
 			if err != nil {
-				log.V(2).Info("failed to check go.sum existence", "error", err)
-			} else if exists {
-				if _, err := cm.GetOrUpdateMetadata(goSumPath); err != nil {
-					log.V(2).Info("failed to update metadata for go.sum", "error", err)
-				}
+				return err
 			}
-
-			if postHash, ok := computeModuleHash(cm, modDir, repoRoot, goFiles); ok {
-				cm.MarkTidyDone(postHash)
-			}
+			cm.MarkDone("tidy", postKey)
 		}
 	}
 
 	return nil
 }
 
-func findCandidateModules(r *repo.Repo, repoRoot string) []string {
-	seen := make(map[string]bool)
-	var modules []string
-
-	if r != nil {
-		for _, m := range r.Modules() {
-			cleanM := filepath.Clean(m)
-			rel, err := filepath.Rel(repoRoot, cleanM)
-			if err == nil && !strings.HasPrefix(rel, "..") {
-				if !seen[cleanM] {
-					seen[cleanM] = true
-					modules = append(modules, cleanM)
-				}
-			}
-		}
-	}
-
-	cleanRoot := filepath.Clean(repoRoot)
-	if !seen[cleanRoot] {
-		exists, err := fileutils.FileExists(filepath.Join(cleanRoot, "go.mod"))
-		if err != nil {
-			klog.V(2).Infof("failed to check go.mod in %s: %v", cleanRoot, err)
-		} else if exists {
-			seen[cleanRoot] = true
-			modules = append(modules, cleanRoot)
-		}
-	}
-
-	if r == nil {
-		if err := filepath.WalkDir(cleanRoot, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if !d.IsDir() && d.Name() == "go.mod" {
-				dir := filepath.Dir(path)
-				if !seen[dir] {
-					seen[dir] = true
-					modules = append(modules, dir)
-				}
-			}
-			return nil
-		}); err != nil {
-			klog.V(2).Infof("failed to walk candidate modules in %s: %v", cleanRoot, err)
-		}
-	}
-
-	sort.Strings(modules)
-	return modules
-}
-
-func isModuleInScope(modDir string, files []string, repoRoot string, r *repo.Repo) bool {
-	if len(files) == 0 {
-		return true
-	}
-	cleanModDir := filepath.Clean(modDir)
-	for _, f := range files {
-		absF := f
-		if !filepath.IsAbs(absF) {
-			absF = filepath.Join(repoRoot, f)
-		}
-		absF = filepath.Clean(absF)
-
-		if absF == cleanModDir || strings.HasPrefix(cleanModDir, absF+string(filepath.Separator)) {
-			return true
-		}
-		if r != nil {
-			if r.ModuleFor(absF) == cleanModDir {
-				return true
-			}
-		} else {
-			if strings.HasPrefix(absF, cleanModDir+string(filepath.Separator)) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func getModuleGoFiles(r *repo.Repo, modDir, repoRoot string, ignoreList *walker.IgnoreList) []string {
-	var goFiles []string
-	cleanModDir := filepath.Clean(modDir)
-
-	if r != nil {
-		for _, f := range r.Under(cleanModDir).Files() {
-			if strings.HasSuffix(f.Name, ".go") && f.Module() == cleanModDir {
-				relF, err := filepath.Rel(repoRoot, f.Path)
-				if err == nil && !ignoreList.ShouldIgnore(filepath.ToSlash(relF), false) {
-					goFiles = append(goFiles, f.Path)
-				}
-			}
-		}
-	}
-
-	if len(goFiles) == 0 {
-		if err := filepath.WalkDir(cleanModDir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				if path != cleanModDir {
-					exists, err := fileutils.FileExists(filepath.Join(path, "go.mod"))
-					if err != nil {
-						return err
-					}
-					if exists {
-						return filepath.SkipDir
-					}
-				}
-				relD, err := filepath.Rel(repoRoot, path)
-				if err != nil {
-					return err
-				}
-				if ignoreList.ShouldIgnore(filepath.ToSlash(relD), true) {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if strings.HasSuffix(d.Name(), ".go") {
-				relF, err := filepath.Rel(repoRoot, path)
-				if err != nil {
-					return err
-				}
-				if !ignoreList.ShouldIgnore(filepath.ToSlash(relF), false) {
-					goFiles = append(goFiles, path)
-				}
-			}
-			return nil
-		}); err != nil {
-			klog.V(2).Infof("failed to walk module go files in %s: %v", cleanModDir, err)
-		}
-	}
-
-	sort.Strings(goFiles)
-	return slices.Compact(goFiles)
-}
-
-func computeModuleHash(cm *cache.Manager, modDir, repoRoot string, goFiles []string) (string, bool) {
-	if cm == nil {
-		return "", false
-	}
-
-	goModPath := filepath.Join(modDir, "go.mod")
-	modMeta, err := cm.GetOrUpdateMetadata(goModPath)
-	if err != nil {
-		return "", false
-	}
-
-	var sumMeta *cache.FileMetadata
-	goSumPath := filepath.Join(modDir, "go.sum")
-	exists, err := fileutils.FileExists(goSumPath)
-	if err != nil {
-		return "", false
-	}
-	if exists {
-		sumMeta, err = cm.GetOrUpdateMetadata(goSumPath)
-		if err != nil {
-			return "", false
-		}
-	}
-
+func computeModuleKey(modDir string, r *repo.Repo, goFiles []*repo.File) (string, error) {
 	h := sha256.New()
-	relMod, err := filepath.Rel(repoRoot, modDir)
-	if err != nil {
-		return "", false
-	}
-	h.Write([]byte(filepath.ToSlash(relMod) + "\n"))
-	h.Write([]byte("go.mod:" + modMeta.Hash + "\n"))
-	if sumMeta != nil {
-		h.Write([]byte("go.sum:" + sumMeta.Hash + "\n"))
-	} else {
-		h.Write([]byte("go.sum:none\n"))
-	}
-
-	for _, gf := range goFiles {
-		meta, err := cm.GetOrUpdateMetadata(gf)
+	if f := r.File(filepath.Join(modDir, "go.mod")); f != nil {
+		hash, err := f.Hash()
 		if err != nil {
-			return "", false
+			return "", err
 		}
-		rel, err := filepath.Rel(modDir, gf)
-		if err != nil {
-			return "", false
-		}
-		h.Write([]byte(filepath.ToSlash(rel) + ":" + meta.Hash + "\n"))
+		h.Write([]byte("go.mod:" + hash + "\n"))
 	}
-
-	return hex.EncodeToString(h.Sum(nil)), true
+	if f := r.File(filepath.Join(modDir, "go.sum")); f != nil {
+		hash, err := f.Hash()
+		if err != nil && !os.IsNotExist(err) {
+			return "", err
+		}
+		if err == nil {
+			h.Write([]byte("go.sum:" + hash + "\n"))
+		}
+	}
+	for _, f := range goFiles {
+		hash, err := f.Hash()
+		if err != nil {
+			return "", err
+		}
+		rel, err := filepath.Rel(modDir, f.Path)
+		if err != nil {
+			return "", err
+		}
+		h.Write([]byte(filepath.ToSlash(rel) + ":" + hash + "\n"))
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }

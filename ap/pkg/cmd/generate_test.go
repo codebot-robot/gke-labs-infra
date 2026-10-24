@@ -176,12 +176,24 @@ func TestRunGenerate_UntidyGoMod(t *testing.T) {
 	}
 }
 
+func gitEnv() []string {
+	var env []string
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "GIT_CONFIG_") {
+			env = append(env, e)
+		}
+	}
+	return env
+}
+
 func TestRunGenerate_VerifyReportsUntidyGoMod(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "")
 	tempDir := t.TempDir()
 
 	// Initialize git repo
 	cmd := exec.Command("git", "init")
 	cmd.Dir = tempDir
+	cmd.Env = gitEnv()
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("git init failed: %v", err)
 	}
@@ -191,6 +203,7 @@ func TestRunGenerate_VerifyReportsUntidyGoMod(t *testing.T) {
 	} {
 		c := exec.Command("git", args...)
 		c.Dir = tempDir
+		c.Env = gitEnv()
 		if err := c.Run(); err != nil {
 			t.Fatalf("git %v failed: %v", args, err)
 		}
@@ -219,11 +232,13 @@ func TestRunGenerate_VerifyReportsUntidyGoMod(t *testing.T) {
 	// Commit untidy go.mod
 	addCmd := exec.Command("git", "add", ".")
 	addCmd.Dir = tempDir
+	addCmd.Env = gitEnv()
 	if err := addCmd.Run(); err != nil {
 		t.Fatalf("git add failed: %v", err)
 	}
 	commitCmd := exec.Command("git", "commit", "-m", "initial commit with untidy go.mod")
 	commitCmd.Dir = tempDir
+	commitCmd.Env = gitEnv()
 	if err := commitCmd.Run(); err != nil {
 		t.Fatalf("git commit failed: %v", err)
 	}
