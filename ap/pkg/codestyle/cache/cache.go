@@ -31,13 +31,13 @@ import (
 )
 
 type Caches struct {
-	Metadata map[string]*FileMetadata   `json:"metadata"`
-	Done     map[string]map[string]bool `json:"done"`
+	Metadata map[string]*FileMetadata `json:"metadata"`
 }
 
 type Manager struct {
 	dir    string
 	caches *Caches
+	done   *DoneIndex
 	mu     sync.Mutex
 }
 
@@ -59,8 +59,8 @@ func NewManagerWithDir(dir string) (*Manager, error) {
 		dir: dir,
 		caches: &Caches{
 			Metadata: make(map[string]*FileMetadata),
-			Done:     make(map[string]map[string]bool),
 		},
+		done: NewDoneIndex(),
 	}
 	if err := m.load(); err != nil {
 		klog.Warningf("falling back to empty codestyle cache: %v", err)
@@ -68,8 +68,18 @@ func NewManagerWithDir(dir string) (*Manager, error) {
 	return m, nil
 }
 
+func removeLegacyFile(path string) {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		klog.V(2).Infof("failed to remove legacy cache file %s: %v", path, err)
+	}
+}
+
 func (m *Manager) load() error {
 	var errs []error
+
+	// Ignore and delete legacy JSON caches
+	removeLegacyFile(filepath.Join(m.dir, "done.json"))
+	removeLegacyFile(filepath.Join(m.dir, "gofmt.json"))
 
 	metaPath := filepath.Join(m.dir, "metadata.json")
 	if data, err := os.ReadFile(metaPath); err != nil {
@@ -82,18 +92,17 @@ func (m *Manager) load() error {
 		errs = append(errs, fmt.Errorf("failed to parse metadata cache %s: %w", metaPath, err))
 	}
 
-	donePath := filepath.Join(m.dir, "done.json")
-	if data, err := os.ReadFile(donePath); err != nil {
+	doneBinPath := filepath.Join(m.dir, "done.bin")
+	if data, err := os.ReadFile(doneBinPath); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			klog.Warningf("failed to read done cache %s: %v", donePath, err)
-			errs = append(errs, fmt.Errorf("failed to read done cache %s: %w", donePath, err))
+			klog.Warningf("failed to read done cache %s: %v", doneBinPath, err)
+			errs = append(errs, fmt.Errorf("failed to read done cache %s: %w", doneBinPath, err))
 		}
-	} else if err := json.Unmarshal(data, &m.caches.Done); err != nil {
-		klog.Warningf("failed to parse done cache %s: %v", donePath, err)
-		errs = append(errs, fmt.Errorf("failed to parse done cache %s: %w", donePath, err))
-	}
-	if m.caches.Done == nil {
-		m.caches.Done = make(map[string]map[string]bool)
+	} else if idx, err := LoadDone(data); err != nil {
+		klog.Warningf("failed to parse done cache %s: %v", doneBinPath, err)
+		errs = append(errs, fmt.Errorf("failed to parse done cache %s: %w", doneBinPath, err))
+	} else {
+		m.done = idx
 	}
 
 	return errors.Join(errs...)
@@ -103,21 +112,21 @@ func (m *Manager) Save() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Clean up legacy JSON caches
+	removeLegacyFile(filepath.Join(m.dir, "done.json"))
+	removeLegacyFile(filepath.Join(m.dir, "gofmt.json"))
+
 	metaPath := filepath.Join(m.dir, "metadata.json")
 	metaData, err := json.MarshalIndent(m.caches.Metadata, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(metaPath, metaData, 0644); err != nil {
+	if err := fileutils.WriteFileAtomic(metaPath, metaData, 0644); err != nil {
 		return err
 	}
 
-	donePath := filepath.Join(m.dir, "done.json")
-	doneData, err := json.MarshalIndent(m.caches.Done, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(donePath, doneData, 0644); err != nil {
+	doneBinPath := filepath.Join(m.dir, "done.bin")
+	if err := m.done.Save(doneBinPath); err != nil {
 		return err
 	}
 	return nil
@@ -154,26 +163,21 @@ func (m *Manager) GetOrUpdateMetadata(path string) (*FileMetadata, error) {
 func (m *Manager) IsDone(step, hash string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.caches.Done == nil {
+	if m.done == nil {
 		return false
 	}
-	stepMap := m.caches.Done[step]
-	if stepMap == nil {
-		return false
-	}
-	return stepMap[hash]
+	return m.done.IsDone(step, hash)
 }
 
 func (m *Manager) MarkDone(step, hash string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.caches.Done == nil {
-		m.caches.Done = make(map[string]map[string]bool)
+	if m.done == nil {
+		m.done = NewDoneIndex()
 	}
-	if m.caches.Done[step] == nil {
-		m.caches.Done[step] = make(map[string]bool)
+	if err := m.done.MarkDone(step, hash); err != nil {
+		klog.V(2).Infof("failed to mark done for step %s: %v", step, err)
 	}
-	m.caches.Done[step][hash] = true
 }
 
 func hashFile(path string) (retHash string, retErr error) {
