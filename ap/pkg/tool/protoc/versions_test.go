@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	toolversions "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/versions"
 	"gopkg.in/yaml.v3"
 )
 
@@ -54,7 +55,7 @@ func TestVersionsTableIntegrity(t *testing.T) {
 		if i > 0 {
 			prev := parsedVersions.Protoc[i-1].Version
 			curr := rel.Version
-			if compareVersions(prev, curr) <= 0 {
+			if toolversions.Compare(prev, curr) <= 0 {
 				t.Errorf("versions table is not sorted newest-first: %s is not newer than %s", prev, curr)
 			}
 		}
@@ -68,7 +69,7 @@ func TestVersionsTableIntegrity(t *testing.T) {
 	}
 }
 
-// TestUpdateVersionsFile tests that update-protoc-versions rewrites versions.yaml against a mock GitHub API
+// TestUpdateVersionsFile tests that update-versions rewrites versions.yaml against a mock GitHub API
 // and follows Link headers across multiple pages.
 func TestUpdateVersionsFile(t *testing.T) {
 	page1Releases := []githubRelease{
@@ -153,54 +154,6 @@ func TestUpdateVersionsFile(t *testing.T) {
 	}
 	if parsed.Plugins["protoc-gen-go"] == "" {
 		t.Errorf("expected protoc-gen-go plugin version, got empty")
-	}
-}
-
-func TestParseNextLink(t *testing.T) {
-	tests := []struct {
-		name   string
-		header string
-		want   string
-	}{
-		{
-			name:   "empty",
-			header: "",
-			want:   "",
-		},
-		{
-			name:   "single next link",
-			header: `<https://api.github.com/releases?page=2>; rel="next"`,
-			want:   "https://api.github.com/releases?page=2",
-		},
-		{
-			name:   "next and last links",
-			header: `<https://api.github.com/releases?page=2>; rel="next", <https://api.github.com/releases?page=5>; rel="last"`,
-			want:   "https://api.github.com/releases?page=2",
-		},
-		{
-			name:   "prev and first without next",
-			header: `<https://api.github.com/releases?page=1>; rel="prev", <https://api.github.com/releases?page=1>; rel="first"`,
-			want:   "",
-		},
-		{
-			name:   "unquoted rel",
-			header: `<https://api.github.com/releases?page=3>; rel=next`,
-			want:   "https://api.github.com/releases?page=3",
-		},
-		{
-			name:   "whitespace and extra parameters",
-			header: ` <https://api.github.com/releases?page=4> ; title="Next" ; rel = "next" `,
-			want:   "https://api.github.com/releases?page=4",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := parseNextLink(tc.header)
-			if got != tc.want {
-				t.Errorf("parseNextLink(%q) = %q, want %q", tc.header, got, tc.want)
-			}
-		})
 	}
 }
 

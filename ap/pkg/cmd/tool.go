@@ -15,6 +15,9 @@
 package cmd
 
 import (
+	"fmt"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/protoc"
 	"github.com/spf13/cobra"
 )
@@ -27,18 +30,31 @@ func BuildToolCommand(rootOpt *RootOptions) *cobra.Command {
 	}
 
 	cmd.AddCommand(BuildToolProtocCommand(rootOpt))
-	cmd.AddCommand(BuildToolUpdateProtocVersionsCommand(rootOpt))
 	cmd.AddCommand(BuildToolDockerCommand(rootOpt))
 	cmd.AddCommand(BuildToolDockerBuildxCommand(rootOpt))
+	cmd.AddCommand(BuildToolUpdateVersionsCommand(rootOpt))
 
 	return cmd
 }
 
-// BuildToolUpdateProtocVersionsCommand constructs the cobra command for "tool update-protoc-versions".
-func BuildToolUpdateProtocVersionsCommand(rootOpt *RootOptions) *cobra.Command {
-	return &cobra.Command{
-		Use:   "update-protoc-versions",
-		Short: "Update well-known protoc releases and plugin versions in versions.yaml",
+// ToolUpdateVersionsOptions holds flags for "tool update-versions".
+type ToolUpdateVersionsOptions struct {
+	Protoc bool
+	Docker bool
+	Buildx bool
+}
+
+// BuildToolUpdateVersionsCommand constructs the cobra command for "tool update-versions".
+func BuildToolUpdateVersionsCommand(rootOpt *RootOptions) *cobra.Command {
+	opts := ToolUpdateVersionsOptions{
+		Protoc: true,
+		Docker: true,
+		Buildx: true,
+	}
+
+	cmd := &cobra.Command{
+		Use:   "update-versions",
+		Short: "Update baked-in tool release versions and checksums in versions.yaml",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			repoRoot := rootOpt.RepoRoot
@@ -52,7 +68,29 @@ func BuildToolUpdateProtocVersionsCommand(rootOpt *RootOptions) *cobra.Command {
 					return err
 				}
 			}
-			return protoc.UpdateVersionsFile(cmd.Context(), repoRoot)
+
+			if opts.Protoc {
+				if err := protoc.Update(cmd.Context(), repoRoot); err != nil {
+					return fmt.Errorf("failed updating protoc versions: %w", err)
+				}
+			}
+
+			if opts.Docker || opts.Buildx {
+				if err := docker.Update(cmd.Context(), repoRoot, docker.UpdateOptions{
+					Docker: opts.Docker,
+					Buildx: opts.Buildx,
+				}); err != nil {
+					return fmt.Errorf("failed updating docker versions: %w", err)
+				}
+			}
+
+			return nil
 		},
 	}
+
+	cmd.Flags().BoolVar(&opts.Protoc, "protoc", true, "Update protoc and plugin versions in ap/pkg/tool/protoc/versions.yaml")
+	cmd.Flags().BoolVar(&opts.Docker, "docker", true, "Update Docker versions in ap/pkg/tool/docker/versions.yaml")
+	cmd.Flags().BoolVar(&opts.Buildx, "buildx", true, "Update Docker Buildx versions in ap/pkg/tool/docker/versions.yaml")
+
+	return cmd
 }

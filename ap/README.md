@@ -153,7 +153,7 @@ plugins:
 - `plugins`: Map of protobuf plugin names to pinned version tags (e.g. `protoc-gen-go: "v1.36.12"`).
 - Versions listed in `ap/pkg/tool/protoc/versions.yaml` resolve offline with SHA-256 asset digest verification without network round-trips to GitHub.
 - Any requested version not found in `versions.yaml` falls back to resolving dynamically from the GitHub API with a warning, which is subject to GitHub API rate limits.
-- Run `ap tool update-protoc-versions` to refresh the table of well-known protoc releases and plugin versions with their asset digests.
+- Run `ap tool update-versions` to refresh the table of well-known tool releases and plugin versions with their asset digests.
 
 ### docker.yaml
 
@@ -169,6 +169,10 @@ buildx: "0.38.1"
 - `buildx`: Pinned version of the `docker-buildx` binary (defaults to the newest version in `versions.yaml`, e.g. `"0.38.1"`).
 - Pinned binaries are downloaded and cached in `~/.cache/ap/tools/`.
 - `ap deploy` and `ap build` automatically use these pinned versions rather than whatever version happens to be on the system PATH.
+
+### Updating Tool Versions
+
+Run `ap tool update-versions` to refresh baked-in release tables (`ap/pkg/tool/protoc/versions.yaml` and `ap/pkg/tool/docker/versions.yaml`) with verified checksums. Flags allow skipping individual tools (all default to `true`): `--protoc`, `--docker`, and `--buildx` (e.g. `ap tool update-versions --docker=false` skips the slower Docker tarball downloads).
 
 ### ap.yaml
 
@@ -237,4 +241,4 @@ Commands:
 - `alpha`: Experimental commands (e.g. `alpha sandbox`)
 - `version`: Print version information
 - `tool protoc`: Run protoc with pinned binary and language plugins
-- `tool update-protoc-versions`: Update well-known protoc releases and plugin versions in versions.yaml
+- `tool update-versions`: Update baked-in tool release versions and checksums in versions.yaml (supports `--protoc`, `--docker`, `--buildx`)

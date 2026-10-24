@@ -15,8 +15,12 @@
 package docker
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	toolversions "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/versions"
 )
 
 func TestVersionsYAML_Structure(t *testing.T) {
@@ -100,5 +104,59 @@ func TestLookupBuildx(t *testing.T) {
 	_, okNone := LookupBuildx("v0.0.0-nonexistent")
 	if okNone {
 		t.Error("expected LookupBuildx for nonexistent version to return false")
+	}
+}
+
+func TestVersionsYAML_Sorted(t *testing.T) {
+	var prevDocker string
+	for i, rel := range parsedDockerReleases {
+		if i > 0 {
+			curr := rel.Version
+			if toolversions.Compare(prevDocker, curr) <= 0 {
+				t.Errorf("docker versions table is not sorted newest-first: %s is not newer than %s", prevDocker, curr)
+			}
+		}
+		prevDocker = rel.Version
+	}
+
+	var prevBuildx string
+	for i, rel := range parsedBuildxReleases {
+		if i > 0 {
+			curr := rel.Version
+			if toolversions.Compare(prevBuildx, curr) <= 0 {
+				t.Errorf("buildx versions table is not sorted newest-first: %s is not newer than %s", prevBuildx, curr)
+			}
+		}
+		prevBuildx = rel.Version
+	}
+}
+
+// TestNoGoGenerateDirective verifies that no //go:generate directive exists under
+// ap/pkg/tool/docker so that ap generate does not automatically run update-versions in CI.
+func TestNoGoGenerateDirective(t *testing.T) {
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() || !strings.HasSuffix(info.Name(), ".go") {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+
+		lines := strings.Split(string(content), "\n")
+		for lineNum, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "//go:generate") {
+				t.Errorf("%s:%d contains unexpected //go:generate directive: %s (update-versions must only be run manually or by scheduled jobs, never on every ap generate / CI run)", path, lineNum+1, trimmed)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to walk package directory: %v", err)
 	}
 }

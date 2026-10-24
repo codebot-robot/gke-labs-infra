@@ -94,3 +94,34 @@ func Download(ctx context.Context, downloadURL, expectedDigest, dir string) (str
 
 	return tmpName, nil
 }
+
+// Digest downloads from downloadURL, computes its SHA-256 hash without saving to disk,
+// and returns it in "sha256:<hex>" format.
+func Digest(ctx context.Context, downloadURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request for %s: %w", downloadURL, err)
+	}
+	req.Header.Set("User-Agent", "gke-labs-ap")
+
+	resp, err := scoped.HTTPClient(ctx).Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to download from %s: %w", downloadURL, err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			klog.V(2).Infof("failed to close response body: %v", closeErr)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download from %s: HTTP status %s", downloadURL, resp.Status)
+	}
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, resp.Body); err != nil {
+		return "", fmt.Errorf("failed computing digest for %s: %w", downloadURL, err)
+	}
+
+	return "sha256:" + hex.EncodeToString(hasher.Sum(nil)), nil
+}
