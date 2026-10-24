@@ -90,3 +90,37 @@ func TestLatest_Empty(t *testing.T) {
 		t.Errorf("expected nil for empty slice, got %v", got)
 	}
 }
+
+func TestCompare(t *testing.T) {
+	tests := []struct {
+		a, b string
+		want int
+	}{
+		{"29.9.2", "29.8.2", 1},
+		{"29.8.2", "29.9.2", -1},
+		{"29.9.2", "29.9.2", 0},
+		{"v29.9.2", "29.9.2", 0},
+		{"0.38.1", "0.21.1", 1},
+		{"36.2", "36.1", 1},
+		{"1.0.0", "1.0", 0},
+		{"1.2.3-rc1", "1.2.3", 0},
+	}
+	for _, tc := range tests {
+		got := Compare(tc.a, tc.b)
+		if got != tc.want {
+			t.Errorf("Compare(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+func TestSortNewestFirst(t *testing.T) {
+	rels := []Release{
+		{Version: "28.0.1"},
+		{Version: "29.9.2"},
+		{Version: "29.8.2"},
+	}
+	SortNewestFirst(rels)
+	if rels[0].Version != "29.9.2" || rels[1].Version != "29.8.2" || rels[2].Version != "28.0.1" {
+		t.Errorf("unexpected sort order: %v", rels)
+	}
+}

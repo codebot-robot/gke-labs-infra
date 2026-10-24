@@ -17,6 +17,8 @@ package versions
 import (
 	"bytes"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -72,4 +74,57 @@ func Lookup(releases []Release, version string) (*Release, bool) {
 		}
 	}
 	return nil, false
+}
+
+// Compare compares two semantic versions. It returns 1 if a > b, -1 if a < b, and 0 if a == b.
+func Compare(a, b string) int {
+	parts1 := parseVersionParts(a)
+	parts2 := parseVersionParts(b)
+
+	maxLen := len(parts1)
+	if len(parts2) > maxLen {
+		maxLen = len(parts2)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		p1 := 0
+		if i < len(parts1) {
+			p1 = parts1[i]
+		}
+		p2 := 0
+		if i < len(parts2) {
+			p2 = parts2[i]
+		}
+		if p1 != p2 {
+			if p1 > p2 {
+				return 1
+			}
+			return -1
+		}
+	}
+	return 0
+}
+
+func parseVersionParts(v string) []int {
+	v = strings.TrimPrefix(v, "v")
+	if idx := strings.IndexAny(v, "-+"); idx != -1 {
+		v = v[:idx]
+	}
+	rawParts := strings.Split(v, ".")
+	var parts []int
+	for _, p := range rawParts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			break
+		}
+		parts = append(parts, n)
+	}
+	return parts
+}
+
+// SortNewestFirst sorts releases by version, newest first.
+func SortNewestFirst(releases []Release) {
+	sort.Slice(releases, func(i, j int) bool {
+		return Compare(releases[i].Version, releases[j].Version) > 0
+	})
 }
