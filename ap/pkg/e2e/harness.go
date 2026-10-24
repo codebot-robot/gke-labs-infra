@@ -16,6 +16,7 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -200,11 +201,35 @@ func (h *Harness) DockerBuild(tag, dockerfile, context string) {
 	h.runCmd("docker", "build", "-t", tag, "-f", dockerfile, context)
 }
 
+// LoadImages loads docker images into the specified kind cluster using the given kind binary.
+func LoadImages(ctx context.Context, kindBin, cluster string, images []string) error {
+	if len(images) == 0 {
+		return nil
+	}
+	if kindBin == "" {
+		kindBin = "kind"
+	}
+	args := []string{"load", "docker-image"}
+	args = append(args, images...)
+	if cluster != "" {
+		args = append(args, "--name", cluster)
+	}
+	cmd := exec.CommandContext(ctx, kindBin, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, err)
+	}
+	return nil
+}
+
 // KindLoad loads a docker image into the kind cluster.
 func (h *Harness) KindLoad(tag string) {
 	h.t.Helper()
 	h.t.Logf("Loading image %s into kind cluster %s", tag, h.clusterName)
-	h.runCmd(h.KindCommand(), "load", "docker-image", tag, "--name", h.clusterName)
+	if err := LoadImages(h.t.Context(), h.KindCommand(), h.clusterName, []string{tag}); err != nil {
+		h.t.Fatalf("KindLoad failed: %v", err)
+	}
 }
 
 // SetupRegistry deploys an in-cluster registry and waits for it to be ready.

@@ -17,15 +17,19 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/e2e"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	toolKind "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 	"github.com/spf13/cobra"
 )
 
@@ -36,6 +40,8 @@ type DeployOptions struct {
 	BuildkitHost string
 	Namespace    string
 	Targets      []string
+
+	kindCluster string
 
 	plans []deployPlan
 }
@@ -284,12 +290,66 @@ func buildDeployPlans(r *repo.Repo, repoRoot, currentAPRoot string, targets []st
 	return plans, nil
 }
 
-// BuildDeployPlan constructs the task tree for deploying artifacts according to DeployOptions.
-func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string) ([]tasks.Task, error) {
-	return buildDeployTasks(r, opt.plans, !opt.SkipPush, buildkitHost, opt.Namespace)
+// ParseKindClusterFromContext extracts the kind cluster name if the context represents a kind cluster.
+// For example, "kind-foo" -> ("foo", true).
+func ParseKindClusterFromContext(contextName string) (string, bool) {
+	if cluster, ok := strings.CutPrefix(strings.TrimSpace(contextName), "kind-"); ok && cluster != "" {
+		return cluster, true
+	}
+	return "", false
 }
 
-func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string) ([]tasks.Task, error) {
+var execCommandContext = exec.CommandContext
+
+func getCurrentKubeContext(ctx context.Context) string {
+	cmd := execCommandContext(ctx, "kubectl", "config", "current-context")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// KindLoadTask loads docker images into a kind cluster using the tool-managed kind binary.
+type KindLoadTask struct {
+	RepoRoot    string
+	ClusterName string
+	Images      []string
+}
+
+func (t *KindLoadTask) Run(ctx context.Context, scope *tasks.APScope) error {
+	if len(t.Images) == 0 {
+		return nil
+	}
+	root := t.RepoRoot
+	if root == "" {
+		root = scope.RepoRoot
+	}
+	kindBin, err := toolKind.EnsureKindForRepo(ctx, root)
+	if err != nil {
+		return fmt.Errorf("failed to ensure kind tool: %w", err)
+	}
+	return e2e.LoadImages(ctx, kindBin, t.ClusterName, t.Images)
+}
+
+func (t *KindLoadTask) GetName() string {
+	if t.ClusterName != "" {
+		return fmt.Sprintf("kind-load (cluster: %s)", t.ClusterName)
+	}
+	return "kind-load"
+}
+
+func (t *KindLoadTask) GetChildren() []tasks.Task {
+	return nil
+}
+
+// BuildDeployPlan constructs the task tree for deploying artifacts according to DeployOptions.
+func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string) ([]tasks.Task, error) {
+	push := !opt.SkipPush && opt.kindCluster == ""
+	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, opt.kindCluster)
+}
+
+func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string, kindCluster string) ([]tasks.Task, error) {
 	var allTasks []tasks.Task
 
 	var originalNamespace string
@@ -311,6 +371,27 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 			return nil, fmt.Errorf("build failed during deploy for %s: %w", plan.apRoot, err)
 		}
 		group.Tasks = append(group.Tasks, buildTasks)
+
+		if kindCluster != "" && len(plan.imageNames) > 0 {
+			cfg, err := config.Load(plan.apRoot)
+			if err != nil {
+				return nil, err
+			}
+			imageRepo := cfg.ImageRepo()
+			tag := os.Getenv("IMAGE_TAG")
+			if tag == "" {
+				tag = "latest"
+			}
+			var fullImages []string
+			for _, img := range plan.imageNames {
+				fullImages = append(fullImages, images.FullImageName(imageRepo, img, tag))
+			}
+			group.Tasks = append(group.Tasks, &KindLoadTask{
+				RepoRoot:    plan.apRoot,
+				ClusterName: kindCluster,
+				Images:      fullImages,
+			})
+		}
 
 		deployTasks := k8s.DeployTasksForManifests(plan.manifests, k8s.DeployTaskOptions{
 			Namespace:         namespace,
@@ -352,6 +433,12 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 	}
 	if cfg.ImageRepo() == "" {
 		return fmt.Errorf("IMAGE_PREFIX is not set; it is required for deploy")
+	}
+
+	if cfg.ImageRepo() != "images.local" {
+		if cluster, ok := ParseKindClusterFromContext(getCurrentKubeContext(ctx)); ok {
+			opt.kindCluster = cluster
+		}
 	}
 
 	allTasks, err := BuildDeployPlan(opt, r, buildkitHost)

@@ -45,6 +45,10 @@ All generator outputs are written atomically. Generated files carry standard hea
 
 Running `ap generate --verify` (or `ap verify-generate`) perturbs each generated file and proves that its generator restores it to its clean state. In addition, `ap generate --audit-generated` (with `--strict`) audits the repository for generated files that lack a standard generated header.
 
+## Deployment
+
+The `ap deploy` command builds container images and applies Kubernetes manifests. When the current context is a kind cluster, `ap deploy` builds locally, loads images with `kind load docker-image`, and applies; set a non-`latest` `IMAGE_TAG` so pods use `imagePullPolicy: IfNotPresent`.
+
 ## Configuration Files
 
 The following files can be placed in the `.ap/` directory:
