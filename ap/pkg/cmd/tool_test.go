@@ -155,19 +155,23 @@ func TestToolProtoc_RealExecution(t *testing.T) {
 	}
 }
 
-func TestToolUpdateProtocVersions_Command(t *testing.T) {
+func TestToolUpdateVersions_Command(t *testing.T) {
 	rootCmd := BuildRootCommand()
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"tool", "update-protoc-versions", "--help"})
+	rootCmd.SetArgs([]string{"tool", "update-versions", "--help"})
 
 	err := rootCmd.ExecuteContext(t.Context())
 	if err != nil {
-		t.Fatalf("unexpected error running ap tool update-protoc-versions --help: %v", err)
+		t.Fatalf("unexpected error running ap tool update-versions --help: %v", err)
 	}
-	if !strings.Contains(buf.String(), "update-protoc-versions") {
-		t.Errorf("expected help output to mention update-protoc-versions, got: %s", buf.String())
+	out := buf.String()
+	if !strings.Contains(out, "update-versions") {
+		t.Errorf("expected help output to mention update-versions, got: %s", out)
+	}
+	if !strings.Contains(out, "--protoc") || !strings.Contains(out, "--docker") || !strings.Contains(out, "--buildx") {
+		t.Errorf("expected help output to mention --protoc, --docker, and --buildx flags, got: %s", out)
 	}
 }
 
