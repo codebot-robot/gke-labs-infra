@@ -15,6 +15,7 @@
 package cache
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
@@ -30,7 +31,7 @@ func makeHexHash(prefix byte, id uint64) string {
 	return hex.EncodeToString(raw[:])
 }
 
-// TestDoneIndex_HeaderRoundTrip tests header encoding and decoding, including adding a step.
+// TestDoneIndex_HeaderRoundTrip tests header encoding and decoding with the fixed 64-byte header.
 func TestDoneIndex_HeaderRoundTrip(t *testing.T) {
 	tmpDir := t.TempDir()
 	binPath := filepath.Join(tmpDir, "done.bin")
@@ -39,14 +40,14 @@ func TestDoneIndex_HeaderRoundTrip(t *testing.T) {
 	hash1 := makeHexHash(0x11, 1)
 	hash2 := makeHexHash(0x22, 2)
 
-	if err := idx.MarkDone("gofmt", hash1); err != nil {
-		t.Fatalf("MarkDone(gofmt) failed: %v", err)
+	if err := idx.MarkDone(StepGofmt, hash1); err != nil {
+		t.Fatalf("MarkDone(StepGofmt) failed: %v", err)
 	}
-	if err := idx.MarkDone("tidy", hash1); err != nil {
-		t.Fatalf("MarkDone(tidy) failed: %v", err)
+	if err := idx.MarkDone(StepTidy, hash1); err != nil {
+		t.Fatalf("MarkDone(StepTidy) failed: %v", err)
 	}
-	if err := idx.MarkDone("vet", hash2); err != nil {
-		t.Fatalf("MarkDone(vet) failed: %v", err)
+	if err := idx.MarkDone(StepGofmt, hash2); err != nil {
+		t.Fatalf("MarkDone(StepGofmt) failed: %v", err)
 	}
 
 	if err := idx.Save(binPath); err != nil {
@@ -58,63 +59,112 @@ func TestDoneIndex_HeaderRoundTrip(t *testing.T) {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
 
+	if len(data) != doneHeaderSize+2*int(doneRecordSize) {
+		t.Fatalf("unexpected file size: %d, expected %d", len(data), doneHeaderSize+2*int(doneRecordSize))
+	}
+
+	// Verify header layout
+	if !bytes.Equal(data[:8], doneMagic[:]) {
+		t.Errorf("magic mismatch: got %q, want %q", data[:8], doneMagic)
+	}
+	ver := binary.LittleEndian.Uint16(data[8:10])
+	if ver != doneVersion {
+		t.Errorf("version mismatch: got %d, want %d", ver, doneVersion)
+	}
+	recSize := binary.LittleEndian.Uint16(data[10:12])
+	if recSize != doneRecordSize {
+		t.Errorf("recordSize mismatch: got %d, want %d", recSize, doneRecordSize)
+	}
+	recCount := binary.LittleEndian.Uint32(data[12:16])
+	if recCount != 2 {
+		t.Errorf("recordCount mismatch: got %d, want 2", recCount)
+	}
+	// Zero padding in bytes 16..64
+	for i := 16; i < 64; i++ {
+		if data[i] != 0 {
+			t.Errorf("header padding at byte %d not zero: %d", i, data[i])
+			break
+		}
+	}
+
 	loaded, err := LoadDone(data)
 	if err != nil {
 		t.Fatalf("LoadDone failed: %v", err)
 	}
 
-	if loaded.stepCount != 3 {
-		t.Fatalf("expected stepCount 3, got %d", loaded.stepCount)
+	if !loaded.IsDone(StepGofmt, hash1) {
+		t.Errorf("expected IsDone(StepGofmt, hash1) to be true")
 	}
-	if string(loaded.stepNames[0]) != "gofmt" {
-		t.Errorf("step 0: expected 'gofmt', got %q", loaded.stepNames[0])
+	if !loaded.IsDone(StepTidy, hash1) {
+		t.Errorf("expected IsDone(StepTidy, hash1) to be true")
 	}
-	if string(loaded.stepNames[1]) != "tidy" {
-		t.Errorf("step 1: expected 'tidy', got %q", loaded.stepNames[1])
+	if !loaded.IsDone(StepGofmt, hash2) {
+		t.Errorf("expected IsDone(StepGofmt, hash2) to be true")
 	}
-	if string(loaded.stepNames[2]) != "vet" {
-		t.Errorf("step 2: expected 'vet', got %q", loaded.stepNames[2])
+	if loaded.IsDone(StepTidy, hash2) {
+		t.Errorf("expected IsDone(StepTidy, hash2) to be false")
+	}
+}
+
+// TestDoneIndex_TreatAsEmpty tests that invalid headers return errors in LoadDone
+// and are safely treated as empty caches in Manager.load() without failing.
+func TestDoneIndex_TreatAsEmpty(t *testing.T) {
+	testCases := []struct {
+		name string
+		data []byte
+	}{
+		{"too small", []byte("short")},
+		{"wrong magic", make([]byte, 64)},
+		{"wrong version", func() []byte {
+			b := make([]byte, 64)
+			copy(b[:8], doneMagic[:])
+			binary.LittleEndian.PutUint16(b[8:10], 99)
+			binary.LittleEndian.PutUint16(b[10:12], doneRecordSize)
+			return b
+		}()},
+		{"wrong record size", func() []byte {
+			b := make([]byte, 64)
+			copy(b[:8], doneMagic[:])
+			binary.LittleEndian.PutUint16(b[8:10], doneVersion)
+			binary.LittleEndian.PutUint16(b[10:12], 40)
+			return b
+		}()},
+		{"truncated records", func() []byte {
+			b := make([]byte, 64+10)
+			copy(b[:8], doneMagic[:])
+			binary.LittleEndian.PutUint16(b[8:10], doneVersion)
+			binary.LittleEndian.PutUint16(b[10:12], doneRecordSize)
+			binary.LittleEndian.PutUint32(b[12:16], 1) // expects 36 bytes, got 10
+			return b
+		}()},
 	}
 
-	if !loaded.IsDone("gofmt", hash1) {
-		t.Errorf("expected IsDone(gofmt, hash1) to be true")
-	}
-	if !loaded.IsDone("tidy", hash1) {
-		t.Errorf("expected IsDone(tidy, hash1) to be true")
-	}
-	if loaded.IsDone("vet", hash1) {
-		t.Errorf("expected IsDone(vet, hash1) to be false")
-	}
-	if !loaded.IsDone("vet", hash2) {
-		t.Errorf("expected IsDone(vet, hash2) to be true")
-	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadDone(tc.data)
+			if err == nil {
+				t.Errorf("expected LoadDone to fail for %s", tc.name)
+			}
 
-	// Add another step to existing cache
-	hash3 := makeHexHash(0x33, 3)
-	if err := loaded.MarkDone("custom-step", hash3); err != nil {
-		t.Fatalf("MarkDone(custom-step) failed: %v", err)
-	}
-	if err := loaded.Save(binPath); err != nil {
-		t.Fatalf("Save with added step failed: %v", err)
-	}
-
-	data2, err := os.ReadFile(binPath)
-	if err != nil {
-		t.Fatalf("ReadFile after added step failed: %v", err)
-	}
-	loaded2, err := LoadDone(data2)
-	if err != nil {
-		t.Fatalf("LoadDone after added step failed: %v", err)
-	}
-
-	if loaded2.stepCount != 4 {
-		t.Fatalf("expected stepCount 4, got %d", loaded2.stepCount)
-	}
-	if string(loaded2.stepNames[3]) != "custom-step" {
-		t.Errorf("step 3: expected 'custom-step', got %q", loaded2.stepNames[3])
-	}
-	if !loaded2.IsDone("custom-step", hash3) {
-		t.Errorf("expected IsDone(custom-step, hash3) to be true")
+			// In Manager.load(), corrupt done.bin must be treated as empty without error
+			tmpDir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(tmpDir, "done.bin"), tc.data, 0644); err != nil {
+				t.Fatal(err)
+			}
+			m := &Manager{
+				dir: tmpDir,
+				caches: &Caches{
+					Metadata: make(map[string]*FileMetadata),
+				},
+				done: NewDoneIndex(),
+			}
+			if err := m.load(); err != nil {
+				t.Fatalf("expected m.load() to succeed (treat as empty) for %s, got: %v", tc.name, err)
+			}
+			if m.done == nil || len(m.done.records) != 0 {
+				t.Errorf("expected empty done cache for %s", tc.name)
+			}
+		})
 	}
 }
 
@@ -129,10 +179,10 @@ func TestDoneIndex_MergePending(t *testing.T) {
 	hashC := makeHexHash(0x40, 3)
 
 	idx := NewDoneIndex()
-	if err := idx.MarkDone("gofmt", hashA); err != nil {
+	if err := idx.MarkDone(StepGofmt, hashA); err != nil {
 		t.Fatal(err)
 	}
-	if err := idx.MarkDone("gofmt", hashC); err != nil {
+	if err := idx.MarkDone(StepGofmt, hashC); err != nil {
 		t.Fatal(err)
 	}
 	if err := idx.Save(binPath); err != nil {
@@ -150,37 +200,37 @@ func TestDoneIndex_MergePending(t *testing.T) {
 
 	// Pending additions:
 	// hashStart: smaller than hashA (inserted at start)
-	// hashA: existing hash, new bit "tidy"
+	// hashA: existing hash, new bit StepTidy
 	// hashB: between hashA and hashC
 	// hashEnd: larger than hashC (inserted at end)
 	hashStart := makeHexHash(0x10, 0)
 	hashB := makeHexHash(0x30, 2)
 	hashEnd := makeHexHash(0x50, 4)
 
-	if err := loaded.MarkDone("tidy", hashStart); err != nil {
+	if err := loaded.MarkDone(StepTidy, hashStart); err != nil {
 		t.Fatal(err)
 	}
-	if err := loaded.MarkDone("tidy", hashA); err != nil {
+	if err := loaded.MarkDone(StepTidy, hashA); err != nil {
 		t.Fatal(err)
 	}
-	if err := loaded.MarkDone("gofmt", hashB); err != nil {
+	if err := loaded.MarkDone(StepGofmt, hashB); err != nil {
 		t.Fatal(err)
 	}
-	if err := loaded.MarkDone("tidy", hashEnd); err != nil {
+	if err := loaded.MarkDone(StepTidy, hashEnd); err != nil {
 		t.Fatal(err)
 	}
 
 	// Before save: pending lookups should succeed
-	if !loaded.IsDone("tidy", hashStart) {
+	if !loaded.IsDone(StepTidy, hashStart) {
 		t.Errorf("pending lookup hashStart failed")
 	}
-	if !loaded.IsDone("gofmt", hashA) || !loaded.IsDone("tidy", hashA) {
+	if !loaded.IsDone(StepGofmt, hashA) || !loaded.IsDone(StepTidy, hashA) {
 		t.Errorf("pending lookup hashA failed")
 	}
-	if !loaded.IsDone("gofmt", hashB) {
+	if !loaded.IsDone(StepGofmt, hashB) {
 		t.Errorf("pending lookup hashB failed")
 	}
-	if !loaded.IsDone("tidy", hashEnd) {
+	if !loaded.IsDone(StepTidy, hashEnd) {
 		t.Errorf("pending lookup hashEnd failed")
 	}
 
@@ -204,20 +254,20 @@ func TestDoneIndex_MergePending(t *testing.T) {
 	}
 
 	// Verify all records and flags
-	if !reloaded.IsDone("tidy", hashStart) || reloaded.IsDone("gofmt", hashStart) {
+	if !reloaded.IsDone(StepTidy, hashStart) || reloaded.IsDone(StepGofmt, hashStart) {
 		t.Errorf("hashStart flags incorrect")
 	}
-	// hashA has BOTH gofmt and tidy
-	if !reloaded.IsDone("gofmt", hashA) || !reloaded.IsDone("tidy", hashA) {
+	// hashA has BOTH StepGofmt and StepTidy
+	if !reloaded.IsDone(StepGofmt, hashA) || !reloaded.IsDone(StepTidy, hashA) {
 		t.Errorf("hashA expected both gofmt and tidy to be done")
 	}
-	if !reloaded.IsDone("gofmt", hashB) || reloaded.IsDone("tidy", hashB) {
+	if !reloaded.IsDone(StepGofmt, hashB) || reloaded.IsDone(StepTidy, hashB) {
 		t.Errorf("hashB flags incorrect")
 	}
-	if !reloaded.IsDone("gofmt", hashC) || reloaded.IsDone("tidy", hashC) {
+	if !reloaded.IsDone(StepGofmt, hashC) || reloaded.IsDone(StepTidy, hashC) {
 		t.Errorf("hashC flags incorrect")
 	}
-	if !reloaded.IsDone("tidy", hashEnd) || reloaded.IsDone("gofmt", hashEnd) {
+	if !reloaded.IsDone(StepTidy, hashEnd) || reloaded.IsDone(StepGofmt, hashEnd) {
 		t.Errorf("hashEnd flags incorrect")
 	}
 }
@@ -228,7 +278,7 @@ func TestDoneIndex_LookupHitMiss(t *testing.T) {
 	// Empty index
 	empty := NewDoneIndex()
 	dummyHash := makeHexHash(0x10, 1)
-	if empty.IsDone("gofmt", dummyHash) {
+	if empty.IsDone(StepGofmt, dummyHash) {
 		t.Errorf("expected empty index lookup to return false")
 	}
 
@@ -237,13 +287,13 @@ func TestDoneIndex_LookupHitMiss(t *testing.T) {
 	h3 := makeHexHash(0x40, 30)
 
 	idx := NewDoneIndex()
-	if err := idx.MarkDone("gofmt", h1); err != nil {
+	if err := idx.MarkDone(StepGofmt, h1); err != nil {
 		t.Fatal(err)
 	}
-	if err := idx.MarkDone("gofmt", h2); err != nil {
+	if err := idx.MarkDone(StepGofmt, h2); err != nil {
 		t.Fatal(err)
 	}
-	if err := idx.MarkDone("gofmt", h3); err != nil {
+	if err := idx.MarkDone(StepGofmt, h3); err != nil {
 		t.Fatal(err)
 	}
 
@@ -263,49 +313,49 @@ func TestDoneIndex_LookupHitMiss(t *testing.T) {
 	}
 
 	// Hit at start
-	if !loaded.IsDone("gofmt", h1) {
+	if !loaded.IsDone(StepGofmt, h1) {
 		t.Errorf("expected hit at start (h1)")
 	}
 	// Hit in middle
-	if !loaded.IsDone("gofmt", h2) {
+	if !loaded.IsDone(StepGofmt, h2) {
 		t.Errorf("expected hit in middle (h2)")
 	}
 	// Hit at end
-	if !loaded.IsDone("gofmt", h3) {
+	if !loaded.IsDone(StepGofmt, h3) {
 		t.Errorf("expected hit at end (h3)")
 	}
 
 	// Miss before start
 	hBefore := makeHexHash(0x10, 1)
-	if loaded.IsDone("gofmt", hBefore) {
+	if loaded.IsDone(StepGofmt, hBefore) {
 		t.Errorf("expected miss before start")
 	}
 	// Miss between h1 and h2
 	hBetween12 := makeHexHash(0x25, 15)
-	if loaded.IsDone("gofmt", hBetween12) {
+	if loaded.IsDone(StepGofmt, hBetween12) {
 		t.Errorf("expected miss between h1 and h2")
 	}
 	// Miss between h2 and h3
 	hBetween23 := makeHexHash(0x35, 25)
-	if loaded.IsDone("gofmt", hBetween23) {
+	if loaded.IsDone(StepGofmt, hBetween23) {
 		t.Errorf("expected miss between h2 and h3")
 	}
 	// Miss after end
 	hAfter := makeHexHash(0x50, 40)
-	if loaded.IsDone("gofmt", hAfter) {
+	if loaded.IsDone(StepGofmt, hAfter) {
 		t.Errorf("expected miss after end")
 	}
 
-	// Miss for unknown step
-	if loaded.IsDone("unknown-step", h2) {
+	// Miss for unknown step (> 31)
+	if loaded.IsDone(Step(99), h2) {
 		t.Errorf("expected miss for unknown step")
 	}
 
 	// Miss for invalid hash strings
-	if loaded.IsDone("gofmt", "short") {
+	if loaded.IsDone(StepGofmt, "short") {
 		t.Errorf("expected miss for short hash")
 	}
-	if loaded.IsDone("gofmt", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefZZ") {
+	if loaded.IsDone(StepGofmt, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdefZZ") {
 		t.Errorf("expected miss for invalid hex chars")
 	}
 }
@@ -327,12 +377,12 @@ func build100kTestData() (binData []byte, jsonData []byte, sampleHashes []string
 		sampleHashes[i] = hStr
 
 		// gofmt on all, tidy on even entries
-		if err := idx.MarkDone("gofmt", hStr); err != nil {
+		if err := idx.MarkDone(StepGofmt, hStr); err != nil {
 			return nil, nil, nil, err
 		}
 		doneJSON["gofmt"][hStr] = true
 		if i%2 == 0 {
-			if err := idx.MarkDone("tidy", hStr); err != nil {
+			if err := idx.MarkDone(StepTidy, hStr); err != nil {
 				return nil, nil, nil, err
 			}
 			doneJSON["tidy"][hStr] = true
@@ -376,8 +426,8 @@ func TestDoneIndex_Allocs_100k(t *testing.T) {
 	// Lookup is zero allocations
 	midHash := sampleHashes[50_000]
 	lookupAllocs := testing.AllocsPerRun(1000, func() {
-		if !loaded.IsDone("gofmt", midHash) {
-			t.Fatalf("expected IsDone(gofmt, midHash) to be true")
+		if !loaded.IsDone(StepGofmt, midHash) {
+			t.Fatalf("expected IsDone(StepGofmt, midHash) to be true")
 		}
 	})
 	if lookupAllocs != 0.0 {
@@ -414,7 +464,7 @@ func BenchmarkDoneBin_Lookup_100k(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		if !idx.IsDone("gofmt", target) {
+		if !idx.IsDone(StepGofmt, target) {
 			b.Fatal("lookup failed")
 		}
 	}

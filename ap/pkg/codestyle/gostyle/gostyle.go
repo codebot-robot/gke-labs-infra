@@ -110,7 +110,7 @@ func runGofmt(ctx context.Context, r *repo.Repo, repoRoot string, files []string
 				dirtyFiles = append(dirtyFiles, f)
 				continue
 			}
-			if !cm.IsDone("gofmt", meta.Hash) {
+			if !cm.IsDone(cache.StepGofmt, meta.Hash) {
 				dirtyFiles = append(dirtyFiles, f)
 			}
 		}
@@ -154,7 +154,7 @@ func runGofmt(ctx context.Context, r *repo.Repo, repoRoot string, files []string
 			if err != nil {
 				continue
 			}
-			cm.MarkDone("gofmt", meta.Hash)
+			cm.MarkDone(cache.StepGofmt, meta.Hash)
 		}
 	}
 
@@ -203,7 +203,7 @@ func runGoModTidy(ctx context.Context, r *repo.Repo, repoRoot string, files []st
 			return err
 		}
 
-		if cm != nil && cm.IsDone("tidy", key) {
+		if cm != nil && cm.IsDone(cache.StepTidy, key) {
 			log.V(2).Info("Module is tidy (cached)", "module", relMod)
 			continue
 		}
@@ -235,7 +235,7 @@ func runGoModTidy(ctx context.Context, r *repo.Repo, repoRoot string, files []st
 			if err != nil {
 				return err
 			}
-			cm.MarkDone("tidy", postKey)
+			cm.MarkDone(cache.StepTidy, postKey)
 		}
 	}
 

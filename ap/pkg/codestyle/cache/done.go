@@ -25,28 +25,35 @@ import (
 )
 
 const (
-	doneMagic      = "apdone\n"
+	doneHeaderSize = 64
 	doneVersion    = uint16(1)
-	doneRecordSize = uint16(40)
+	doneRecordSize = uint16(36)
 	hashSize       = 32
-	flagsSize      = 8
-	maxSteps       = 64
+	flagsSize      = 4
+)
+
+var doneMagic = [8]byte{'a', 'p', 'd', 'o', 'n', 'e', '\n', 0}
+
+// Step identifies a build/codestyle step tracked in done.bin flags.
+type Step uint8
+
+const (
+	StepGofmt Step = iota // bit 0
+	StepTidy              // bit 1
 )
 
 type pendingRecord struct {
 	hash  [hashSize]byte
-	flags uint64
+	flags uint32
 }
 
 // DoneIndex maintains a flat, sorted, fixed-record index of completed steps
 // keyed by raw 32-byte SHA-256 hash. The record region is kept as a raw []byte slice
-// and searched in place with zero heap allocations per lookup.
+// starting at offset 64 (cache-line boundary) and searched in place with zero heap allocations per lookup.
 type DoneIndex struct {
-	data      []byte
-	records   []byte
-	stepNames [maxSteps][]byte
-	stepCount int
-	pending   []pendingRecord
+	data    []byte
+	records []byte
+	pending []pendingRecord
 }
 
 // NewDoneIndex creates an empty DoneIndex.
@@ -55,91 +62,47 @@ func NewDoneIndex() *DoneIndex {
 }
 
 // LoadDone loads a DoneIndex from a byte slice containing the contents of done.bin.
-// Only the header is parsed; the records region is retained as a sub-slice.
+// Only the header is parsed; the records region is retained as a sub-slice starting at byte 64.
 // Exactly one allocation occurs when the caller receives the newly allocated *DoneIndex struct.
 func LoadDone(data []byte) (*DoneIndex, error) {
-	if len(data) < 13 {
-		return nil, fmt.Errorf("done cache too small: %d bytes (minimum 13)", len(data))
+	if len(data) < doneHeaderSize {
+		return nil, fmt.Errorf("done cache too small: %d bytes (minimum %d)", len(data), doneHeaderSize)
 	}
-	if string(data[:7]) != doneMagic {
-		return nil, fmt.Errorf("invalid done cache magic: %q", data[:7])
+	if string(data[:7]) != "apdone\n" {
+		return nil, fmt.Errorf("invalid done cache magic: %q", data[:8])
 	}
-	version := binary.LittleEndian.Uint16(data[7:9])
+	version := binary.LittleEndian.Uint16(data[8:10])
 	if version != doneVersion {
 		return nil, fmt.Errorf("unsupported done cache version: %d", version)
 	}
-	recordSize := binary.LittleEndian.Uint16(data[9:11])
+	recordSize := binary.LittleEndian.Uint16(data[10:12])
 	if recordSize != doneRecordSize {
 		return nil, fmt.Errorf("unsupported done cache record size: %d (expected %d)", recordSize, doneRecordSize)
 	}
-	stepCount := binary.LittleEndian.Uint16(data[11:13])
-	if stepCount > maxSteps {
-		return nil, fmt.Errorf("step count %d exceeds maximum of %d", stepCount, maxSteps)
+	recordCount := binary.LittleEndian.Uint32(data[12:16])
+	records := data[doneHeaderSize:]
+	if len(records) != int(recordCount)*int(doneRecordSize) {
+		return nil, fmt.Errorf("done cache corrupt: record region length %d does not match count %d * size %d", len(records), recordCount, doneRecordSize)
 	}
 
-	idx := &DoneIndex{
-		data:      data,
-		stepCount: int(stepCount),
-	}
-
-	offset := 13
-	for i := 0; i < int(stepCount); i++ {
-		if len(data) < offset+2 {
-			return nil, fmt.Errorf("truncated done cache header reading step %d length", i)
-		}
-		nameLen := int(binary.LittleEndian.Uint16(data[offset : offset+2]))
-		offset += 2
-		if len(data) < offset+nameLen {
-			return nil, fmt.Errorf("truncated done cache header reading step %d name", i)
-		}
-		idx.stepNames[i] = data[offset : offset+nameLen]
-		offset += nameLen
-	}
-
-	records := data[offset:]
-	if len(records)%int(doneRecordSize) != 0 {
-		return nil, fmt.Errorf("corrupt done cache: record region length %d is not a multiple of %d", len(records), doneRecordSize)
-	}
-	idx.records = records
-
-	return idx, nil
-}
-
-func (idx *DoneIndex) stepBit(step string) int {
-	for i := 0; i < idx.stepCount; i++ {
-		if string(idx.stepNames[i]) == step {
-			return i
-		}
-	}
-	return -1
-}
-
-func (idx *DoneIndex) getOrAssignStepBit(step string) (int, error) {
-	if bit := idx.stepBit(step); bit >= 0 {
-		return bit, nil
-	}
-	if idx.stepCount >= maxSteps {
-		return -1, fmt.Errorf("cannot add step %q: maximum of %d steps reached", step, maxSteps)
-	}
-	bit := idx.stepCount
-	idx.stepNames[bit] = []byte(step)
-	idx.stepCount++
-	return bit, nil
+	return &DoneIndex{
+		data:    data,
+		records: records,
+	}, nil
 }
 
 // IsDone returns true if the specified step has been completed for the given hash.
 // Performs zero heap allocations.
-func (idx *DoneIndex) IsDone(step, hash string) bool {
+func (idx *DoneIndex) IsDone(step Step, hash string) bool {
+	if step >= 32 {
+		return false
+	}
 	var rawHash [hashSize]byte
 	if !decodeHex32(&rawHash, hash) {
 		return false
 	}
 
-	bit := idx.stepBit(step)
-	if bit < 0 {
-		return false
-	}
-	bitMask := uint64(1) << uint(bit)
+	bitMask := uint32(1) << step
 
 	// Check pending list first
 	for i := len(idx.pending) - 1; i >= 0; i-- {
@@ -157,7 +120,7 @@ func (idx *DoneIndex) IsDone(step, hash string) bool {
 	if probeIdx < n {
 		offset := probeIdx * int(doneRecordSize)
 		if bytes.Equal(idx.records[offset:offset+hashSize], rawHash[:]) {
-			flags := binary.LittleEndian.Uint64(idx.records[offset+hashSize : offset+int(doneRecordSize)])
+			flags := binary.LittleEndian.Uint32(idx.records[offset+hashSize : offset+int(doneRecordSize)])
 			return (flags & bitMask) != 0
 		}
 	}
@@ -166,18 +129,16 @@ func (idx *DoneIndex) IsDone(step, hash string) bool {
 }
 
 // MarkDone marks a step as completed for the given hash in the pending list.
-func (idx *DoneIndex) MarkDone(step, hash string) error {
+func (idx *DoneIndex) MarkDone(step Step, hash string) error {
+	if step >= 32 {
+		return fmt.Errorf("step %d exceeds maximum 31", step)
+	}
 	var rawHash [hashSize]byte
 	if !decodeHex32(&rawHash, hash) {
 		return fmt.Errorf("invalid hash %q: expected 64 hex characters", hash)
 	}
 
-	bit, err := idx.getOrAssignStepBit(step)
-	if err != nil {
-		return err
-	}
-	bitMask := uint64(1) << uint(bit)
-
+	bitMask := uint32(1) << step
 	idx.pending = append(idx.pending, pendingRecord{
 		hash:  rawHash,
 		flags: bitMask,
@@ -221,16 +182,16 @@ func (idx *DoneIndex) Encode() ([]byte, error) {
 		} else if cmp > 0 {
 			merged = append(merged, pendHash...)
 			var flagBytes [flagsSize]byte
-			binary.LittleEndian.PutUint64(flagBytes[:], pending[j].flags)
+			binary.LittleEndian.PutUint32(flagBytes[:], pending[j].flags)
 			merged = append(merged, flagBytes[:]...)
 			j++
 		} else {
 			// Hashes match: OR flags
-			existFlags := binary.LittleEndian.Uint64(existingRecords[i+hashSize : i+int(doneRecordSize)])
+			existFlags := binary.LittleEndian.Uint32(existingRecords[i+hashSize : i+int(doneRecordSize)])
 			mergedFlags := existFlags | pending[j].flags
 			merged = append(merged, existHash...)
 			var flagBytes [flagsSize]byte
-			binary.LittleEndian.PutUint64(flagBytes[:], mergedFlags)
+			binary.LittleEndian.PutUint32(flagBytes[:], mergedFlags)
 			merged = append(merged, flagBytes[:]...)
 			i += int(doneRecordSize)
 			j++
@@ -242,36 +203,19 @@ func (idx *DoneIndex) Encode() ([]byte, error) {
 	for ; j < len(pending); j++ {
 		merged = append(merged, pending[j].hash[:]...)
 		var flagBytes [flagsSize]byte
-		binary.LittleEndian.PutUint64(flagBytes[:], pending[j].flags)
+		binary.LittleEndian.PutUint32(flagBytes[:], pending[j].flags)
 		merged = append(merged, flagBytes[:]...)
 	}
 
-	// Compute header size: magic (7) + version (2) + recordSize (2) + stepCount (2)
-	headerSize := 13
-	for k := 0; k < idx.stepCount; k++ {
-		headerSize += 2 + len(idx.stepNames[k])
-	}
+	totalRecords := len(merged) / int(doneRecordSize)
+	fileBytes := make([]byte, doneHeaderSize+len(merged))
+	copy(fileBytes[:8], doneMagic[:])
+	binary.LittleEndian.PutUint16(fileBytes[8:10], doneVersion)
+	binary.LittleEndian.PutUint16(fileBytes[10:12], doneRecordSize)
+	binary.LittleEndian.PutUint32(fileBytes[12:16], uint32(totalRecords))
+	// fileBytes[16:64] is zero padding to 64 bytes
+	copy(fileBytes[doneHeaderSize:], merged)
 
-	fileBytes := make([]byte, 0, headerSize+len(merged))
-	fileBytes = append(fileBytes, doneMagic...)
-
-	var hBuf [2]byte
-	binary.LittleEndian.PutUint16(hBuf[:], doneVersion)
-	fileBytes = append(fileBytes, hBuf[:]...)
-
-	binary.LittleEndian.PutUint16(hBuf[:], doneRecordSize)
-	fileBytes = append(fileBytes, hBuf[:]...)
-
-	binary.LittleEndian.PutUint16(hBuf[:], uint16(idx.stepCount))
-	fileBytes = append(fileBytes, hBuf[:]...)
-
-	for k := 0; k < idx.stepCount; k++ {
-		binary.LittleEndian.PutUint16(hBuf[:], uint16(len(idx.stepNames[k])))
-		fileBytes = append(fileBytes, hBuf[:]...)
-		fileBytes = append(fileBytes, idx.stepNames[k]...)
-	}
-
-	fileBytes = append(fileBytes, merged...)
 	return fileBytes, nil
 }
 

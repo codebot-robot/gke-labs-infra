@@ -95,12 +95,12 @@ func (m *Manager) load() error {
 	doneBinPath := filepath.Join(m.dir, "done.bin")
 	if data, err := os.ReadFile(doneBinPath); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
-			klog.Warningf("failed to read done cache %s: %v", doneBinPath, err)
-			errs = append(errs, fmt.Errorf("failed to read done cache %s: %w", doneBinPath, err))
+			klog.V(2).Infof("failed to read done cache %s: %v, starting with empty cache", doneBinPath, err)
 		}
+		m.done = NewDoneIndex()
 	} else if idx, err := LoadDone(data); err != nil {
-		klog.Warningf("failed to parse done cache %s: %v", doneBinPath, err)
-		errs = append(errs, fmt.Errorf("failed to parse done cache %s: %w", doneBinPath, err))
+		klog.V(2).Infof("invalid done cache %s: %v, starting with empty cache", doneBinPath, err)
+		m.done = NewDoneIndex()
 	} else {
 		m.done = idx
 	}
@@ -160,7 +160,7 @@ func (m *Manager) GetOrUpdateMetadata(path string) (*FileMetadata, error) {
 	return current, nil
 }
 
-func (m *Manager) IsDone(step, hash string) bool {
+func (m *Manager) IsDone(step Step, hash string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.done == nil {
@@ -169,14 +169,14 @@ func (m *Manager) IsDone(step, hash string) bool {
 	return m.done.IsDone(step, hash)
 }
 
-func (m *Manager) MarkDone(step, hash string) {
+func (m *Manager) MarkDone(step Step, hash string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.done == nil {
 		m.done = NewDoneIndex()
 	}
 	if err := m.done.MarkDone(step, hash); err != nil {
-		klog.V(2).Infof("failed to mark done for step %s: %v", step, err)
+		klog.V(2).Infof("failed to mark done for step %d: %v", step, err)
 	}
 }
 
