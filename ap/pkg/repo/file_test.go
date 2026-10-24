@@ -190,11 +190,11 @@ func TestFile_HashAndRefresh(t *testing.T) {
 		t.Errorf("expected hash to update after file modification, got %q", hash3)
 	}
 
-	// After refresh, hash is recomputed and remains consistent
-	f.Refresh()
+	// After InvalidateCachedInfo, hash is recomputed and remains consistent
+	f.InvalidateCachedInfo()
 	hash4, err := f.Hash()
 	if err != nil {
-		t.Fatalf("f.Hash() after refresh failed: %v", err)
+		t.Fatalf("f.Hash() after InvalidateCachedInfo failed: %v", err)
 	}
 	if hash4 != hash3 {
 		t.Errorf("expected hash after refresh to match %q, got %q", hash3, hash4)
@@ -318,8 +318,8 @@ func TestFile_ReferencedGOOS(t *testing.T) {
 				t.Errorf("memoized ReferencedGOOS() = %v, want %v", got2, tt.want)
 			}
 
-			// Verify Refresh()
-			f.Refresh()
+			// Verify InvalidateCachedInfo()
+			f.InvalidateCachedInfo()
 			got3 := f.ReferencedGOOS()
 			if !reflect.DeepEqual(got3, tt.want) {
 				t.Errorf("refreshed ReferencedGOOS() = %v, want %v", got3, tt.want)

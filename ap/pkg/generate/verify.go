@@ -318,7 +318,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 		}
 		perturbedFiles = append(perturbedFiles, pf)
 
-		if err := r.WriteFileAtomic(f.Path, perturbed, info.Mode()); err != nil {
+		if err := r.WriteFile(f.Path, perturbed, info.Mode()); err != nil {
 			return fmt.Errorf("failed to write perturbed file %s: %w", f.Path, err)
 		}
 	}
@@ -333,7 +333,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 			}
 			undone, ok := Undo(currentData, pf.marker, pf.isBinary, pf.wasEmpty)
 			if ok {
-				if err := r.WriteFileAtomic(pf.path, undone, pf.mode); err != nil {
+				if err := r.WriteFile(pf.path, undone, pf.mode); err != nil {
 					klog.Errorf("failed to restore file %s: %v", pf.path, err)
 				}
 			}

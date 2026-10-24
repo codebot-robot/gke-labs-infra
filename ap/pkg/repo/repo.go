@@ -15,6 +15,7 @@
 package repo
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"os"
@@ -389,8 +390,7 @@ func (r *Repo) FileExists(path string) bool {
 }
 
 // TrackFile ensures that a file at path is known to the Repo tree, adding it if not already present.
-// If the file already exists in the tree, its memoized state is refreshed.
-// If the file no longer exists on disk, it is untracked from the tree.
+// If the file is already tracked, TrackFile returns the existing *File.
 func (r *Repo) TrackFile(path string) *File {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
@@ -403,15 +403,6 @@ func (r *Repo) TrackFile(path string) *File {
 
 func (r *Repo) trackFileLocked(clean string) *File {
 	if f, ok := r.filesByPath[clean]; ok {
-		fi, err := os.Stat(clean)
-		if err != nil {
-			if os.IsNotExist(err) {
-				r.untrackFileLocked(clean)
-			}
-			return nil
-		}
-		f.Refresh()
-		f.info = fi
 		return f
 	}
 	fi, err := os.Stat(clean)
@@ -431,12 +422,13 @@ func (r *Repo) trackFileLocked(clean string) *File {
 	r.ensureDirs(parentDir)
 
 	f := &File{
-		Path:    clean,
-		RelPath: relPath,
-		Name:    filepath.Base(clean),
-		apRoot:  closestAncestor(clean, r.apRoots),
-		module:  closestAncestor(clean, r.modules),
-		info:    fi,
+		Path:      clean,
+		RelPath:   relPath,
+		Name:      filepath.Base(clean),
+		apRoot:    closestAncestor(clean, r.apRoots),
+		module:    closestAncestor(clean, r.modules),
+		info:      fi,
+		infoValid: true,
 	}
 	r.files = append(r.files, f)
 	sort.Slice(r.files, func(i, j int) bool {
@@ -542,7 +534,11 @@ func (r *Repo) recomputeHasTestsDirs() {
 	}
 }
 
-// UntrackFile removes path from the repo tree if present.
+// UntrackFile removes path from the repo tree's in-memory snapshot.
+// It should be called when a file has been removed or deleted externally outside
+// the tree's own write methods, so that subsequent tree queries (e.g. Files,
+// File, FileExists) no longer report it as present. To delete a file from both
+// disk and the tree, callers should prefer Remove.
 func (r *Repo) UntrackFile(path string) {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
@@ -553,7 +549,7 @@ func (r *Repo) UntrackFile(path string) {
 	r.untrackFileLocked(clean)
 }
 
-// Remove removes the named file from disk and untracks it from the repo tree.
+// Remove is equivalent to calling os.Remove, but will update any Repo state appropriately.
 func (r *Repo) Remove(path string) error {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
@@ -566,7 +562,32 @@ func (r *Repo) Remove(path string) error {
 	return nil
 }
 
-// WriteFileAtomic writes data to path atomically and ensures the file is refreshed and tracked in the repo tree.
+// WriteFile writes content to path atomically. If the file already exists with
+// identical content, it is left untouched so mtime is preserved. The repo tree
+// is updated to reflect the new file state.
+func (r *Repo) WriteFile(path string, content []byte, perm os.FileMode) error {
+	clean := filepath.Clean(path)
+	if !filepath.IsAbs(clean) {
+		clean = filepath.Join(r.root, clean)
+	}
+	existing, err := os.ReadFile(clean)
+	if err == nil && bytes.Equal(existing, content) {
+		return nil
+	}
+	if err := fileutils.WriteFileAtomic(clean, content, perm); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if f, ok := r.filesByPath[clean]; ok {
+		f.InvalidateCachedInfo()
+		return nil
+	}
+	r.trackFileLocked(clean)
+	return nil
+}
+
+// WriteFileAtomic writes data to path atomically and ensures the file is tracked in the repo tree.
 func (r *Repo) WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
@@ -575,11 +596,17 @@ func (r *Repo) WriteFileAtomic(path string, data []byte, perm os.FileMode) error
 	if err := fileutils.WriteFileAtomic(clean, data, perm); err != nil {
 		return err
 	}
-	r.TrackFile(clean)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if f, ok := r.filesByPath[clean]; ok {
+		f.InvalidateCachedInfo()
+		return nil
+	}
+	r.trackFileLocked(clean)
 	return nil
 }
 
-// CopyFile copies a file from src to dst atomically and ensures dst is refreshed and tracked in the repo tree.
+// CopyFile copies a file from src to dst atomically and ensures dst is tracked in the repo tree.
 func (r *Repo) CopyFile(src, dst string, perm os.FileMode) error {
 	cleanDst := filepath.Clean(dst)
 	if !filepath.IsAbs(cleanDst) {
@@ -588,13 +615,25 @@ func (r *Repo) CopyFile(src, dst string, perm os.FileMode) error {
 	if err := fileutils.CopyFile(src, cleanDst, perm); err != nil {
 		return err
 	}
-	r.TrackFile(cleanDst)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if f, ok := r.filesByPath[cleanDst]; ok {
+		f.InvalidateCachedInfo()
+		return nil
+	}
+	r.trackFileLocked(cleanDst)
 	return nil
 }
 
-// Invalidate drops memoized state for every file under dir, re-stats lazily,
+// InvalidateAll drops memoized state for every file in the repository tree,
+// re-stats lazily, and discovers newly created and deleted files across the entire repo.
+func (r *Repo) InvalidateAll() error {
+	return r.InvalidateTree(r.root)
+}
+
+// InvalidateTree drops memoized state for every file under dir, re-stats lazily,
 // and picks up newly created and deleted files.
-func (r *Repo) Invalidate(dir string) error {
+func (r *Repo) InvalidateTree(dir string) error {
 	cleanDir := filepath.Clean(dir)
 	if !filepath.IsAbs(cleanDir) {
 		cleanDir = filepath.Join(r.root, cleanDir)
@@ -652,7 +691,7 @@ func (r *Repo) Invalidate(dir string) error {
 			if _, ok := diskFiles[f.Path]; !ok {
 				toUntrack = append(toUntrack, f.Path)
 			} else {
-				f.Refresh()
+				f.InvalidateCachedInfo()
 			}
 		}
 	}
@@ -723,11 +762,26 @@ func (r *Repo) Invalidate(dir string) error {
 	return nil
 }
 
-// Track ensures that each file in paths is known to the Repo tree, adding it if not already
-// present, refreshing it if modified, or untracking it if deleted on disk.
+// Track ensures that each file in paths is updated in the Repo tree: adding it
+// if newly created, invalidating its cached info if already tracked, or untracking
+// it if deleted on disk.
 func (r *Repo) Track(paths ...string) {
-	for _, p := range paths {
-		r.TrackFile(p)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, path := range paths {
+		clean := filepath.Clean(path)
+		if !filepath.IsAbs(clean) {
+			clean = filepath.Join(r.root, clean)
+		}
+		if f, ok := r.filesByPath[clean]; ok {
+			if _, err := os.Stat(clean); err != nil && os.IsNotExist(err) {
+				r.untrackFileLocked(clean)
+			} else {
+				f.InvalidateCachedInfo()
+			}
+			continue
+		}
+		r.trackFileLocked(clean)
 	}
 }
 

@@ -87,15 +87,15 @@ type File struct {
 
 	mu sync.Mutex
 
-	isGeneratedOnce sync.Once
-	isGenerated     bool
-	generatedHeader string
+	isGeneratedValid bool
+	isGenerated      bool
+	generatedHeader  string
 
-	hasGoGenerateOnce sync.Once
-	hasGoGenerate     bool
+	hasGoGenerateValid bool
+	hasGoGenerate      bool
 
-	referencedGOOSOnce sync.Once
-	referencedGOOS     []string
+	referencedGOOSValid bool
+	referencedGOOS      []string
 
 	hash    string
 	hashErr error
@@ -104,20 +104,23 @@ type File struct {
 	metaMtime int64
 	metaInode uint64
 
-	infoOnce sync.Once
-	info     os.FileInfo
+	infoValid bool
+	info      os.FileInfo
 }
 
 // Info returns an os.FileInfo representation of the file, resolved lazily.
 func (f *File) Info() os.FileInfo {
-	f.infoOnce.Do(func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.infoValid {
 		fi, err := os.Stat(f.Path)
 		if err != nil {
 			f.info = &fileInfo{name: f.Name}
-			return
+		} else {
+			f.info = fi
 		}
-		f.info = fi
-	})
+		f.infoValid = true
+	}
 	return f.info
 }
 
@@ -141,9 +144,12 @@ func (f *File) HasGoGenerate() bool {
 	if !strings.HasSuffix(f.Name, ".go") {
 		return false
 	}
-	f.hasGoGenerateOnce.Do(func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.hasGoGenerateValid {
 		f.hasGoGenerate = f.scanGoGenerate()
-	})
+		f.hasGoGenerateValid = true
+	}
 	return f.hasGoGenerate
 }
 
@@ -169,15 +175,23 @@ func (f *File) scanGoGenerate() bool {
 // A file is generated if any of its first 30 lines contains a comment
 // starting with "Code generated" and ending with "DO NOT EDIT."
 func (f *File) IsGenerated() bool {
-	f.isGeneratedOnce.Do(func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.isGeneratedValid {
 		f.isGenerated, f.generatedHeader = f.scanGenerated()
-	})
+		f.isGeneratedValid = true
+	}
 	return f.isGenerated
 }
 
 // GeneratedHeader returns the matched generated header line if the file is generated.
 func (f *File) GeneratedHeader() string {
-	_ = f.IsGenerated()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.isGeneratedValid {
+		f.isGenerated, f.generatedHeader = f.scanGenerated()
+		f.isGeneratedValid = true
+	}
 	return f.generatedHeader
 }
 
@@ -282,15 +296,7 @@ func (f *File) computeHashLocked() (string, error) {
 
 	// Content changed; invalidate memoized file attributes
 	if f.hash != "" {
-		f.infoOnce = sync.Once{}
-		f.info = nil
-		f.isGeneratedOnce = sync.Once{}
-		f.isGenerated = false
-		f.generatedHeader = ""
-		f.hasGoGenerateOnce = sync.Once{}
-		f.hasGoGenerate = false
-		f.referencedGOOSOnce = sync.Once{}
-		f.referencedGOOS = nil
+		f.invalidateCachedInfoLocked()
 	}
 
 	h, err := hashFilePath(f.Path)
@@ -326,18 +332,23 @@ func hashFilePath(path string) (retHash string, retErr error) {
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-// Refresh clears memoized metadata, IsGenerated, and Hash, forcing them to re-evaluate.
-func (f *File) Refresh() {
+// InvalidateCachedInfo clears memoized metadata, IsGenerated, HasGoGenerate,
+// ReferencedGOOS, and Hash, forcing them to re-evaluate on next access.
+func (f *File) InvalidateCachedInfo() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.infoOnce = sync.Once{}
+	f.invalidateCachedInfoLocked()
+}
+
+func (f *File) invalidateCachedInfoLocked() {
+	f.infoValid = false
 	f.info = nil
-	f.isGeneratedOnce = sync.Once{}
+	f.isGeneratedValid = false
 	f.isGenerated = false
 	f.generatedHeader = ""
-	f.hasGoGenerateOnce = sync.Once{}
+	f.hasGoGenerateValid = false
 	f.hasGoGenerate = false
-	f.referencedGOOSOnce = sync.Once{}
+	f.referencedGOOSValid = false
 	f.referencedGOOS = nil
 	f.hash = ""
 	f.hashErr = nil
@@ -352,9 +363,12 @@ func (f *File) ReferencedGOOS() []string {
 	if !strings.HasSuffix(f.Name, ".go") {
 		return nil
 	}
-	f.referencedGOOSOnce.Do(func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.referencedGOOSValid {
 		f.referencedGOOS = f.scanReferencedGOOS()
-	})
+		f.referencedGOOSValid = true
+	}
 	return f.referencedGOOS
 }
 

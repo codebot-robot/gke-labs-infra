@@ -15,7 +15,6 @@
 package generate
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -69,7 +68,7 @@ func (t *LegacyScriptTask) Run(ctx context.Context, scope *tasks.APScope) error 
 	}
 	if scope != nil {
 		if r, err := scope.GetRepo(); err == nil && r != nil {
-			if err := r.Invalidate(t.Dir); err != nil {
+			if err := r.InvalidateAll(); err != nil {
 				return fmt.Errorf("failed to invalidate repo tree after %s: %w", t.Name, err)
 			}
 		}
@@ -102,7 +101,7 @@ func (t *GoGenerateTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	}
 	if scope != nil {
 		if r, err := scope.GetRepo(); err == nil && r != nil {
-			if err := r.Invalidate(t.Dir); err != nil {
+			if err := r.InvalidateAll(); err != nil {
 				return fmt.Errorf("failed to invalidate repo tree after go generate in %s: %w", t.Dir, err)
 			}
 		}
@@ -335,7 +334,7 @@ if [[ -n $(git status --porcelain) ]]; then
   exit 1
 fi
 `, headerBlock, skipGuard, apCmd, apCmd, apCmd)
-	if err := writeFileIfChanged(r, targetFile, []byte(content), 0755); err != nil {
+	if err := r.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -352,7 +351,7 @@ func runAuditGeneratedGenerator(_ context.Context, r *repo.Repo, repoRoot string
 
 	if rootCfg == nil || rootCfg.Generate == nil || !rootCfg.Generate.AuditGenerated {
 		// If not opted in, remove stale ap-audit-generated if present
-		if err := removeFile(r, targetFile); err != nil {
+		if err := r.Remove(targetFile); err != nil {
 			return fmt.Errorf("failed to remove %s: %w", targetFile, err)
 		}
 		return nil
@@ -401,7 +400,7 @@ cd "${REPO_ROOT}"
 # Run audit mode (strict in CI)
 %s generate --audit-generated --strict //...
 `, headerBlock, skipGuard, apCmd)
-	if err := writeFileIfChanged(r, targetFile, []byte(content), 0755); err != nil {
+	if err := r.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -455,7 +454,7 @@ cd "${REPO_ROOT}"
 # Run tests
 %s test //...
 `, headerBlock, skipGuard, apCmd)
-	if err := writeFileIfChanged(r, targetFile, []byte(content), 0755); err != nil {
+	if err := r.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -509,7 +508,7 @@ cd "${REPO_ROOT}"
 # Run linting
 %s lint //...
 `, headerBlock, skipGuard, apCmd)
-	if err := writeFileIfChanged(r, targetFile, []byte(content), 0755); err != nil {
+	if err := r.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -549,7 +548,7 @@ func runApBuildGenerator(_ context.Context, r *repo.Repo, repoRoot string, scope
 		}
 		if exists {
 			klog.Infof("Removing %s as no build tasks found", targetFile)
-			if err := removeFile(r, targetFile); err != nil {
+			if err := r.Remove(targetFile); err != nil {
 				return fmt.Errorf("failed to remove %s: %w", targetFile, err)
 			}
 		}
@@ -599,7 +598,7 @@ cd "${REPO_ROOT}"
 # Run build
 %s build //...
 `, headerBlock, skipGuard, apCmd)
-	if err := writeFileIfChanged(r, targetFile, []byte(content), 0755); err != nil {
+	if err := r.WriteFile(targetFile, []byte(content), 0755); err != nil {
 		return fmt.Errorf("failed to write %s: %w", targetFile, err)
 	}
 
@@ -617,7 +616,7 @@ func runApE2eGenerator(_ context.Context, r *repo.Repo, repoRoot string, scopes 
 	}
 	if exists {
 		klog.Infof("Removing global %s", globalTargetFile)
-		if err := removeFile(r, globalTargetFile); err != nil {
+		if err := r.Remove(globalTargetFile); err != nil {
 			return fmt.Errorf("failed to remove %s: %w", globalTargetFile, err)
 		}
 	}
@@ -636,7 +635,7 @@ func runApE2eGenerator(_ context.Context, r *repo.Repo, repoRoot string, scopes 
 			}
 			if exists {
 				klog.Infof("Removing %s as no e2e tasks found", targetFile)
-				if err := removeFile(r, targetFile); err != nil {
+				if err := r.Remove(targetFile); err != nil {
 					return fmt.Errorf("failed to remove %s: %w", targetFile, err)
 				}
 			}
@@ -690,7 +689,7 @@ cd "${REPO_ROOT}"
 # Run e2e tests
 %s e2e %s
 `, headerBlock, skipGuard, apCmd, relApRoot)
-		if err := writeFileIfChanged(r, targetFile, []byte(content), 0755); err != nil {
+		if err := r.WriteFile(targetFile, []byte(content), 0755); err != nil {
 			return fmt.Errorf("failed to write %s: %w", targetFile, err)
 		}
 	}
@@ -835,7 +834,7 @@ jobs:
 		return fmt.Errorf("failed to create workflows dir: %w", err)
 	}
 
-	if err := writeFileIfChanged(r, outputFile, []byte(sb.String()), 0644); err != nil {
+	if err := r.WriteFile(outputFile, []byte(sb.String()), 0644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", outputFile, err)
 	}
 
@@ -968,25 +967,4 @@ if [[ "${GITHUB_EVENT_NAME:-}" == "pull_request" && -n "${GITHUB_SHA:-}" ]]; the
   fi
 fi
 `, strings.Join(patterns, "|"))
-}
-
-func writeFileIfChanged(r *repo.Repo, path string, content []byte, perm os.FileMode) error {
-	existing, err := os.ReadFile(path)
-	if err == nil && bytes.Equal(existing, content) {
-		return nil
-	}
-	if r != nil {
-		return r.WriteFileAtomic(path, content, perm)
-	}
-	return fileutils.WriteFileAtomic(path, content, perm)
-}
-
-func removeFile(r *repo.Repo, path string) error {
-	if r != nil {
-		return r.Remove(path)
-	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	return nil
 }

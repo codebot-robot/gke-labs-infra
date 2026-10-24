@@ -504,28 +504,81 @@ func TestRepo_Invalidate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Run Invalidate on subDir
-	if err := r.Invalidate(subDir); err != nil {
-		t.Fatalf("r.Invalidate failed: %v", err)
+	// Run InvalidateTree on subDir
+	if err := r.InvalidateTree(subDir); err != nil {
+		t.Fatalf("r.InvalidateTree failed: %v", err)
 	}
 
 	// Check new file was picked up
 	if r.File(newFilePath) == nil {
-		t.Errorf("expected new_sub.go to be discovered by Invalidate")
+		t.Errorf("expected new_sub.go to be discovered by InvalidateTree")
 	}
 
 	// Check deleted file was removed
 	if r.File(deletedFile) != nil {
-		t.Errorf("expected deleted file temp.go to be untracked by Invalidate")
+		t.Errorf("expected deleted file temp.go to be untracked by InvalidateTree")
 	}
 
 	// Check modified file hash updated
 	newHash, err := f.Hash()
 	if err != nil {
-		t.Fatalf("f.Hash() after Invalidate failed: %v", err)
+		t.Fatalf("f.Hash() after InvalidateTree failed: %v", err)
 	}
 	if newHash == origHash {
-		t.Errorf("expected Invalidate to refresh hash, got %q == %q", newHash, origHash)
+		t.Errorf("expected InvalidateTree to refresh hash, got %q == %q", newHash, origHash)
+	}
+
+	// Verify InvalidateAll also works across the entire repo
+	if err := r.InvalidateAll(); err != nil {
+		t.Fatalf("r.InvalidateAll failed: %v", err)
+	}
+}
+
+func TestRepo_WriteFile(t *testing.T) {
+	dir := setupTestRepo(t)
+	r, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	existingPath := filepath.Join(dir, "main.go")
+	f := r.File(existingPath)
+	if f == nil {
+		t.Fatal("expected main.go to exist in repo")
+	}
+	initialHash, err := f.Hash()
+	if err != nil {
+		t.Fatalf("f.Hash() failed: %v", err)
+	}
+
+	// 1. Calling WriteFile with identical content is a no-op
+	sameContent := []byte("package main\n\nfunc main() {}\n")
+	fiBefore, err := os.Stat(existingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.WriteFile(existingPath, sameContent, 0644); err != nil {
+		t.Fatalf("r.WriteFile failed: %v", err)
+	}
+	fiAfter, err := os.Stat(existingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fiAfter.ModTime() != fiBefore.ModTime() {
+		t.Errorf("expected WriteFile with identical content to not modify mtime")
+	}
+
+	// 2. Calling WriteFile with new content updates file and hash
+	newContent := []byte("package main\n\nfunc UpdatedWriteFile() {}\n")
+	if err := r.WriteFile(existingPath, newContent, 0644); err != nil {
+		t.Fatalf("r.WriteFile failed: %v", err)
+	}
+	updatedHash, err := f.Hash()
+	if err != nil {
+		t.Fatalf("f.Hash() after WriteFile failed: %v", err)
+	}
+	if updatedHash == initialHash {
+		t.Fatalf("expected Hash() to update without manual refresh, got %q == %q", updatedHash, initialHash)
 	}
 }
 
