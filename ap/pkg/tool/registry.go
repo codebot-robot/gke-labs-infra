@@ -12,6 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Package tool manages external developer tools (docker, kind, protoc) used by ap.
+//
+// Working Directory Invariant:
+// Tool invocations run in the caller's working directory, always; ap locates .ap/
+// config by walking up from cwd but never changes into it. The only place a directory
+// is chosen for a tool is when ap itself orchestrates a task (e.g. go mod tidy per module,
+// docker build per image), and that is set on that task's exec.Cmd, not on the pass-through path.
 package tool
 
 import (
@@ -35,7 +42,6 @@ type Invocation struct {
 	Binary string
 	Args   []string
 	Env    []string
-	Dir    string
 }
 
 // RunOptions specifies options when running a tool via Run.
@@ -81,7 +87,6 @@ func (t *Tool) Run(ctx context.Context, opt RunOptions) error {
 	}
 	cmd := exec.CommandContext(ctx, inv.Binary, inv.Args...)
 	cmd.Env = inv.Env
-	cmd.Dir = inv.Dir
 	cmd.Stdout = opt.Stdout
 	cmd.Stderr = opt.Stderr
 	cmd.Stdin = opt.Stdin
@@ -278,7 +283,6 @@ var registry = []*Tool{
 				Binary: env.ProtocBin,
 				Args:   finalArgs,
 				Env:    env.Env,
-				Dir:    "",
 			}, nil
 		},
 		Update: func(ctx context.Context, repoRoot string) error {
@@ -327,7 +331,6 @@ var registry = []*Tool{
 				Binary: goBin,
 				Args:   args,
 				Env:    fileutils.PrependPath(filteredEnv, filepath.Dir(goBin)),
-				Dir:    "",
 			}, nil
 		},
 		Update: func(ctx context.Context, repoRoot string) error {
