@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -118,7 +119,8 @@ func TestBuildTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	task, err := BuildTasks(r, tmpDir, false, "")
+	naming := ResolveImageNaming(nil)
+	task, err := BuildTasks(r, tmpDir, false, "", naming)
 	if err != nil {
 		t.Fatalf("BuildTasks() error = %v", err)
 	}
@@ -191,8 +193,10 @@ func TestBuildTasksForImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	naming := ResolveImageNaming(nil)
+
 	// 1. Filter for image "a" only
-	taskA, err := BuildTasksForImages(r, tmpDir, false, "", []string{"a"})
+	taskA, err := BuildTasksForImages(r, tmpDir, false, "", []string{"a"}, naming)
 	if err != nil {
 		t.Fatalf("BuildTasksForImages failed: %v", err)
 	}
@@ -213,7 +217,7 @@ func TestBuildTasksForImages(t *testing.T) {
 
 	// 2. Buildctl path with image "b" only
 	buildkitHost := "k8s://autodeploy-system/buildkit"
-	taskB, err := BuildTasksForImages(r, tmpDir, true, buildkitHost, []string{"b"})
+	taskB, err := BuildTasksForImages(r, tmpDir, true, buildkitHost, []string{"b"}, naming)
 	if err != nil {
 		t.Fatalf("BuildTasksForImages with buildkit failed: %v", err)
 	}
@@ -236,7 +240,7 @@ func TestBuildTasksForImages(t *testing.T) {
 	}
 
 	// 3. Filter with empty slice -> 0 tasks
-	taskEmpty, err := BuildTasksForImages(r, tmpDir, false, "", []string{})
+	taskEmpty, err := BuildTasksForImages(r, tmpDir, false, "", []string{}, naming)
 	if err != nil {
 		t.Fatalf("BuildTasksForImages with empty filter failed: %v", err)
 	}
@@ -249,7 +253,7 @@ func TestBuildTasksForImages(t *testing.T) {
 	}
 
 	// 4. Filter with nil slice -> 0 tasks (always filters)
-	taskNil, err := BuildTasksForImages(r, tmpDir, false, "", nil)
+	taskNil, err := BuildTasksForImages(r, tmpDir, false, "", nil, naming)
 	if err != nil {
 		t.Fatalf("BuildTasksForImages with nil filter failed: %v", err)
 	}
@@ -262,7 +266,7 @@ func TestBuildTasksForImages(t *testing.T) {
 	}
 
 	// 5. BuildTasks (without filter) builds all images (a and b)
-	taskAll, err := BuildTasks(r, tmpDir, false, "")
+	taskAll, err := BuildTasks(r, tmpDir, false, "", naming)
 	if err != nil {
 		t.Fatalf("BuildTasks failed: %v", err)
 	}
@@ -381,7 +385,9 @@ func TestBuildTasks_PortForward(t *testing.T) {
 				testRepo = emptyRepo
 			}
 
-			task, err := BuildTasks(testRepo, testDir, tc.push, resolvedHost)
+			cfg, _ := config.Load(testDir)
+			naming := ResolveImageNaming(cfg)
+			task, err := BuildTasks(testRepo, testDir, tc.push, resolvedHost, naming)
 			if err != nil {
 				t.Fatalf("BuildTasks() error = %v", err)
 			}

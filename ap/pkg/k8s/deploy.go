@@ -194,7 +194,7 @@ func FindReferencedImagesInFile(path string) ([]string, error) {
 	return FindPlaceholderImages(string(content))
 }
 
-func replacePlaceholderImages(content string, imageRepository string, imageTag string) (string, error) {
+func replacePlaceholderImages(content string, naming imageref.ImageNaming) (string, error) {
 	decoder := yaml.NewDecoder(strings.NewReader(content))
 	var placeholders []*yaml.Node
 	for {
@@ -234,7 +234,7 @@ func replacePlaceholderImages(content string, imageRepository string, imageTag s
 			return "", fmt.Errorf("invalid placeholder image %q", p.Value)
 		}
 
-		newVal := fmt.Sprintf("%s/%s:%s", imageRepository, base, imageTag)
+		newVal := naming.Ref(base).String()
 		replacements = append(replacements, replacement{
 			offset: start,
 			length: end - start,
@@ -243,7 +243,7 @@ func replacePlaceholderImages(content string, imageRepository string, imageTag s
 	}
 
 	for _, match := range findImageReferenceMatches(content) {
-		newVal := fmt.Sprintf("%s/%s:%s", imageRepository, match.imageName, imageTag)
+		newVal := naming.Ref(match.imageName).String()
 		replacements = append(replacements, replacement{
 			offset: match.start,
 			length: match.end - match.start,
@@ -391,6 +391,7 @@ type DeployTaskOptions struct {
 	OriginalNamespace string
 	ScopeResolver     ScopeResolver
 	CheckNamespace    func(ctx context.Context, namespace string) error
+	Naming            imageref.ImageNaming
 }
 
 // KubectlApplyTask represents a task to apply a single k8s manifest.
@@ -400,17 +401,20 @@ type KubectlApplyTask struct {
 	OriginalNamespace string
 	ScopeResolver     ScopeResolver
 	CheckNamespace    func(ctx context.Context, namespace string) error
+	Naming            imageref.ImageNaming
 }
 
 func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error {
-	cfg, err := config.Load(scope.RepoRoot)
-	if err != nil {
-		return err
-	}
-	imageRepository := cfg.ImageRepo()
-	tag := os.Getenv("IMAGE_TAG")
-	if tag == "" {
-		tag = "latest"
+	naming := t.Naming
+	if naming.Tag == "" && naming.Prefix == "" {
+		cfg, err := config.Load(scope.RepoRoot)
+		if err != nil {
+			return err
+		}
+		naming = imageref.ImageNaming{
+			Prefix: cfg.ImageRepo(),
+			Tag:    "latest",
+		}
 	}
 
 	relPath, err := filepath.Rel(scope.RepoRoot, t.ManifestPath)
@@ -424,7 +428,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		return err
 	}
 
-	replaced, err := replacePlaceholderImages(string(content), imageRepository, tag)
+	replaced, err := replacePlaceholderImages(string(content), naming)
 	if err != nil {
 		return fmt.Errorf("failed to replace placeholders in %s: %w", relPath, err)
 	}
@@ -555,6 +559,7 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 			OriginalNamespace: opt.OriginalNamespace,
 			ScopeResolver:     opt.ScopeResolver,
 			CheckNamespace:    opt.CheckNamespace,
+			Naming:            opt.Naming,
 		})
 	}
 

@@ -69,13 +69,7 @@ func ResolveBuildkitHost(value string) (string, error) {
 
 // FullImageName returns the fully-qualified image tag given prefix, image name, and tag.
 func FullImageName(imagePrefix, imageName, tag string) string {
-	if tag == "" {
-		tag = "latest"
-	}
-	if imagePrefix != "" {
-		return fmt.Sprintf("%s/%s:%s", imagePrefix, imageName, tag)
-	}
-	return fmt.Sprintf("%s:%s", imageName, tag)
+	return ImageRef{Prefix: imagePrefix, Name: imageName, Tag: tag}.String()
 }
 
 // DockerBuildTask represents a task to build a single docker image.
@@ -87,39 +81,34 @@ type DockerBuildTask struct {
 	BuildkitHost string
 	DockerBin    string
 	BuildxBin    string
+	Naming       ImageNaming
 }
 
 func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
-	cfg, err := config.Load(scope.RepoRoot)
-	if err != nil {
-		return err
-	}
-	imagePrefix := cfg.ImageRepo()
-
 	imagesCfg, err := config.LoadImagesConfig(scope.RepoRoot)
 	if err != nil {
 		return err
 	}
 	platforms := imagesCfg.GetPlatforms()
 
-	tag := os.Getenv("IMAGE_TAG")
-	if tag == "" {
-		tag = "latest"
-	}
-
-	actualImagePrefix := imagePrefix
-	if imagePrefix == "images.local" && t.Push {
-		if k8s.IsInCluster() || strings.HasPrefix(t.BuildkitHost, "k8s://") {
-			actualImagePrefix = "in-cluster-image-registry.in-cluster-image-registry-system.svc.cluster.local:80"
-		} else {
-			actualImagePrefix = "localhost:5000"
+	naming := t.Naming
+	if naming.Tag == "" && naming.Prefix == "" {
+		cfg, err := config.Load(scope.RepoRoot)
+		if err != nil {
+			return err
 		}
+		naming = ResolveImageNaming(cfg)
 	}
 
-	fullImageName := FullImageName(actualImagePrefix, t.ImageName, tag)
+	actualImagePrefix := naming.Prefix
+	if t.Push {
+		actualImagePrefix = naming.PushPrefix(t.BuildkitHost)
+	}
+
+	fullImageName := ImageRef{Prefix: actualImagePrefix, Name: t.ImageName, Tag: naming.Tag}.String()
 
 	if t.BuildkitHost != "" {
-		return t.runBuildctl(ctx, t.Root, fullImageName, t.Dockerfile, imagePrefix, platforms)
+		return t.runBuildctl(ctx, t.Root, fullImageName, t.Dockerfile, naming, platforms)
 	}
 
 	buildxBin := t.BuildxBin
@@ -156,7 +145,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 		platforms = nil
 	}
 
-	return t.runDocker(ctx, buildxBin, t.Root, fullImageName, t.Dockerfile, imagePrefix, platforms)
+	return t.runDocker(ctx, buildxBin, t.Root, fullImageName, t.Dockerfile, naming, platforms)
 }
 
 func (t *DockerBuildTask) ensureMultiPlatformBuilder(ctx context.Context, buildxBin string) error {
@@ -199,26 +188,12 @@ func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin s
 	return true
 }
 
-func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, relDockerfilePath, imagePrefix string, platforms []string) error {
+func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) error {
 	klog.Infof("Building image %s from %s using buildctl", fullImageName, root)
 
-	buildctlImageName := fullImageName
-	if imagePrefix == "images.local" && t.Push && strings.HasPrefix(t.BuildkitHost, "k8s://") {
-		tag := os.Getenv("IMAGE_TAG")
-		if tag == "" {
-			tag = "latest"
-		}
-		buildctlImageName = fmt.Sprintf("in-cluster-image-registry.in-cluster-image-registry-system.svc.cluster.local:80/%s:%s", t.ImageName, tag)
-	}
-
-	output := fmt.Sprintf("type=image,name=%s,push=%t", buildctlImageName, t.Push)
+	output := fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push)
 	if t.Push {
 		output += ",registry.insecure=true"
-	}
-
-	tag := os.Getenv("IMAGE_TAG")
-	if tag == "" {
-		tag = "latest"
 	}
 
 	buildctlArgs := []string{
@@ -227,8 +202,8 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 		"--local", "context=.",
 		"--local", "dockerfile=.",
 		"--opt", "filename=" + relDockerfilePath,
-		"--opt", "build-arg:IMAGE_PREFIX=" + imagePrefix,
-		"--opt", "build-arg:IMAGE_TAG=" + tag,
+		"--opt", "build-arg:IMAGE_PREFIX=" + naming.Prefix,
+		"--opt", "build-arg:IMAGE_TAG=" + naming.Tag,
 		"--output", output,
 	}
 
@@ -276,20 +251,15 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 	return nil
 }
 
-func (t *DockerBuildTask) runDocker(ctx context.Context, buildxBin, root, fullImageName, relDockerfilePath, imagePrefix string, platforms []string) error {
+func (t *DockerBuildTask) runDocker(ctx context.Context, buildxBin, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) error {
 	klog.Infof("Building image %s from %s using docker buildx", fullImageName, root)
-
-	tag := os.Getenv("IMAGE_TAG")
-	if tag == "" {
-		tag = "latest"
-	}
 
 	args := []string{
 		"build",
 		"-t", fullImageName,
 		"-f", relDockerfilePath,
-		"--build-arg", "IMAGE_PREFIX=" + imagePrefix,
-		"--build-arg", "IMAGE_TAG=" + tag,
+		"--build-arg", "IMAGE_PREFIX=" + naming.Prefix,
+		"--build-arg", "IMAGE_TAG=" + naming.Tag,
 	}
 
 	if t.Push {
@@ -352,12 +322,7 @@ func FindImageNames(r *repo.Repo, root string) ([]string, error) {
 }
 
 // BuildTasksForImages returns a task group for building only the specified docker images.
-func BuildTasksForImages(r *repo.Repo, root string, push bool, buildkitHost string, imageNames []string) (tasks.Task, error) {
-	cfg, err := config.Load(root)
-	if err != nil {
-		return nil, err
-	}
-
+func BuildTasksForImages(r *repo.Repo, root string, push bool, buildkitHost string, imageNames []string, naming ImageNaming) (tasks.Task, error) {
 	dockerfiles, err := findDockerfiles(r, root)
 	if err != nil {
 		return nil, err
@@ -390,6 +355,7 @@ func BuildTasksForImages(r *repo.Repo, root string, push bool, buildkitHost stri
 			Root:         root,
 			Push:         push,
 			BuildkitHost: buildkitHost,
+			Naming:       naming,
 		})
 	}
 
@@ -402,7 +368,7 @@ func BuildTasksForImages(r *repo.Repo, root string, push bool, buildkitHost stri
 		return rootTask, nil
 	}
 
-	if push && cfg.ImageRepo() == "images.local" && !strings.HasPrefix(buildkitHost, "k8s://") {
+	if push && naming.Prefix == "images.local" && !strings.HasPrefix(buildkitHost, "k8s://") {
 		rootTask = &k8s.PortForwardTask{
 			Child:      rootTask,
 			Service:    "in-cluster-image-registry",
@@ -416,17 +382,22 @@ func BuildTasksForImages(r *repo.Repo, root string, push bool, buildkitHost stri
 }
 
 // BuildTasks returns a task group for building all docker images found in images/<name>/Dockerfile.
-func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string) (tasks.Task, error) {
+func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string, naming ImageNaming) (tasks.Task, error) {
 	allImages, err := FindImageNames(r, root)
 	if err != nil {
 		return nil, err
 	}
-	return BuildTasksForImages(r, root, push, buildkitHost, allImages)
+	return BuildTasksForImages(r, root, push, buildkitHost, allImages, naming)
 }
 
 // Build builds docker images found in images/<name>/Dockerfile.
 func Build(ctx context.Context, r *repo.Repo, root string, push bool, buildkitHost string) error {
-	t, err := BuildTasks(r, root, push, buildkitHost)
+	cfg, err := config.Load(root)
+	if err != nil {
+		return err
+	}
+	naming := ResolveImageNaming(cfg)
+	t, err := BuildTasks(r, root, push, buildkitHost, naming)
 	if err != nil {
 		return err
 	}

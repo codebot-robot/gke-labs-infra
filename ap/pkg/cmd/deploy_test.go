@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
@@ -285,7 +286,13 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 			t.Fatalf("opt.GetRepo failed: %v", err)
 		}
 
-		allTasks, err := BuildDeployPlan(opt, r, "")
+		cfg, err := config.Load(opt.RepoRoot)
+		if err != nil {
+			t.Fatalf("config.Load failed: %v", err)
+		}
+		naming := images.ResolveImageNaming(cfg)
+
+		allTasks, err := BuildDeployPlan(opt, r, "", naming)
 		if err != nil {
 			t.Fatalf("BuildDeployPlan failed: %v", err)
 		}
@@ -348,7 +355,13 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 					t.Fatalf("opt.GetRepo failed: %v", err)
 				}
 
-				_, err = BuildDeployPlan(opt, r, "")
+				cfg, err := config.Load(opt.RepoRoot)
+				if err != nil {
+					t.Fatalf("config.Load failed: %v", err)
+				}
+				naming := images.ResolveImageNaming(cfg)
+
+				_, err = BuildDeployPlan(opt, r, "", naming)
 				if err == nil {
 					t.Fatalf("expected error for tag %q, got nil", tag)
 				}
@@ -381,7 +394,8 @@ func TestDeploy_FixtureRepo_SelectK8s(t *testing.T) {
 		t.Fatalf("GetRepo failed: %v", err)
 	}
 
-	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost)
+	naming := images.ResolveImageNaming(nil)
+	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost, naming)
 	if err != nil {
 		t.Fatalf("BuildDeployPlan failed: %v", err)
 	}
@@ -428,7 +442,8 @@ func TestDeploy_FixtureRepo_SelectWholeRoot(t *testing.T) {
 		t.Fatalf("GetRepo failed: %v", err)
 	}
 
-	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost)
+	naming := images.ResolveImageNaming(nil)
+	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost, naming)
 	if err != nil {
 		t.Fatalf("BuildDeployPlan failed: %v", err)
 	}
@@ -477,7 +492,8 @@ func TestDeploy_FixtureRepo_SelectSubK8s(t *testing.T) {
 		t.Fatalf("GetRepo failed: %v", err)
 	}
 
-	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost)
+	naming := images.ResolveImageNaming(nil)
+	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost, naming)
 	if err != nil {
 		t.Fatalf("BuildDeployPlan failed: %v", err)
 	}
@@ -516,7 +532,8 @@ func TestDeploy_FixtureRepo_SelectFile(t *testing.T) {
 		t.Fatalf("GetRepo failed: %v", err)
 	}
 
-	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost)
+	naming := images.ResolveImageNaming(nil)
+	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost, naming)
 	if err != nil {
 		t.Fatalf("BuildDeployPlan failed: %v", err)
 	}
@@ -555,7 +572,8 @@ func TestDeploy_FixtureRepo_SelectNoImages(t *testing.T) {
 		t.Fatalf("GetRepo failed: %v", err)
 	}
 
-	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost)
+	naming := images.ResolveImageNaming(nil)
+	planTasks, err := BuildDeployPlan(opt, r, opt.BuildkitHost, naming)
 	if err != nil {
 		t.Fatalf("BuildDeployPlan failed: %v", err)
 	}
@@ -714,7 +732,8 @@ func TestDeploy_BuildkitAndBuildx(t *testing.T) {
 	if err := optBuildx.Resolve([]string{"./k8s"}); err != nil {
 		t.Fatalf("optBuildx.Resolve failed: %v", err)
 	}
-	tasksBuildx, err := BuildDeployPlan(optBuildx, r, "")
+	naming := images.ResolveImageNaming(nil)
+	tasksBuildx, err := BuildDeployPlan(optBuildx, r, "", naming)
 	if err != nil {
 		t.Fatalf("BuildDeployPlan buildx failed: %v", err)
 	}
@@ -748,7 +767,7 @@ func TestDeploy_BuildkitAndBuildx(t *testing.T) {
 	if err := optBuildctl.Resolve([]string{"./k8s"}); err != nil {
 		t.Fatalf("optBuildctl.Resolve failed: %v", err)
 	}
-	tasksBuildctl, err := BuildDeployPlan(optBuildctl, r, customHost)
+	tasksBuildctl, err := BuildDeployPlan(optBuildctl, r, customHost, naming)
 	if err != nil {
 		t.Fatalf("BuildDeployPlan buildctl failed: %v", err)
 	}

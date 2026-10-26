@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
@@ -81,7 +82,12 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 		var all []tasks.Task
 
 		// Build tasks
-		buildTasks, err := images.BuildTasks(scope.Repo, apRoot, false, "")
+		cfg, err := config.Load(apRoot)
+		if err != nil {
+			return fmt.Errorf("failed to load config for %s: %w", apRoot, err)
+		}
+		naming := images.ResolveImageNaming(cfg)
+		buildTasks, err := images.BuildTasks(scope.Repo, apRoot, false, "", naming)
 		if err == nil && buildTasks != nil {
 			all = append(all, buildTasks)
 		}

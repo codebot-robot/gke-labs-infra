@@ -17,6 +17,8 @@ package k8s
 import (
 	"reflect"
 	"testing"
+
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 )
 
 func TestReplacePlaceholderImages(t *testing.T) {
@@ -482,7 +484,7 @@ spec:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := replacePlaceholderImages(tt.input, "my-repo", "v1")
+			got, err := replacePlaceholderImages(tt.input, imageref.ImageNaming{Prefix: "my-repo", Tag: "v1"})
 			if err != nil {
 				t.Fatalf("replacePlaceholderImages() error = %v", err)
 			}
