@@ -95,9 +95,6 @@ func (t *Tool) Run(ctx context.Context, opt RunOptions) error {
 
 // Exec executes the tool pass-through using syscall.Exec on Unix or mirroring as child process on Windows.
 func (t *Tool) Exec(ctx context.Context, repoRoot string, args []string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	inv, err := t.Prepare(ctx, repoRoot, args)
 	if err != nil {
 		return err
@@ -334,7 +331,6 @@ var registry = []*Tool{
 				Binary: goBin,
 				Args:   args,
 				Env:    fileutils.PrependPath(filteredEnv, filepath.Dir(goBin)),
-				Dir:    "",
 			}, nil
 		},
 		Update: func(ctx context.Context, repoRoot string) error {

@@ -45,8 +45,9 @@ func init() {
 
 func TestMain(m *testing.M) {
 	if t, ok := Resolve(os.Args[0]); ok {
+		ctx := context.Background()
 		repoRoot := FindRepoRoot()
-		if err := t.Exec(nil, repoRoot, os.Args[1:]); err != nil {
+		if err := t.Exec(ctx, repoRoot, os.Args[1:]); err != nil {
 			fmt.Fprintf(os.Stderr, "ap: %v\n", err)
 			os.Exit(1)
 		}
