@@ -171,8 +171,8 @@ func TestToolUpdateVersions_Command(t *testing.T) {
 	if !strings.Contains(out, "update-versions") {
 		t.Errorf("expected help output to mention update-versions, got: %s", out)
 	}
-	if !strings.Contains(out, "--protoc") || !strings.Contains(out, "--docker") || !strings.Contains(out, "--buildx") || !strings.Contains(out, "--kind") {
-		t.Errorf("expected help output to mention --protoc, --docker, --buildx, and --kind flags, got: %s", out)
+	if !strings.Contains(out, "--protoc") || !strings.Contains(out, "--docker") || !strings.Contains(out, "--buildx") || !strings.Contains(out, "--kind") || !strings.Contains(out, "--go") {
+		t.Errorf("expected help output to mention --protoc, --docker, --buildx, --kind, and --go flags, got: %s", out)
 	}
 }
 
@@ -428,7 +428,7 @@ func TestToolInstall(t *testing.T) {
 	}
 
 	output := buf.String()
-	expectedTools := []string{"kind", "docker", "docker-buildx", "protoc"}
+	expectedTools := []string{"kind", "docker", "docker-buildx", "protoc", "go"}
 	for _, toolName := range expectedTools {
 		linkPath := filepath.Join(tempDir, toolName)
 		fi, err := os.Lstat(linkPath)
@@ -475,5 +475,51 @@ func TestToolInstall(t *testing.T) {
 		if dest != fakeAp {
 			t.Fatalf("expected default symlink %s to point to %s, got %s", linkPath, fakeAp, dest)
 		}
+	}
+}
+
+func TestToolGo_DryRun(t *testing.T) {
+	tempCache := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", tempCache)
+
+	tempDir := t.TempDir()
+	goMod := "module example.com/test\n\ntoolchain go1.27.3\n"
+	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	binName := "go"
+	if runtime.GOOS == "windows" {
+		binName = "go.exe"
+	}
+	goBinDir := filepath.Join(tempCache, "tools", "go", "go1.27.3", "bin")
+	if err := os.MkdirAll(goBinDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(goBinDir, binName), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("AP_ROOT", tempDir)
+
+	rootCmd := BuildRootCommand()
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"tool", "go", "--dry-run", "--", "version"})
+
+	err := rootCmd.ExecuteContext(t.Context())
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error running ap tool go --dry-run: %v\nOutput: %s", err, output)
+	}
+
+	expectedPrefix := fmt.Sprintf("[dry-run] %s", filepath.Join(tempCache, "tools", "go", "go1.27.3", "bin", binName))
+	if !strings.HasPrefix(output, expectedPrefix) {
+		t.Errorf("expected dry-run output to start with %q, got: %s", expectedPrefix, output)
+	}
+	if !strings.Contains(output, "version") {
+		t.Errorf("expected output to contain 'version', got: %s", output)
 	}
 }
