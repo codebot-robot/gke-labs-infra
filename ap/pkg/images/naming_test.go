@@ -131,3 +131,40 @@ func TestResolveImageNaming(t *testing.T) {
 		})
 	}
 }
+
+func TestImageRef_String_Digest(t *testing.T) {
+	tests := []struct {
+		name string
+		ref  ImageRef
+		want string
+	}{
+		{
+			name: "without digest",
+			ref:  ImageRef{Prefix: "my-repo", Name: "app", Tag: "v1"},
+			want: "my-repo/app:v1",
+		},
+		{
+			name: "with sha256 prefix digest",
+			ref:  ImageRef{Prefix: "my-repo", Name: "app", Tag: "latest", Digest: "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"},
+			want: "my-repo/app:latest@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+		},
+		{
+			name: "with raw hex digest",
+			ref:  ImageRef{Prefix: "my-repo", Name: "app", Tag: "latest", Digest: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"},
+			want: "my-repo/app:latest@sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+		},
+		{
+			name: "with unique tag (kind fallback)",
+			ref:  ImageRef{Prefix: "images.local", Name: "app", Tag: "latest-abcdef123456"},
+			want: "images.local/app:latest-abcdef123456",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.ref.String(); got != tt.want {
+				t.Errorf("ref.String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

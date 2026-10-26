@@ -311,13 +311,39 @@ func getCurrentKubeContext(ctx context.Context) string {
 
 // KindLoadTask loads docker images into a kind cluster using the tool-managed kind binary.
 type KindLoadTask struct {
-	RepoRoot    string
+	// RepoRoot is the path to the repository root directory, used to locate
+	// tool configuration for resolving the pinned kind binary.
+	RepoRoot string
+
+	// ClusterName is the name of the kind cluster where images will be loaded.
 	ClusterName string
-	Images      []string
+
+	// ImageNames holds logical image names (e.g. "my-app") corresponding to
+	// images/<name>/Dockerfile in the repo. When set alongside Naming, these names
+	// are resolved dynamically at execution time via Naming.Ref(name).String()
+	// so that content-addressed unique tags generated during the preceding Docker
+	// build are accurately picked up for loading.
+	ImageNames []string
+
+	// Naming holds the image naming conventions and shared image references.
+	Naming images.ImageNaming
+
+	// Images contains fully-qualified image reference strings (e.g.
+	// "images.local/my-app:v1.0"). At plan time this is populated with base
+	// references for task inspection; it also serves as a direct fallback if
+	// ImageNames is empty (such as in unit tests).
+	Images []string
 }
 
 func (t *KindLoadTask) Run(ctx context.Context, scope *tasks.APScope) error {
-	if len(t.Images) == 0 {
+	imagesToLoad := t.Images
+	if len(t.ImageNames) > 0 {
+		imagesToLoad = nil
+		for _, img := range t.ImageNames {
+			imagesToLoad = append(imagesToLoad, t.Naming.Ref(img).String())
+		}
+	}
+	if len(imagesToLoad) == 0 {
 		return nil
 	}
 	root := t.RepoRoot
@@ -328,7 +354,7 @@ func (t *KindLoadTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	if err != nil {
 		return fmt.Errorf("failed to ensure kind tool: %w", err)
 	}
-	return e2e.LoadImages(ctx, kindBin, t.ClusterName, t.Images)
+	return e2e.LoadImages(ctx, kindBin, t.ClusterName, imagesToLoad)
 }
 
 func (t *KindLoadTask) GetName() string {
@@ -344,22 +370,14 @@ func (t *KindLoadTask) GetChildren() []tasks.Task {
 
 // BuildDeployPlan constructs the task tree for deploying artifacts according to DeployOptions.
 func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string, naming images.ImageNaming) ([]tasks.Task, error) {
+	if opt.kindCluster != "" {
+		naming.KindMode = true
+	}
 	push := !opt.SkipPush && opt.kindCluster == ""
 	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, opt.kindCluster, naming)
 }
 
 func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string, kindCluster string, naming images.ImageNaming) ([]tasks.Task, error) {
-	if kindCluster != "" {
-		for _, plan := range plans {
-			if len(plan.imageNames) > 0 {
-				if naming.Tag == "latest" {
-					return nil, fmt.Errorf("set IMAGE_TAG to a non-latest value so pods use imagePullPolicy IfNotPresent")
-				}
-				break
-			}
-		}
-	}
-
 	var allTasks []tasks.Task
 
 	var originalNamespace string
@@ -390,6 +408,8 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 			group.Tasks = append(group.Tasks, &KindLoadTask{
 				RepoRoot:    plan.apRoot,
 				ClusterName: kindCluster,
+				ImageNames:  plan.imageNames,
+				Naming:      naming,
 				Images:      fullImages,
 			})
 		}
