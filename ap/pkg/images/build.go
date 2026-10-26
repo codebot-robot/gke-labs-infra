@@ -122,7 +122,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	fullImageName := ImageRef{Prefix: actualImagePrefix, Name: t.ImageName, Tag: naming.Tag}.String()
 
 	if t.BuildkitHost != "" {
-		return t.runBuildctl(ctx, t.Root, fullImageName, t.Dockerfile, naming, platforms)
+		return t.runBuildctl(ctx, scope, t.Root, fullImageName, t.Dockerfile, naming, platforms)
 	}
 
 	buildxBin := t.BuildxBin
@@ -168,7 +168,7 @@ func (t *DockerBuildTask) Run(ctx context.Context, scope *tasks.APScope) error {
 		platforms = nil
 	}
 
-	return t.runDocker(ctx, buildxBin, dockerBin, t.Root, fullImageName, actualImagePrefix, t.Dockerfile, naming, platforms)
+	return t.runDocker(ctx, scope, buildxBin, dockerBin, t.Root, fullImageName, actualImagePrefix, t.Dockerfile, naming, platforms)
 }
 
 func (t *DockerBuildTask) ensureMultiPlatformBuilder(ctx context.Context, buildxBin string) error {
@@ -211,7 +211,7 @@ func (t *DockerBuildTask) supportsMultiPlatform(ctx context.Context, buildxBin s
 	return true
 }
 
-func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) error {
+func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.APScope, root, fullImageName, relDockerfilePath string, naming ImageNaming, platforms []string) error {
 	klog.Infof("Building image %s from %s using buildctl", fullImageName, root)
 
 	output := fmt.Sprintf("type=image,name=%s,push=%t", fullImageName, t.Push)
@@ -257,8 +257,8 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
 					cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 					cmd.Dir = root
-					cmd.Stdout = os.Stdout
-					cmd.Stderr = os.Stderr
+					cmd.Stdout = scope.GetStdout()
+					cmd.Stderr = scope.GetStderr()
 					cmd.Env = append(os.Environ(), "BUILDKIT_HOST=tcp://localhost:2375")
 					return cmd.Run()
 				},
@@ -268,14 +268,17 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 			LocalPort:  2375,
 			RemotePort: 2375,
 		}
-		if err := pfTask.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root}); err != nil {
+		childScope := *scope
+		childScope.RepoRoot = root
+		childScope.Dir = root
+		if err := pfTask.Run(ctx, &childScope); err != nil {
 			return err
 		}
 	} else {
 		cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)
 		cmd.Dir = root
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		cmd.Stdout = scope.GetStdout()
+		cmd.Stderr = scope.GetStderr()
 		cmd.Env = append(os.Environ(), "BUILDKIT_HOST="+t.BuildkitHost)
 		if err := cmd.Run(); err != nil {
 			return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
@@ -291,7 +294,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 	return nil
 }
 
-func (t *DockerBuildTask) runDocker(ctx context.Context, buildxBin, dockerBin, root, fullImageName, actualImagePrefix, relDockerfilePath string, naming ImageNaming, platforms []string) error {
+func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.APScope, buildxBin, dockerBin, root, fullImageName, actualImagePrefix, relDockerfilePath string, naming ImageNaming, platforms []string) error {
 	klog.Infof("Building image %s from %s using docker buildx", fullImageName, root)
 
 	metaFile := filepath.Join(os.TempDir(), fmt.Sprintf("buildx-meta-%d.json", time.Now().UnixNano()))
@@ -328,8 +331,8 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, buildxBin, dockerBin, r
 
 	cmd := execCommandContext(ctx, buildxBin, args...)
 	cmd.Dir = root
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = scope.GetStdout()
+	cmd.Stderr = scope.GetStderr()
 	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBin))
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
@@ -485,8 +488,9 @@ func BuildTasksForImages(r *repo.Repo, root string, push bool, buildkitHost stri
 	}
 
 	var rootTask tasks.Task = &tasks.Group{
-		Name:  "build-images",
-		Tasks: buildTasks,
+		Name:     "build-images",
+		Tasks:    buildTasks,
+		Parallel: true,
 	}
 
 	if len(buildTasks) == 0 {
