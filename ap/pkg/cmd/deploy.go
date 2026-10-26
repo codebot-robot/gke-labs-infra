@@ -17,7 +17,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -344,17 +343,16 @@ func (t *KindLoadTask) GetChildren() []tasks.Task {
 }
 
 // BuildDeployPlan constructs the task tree for deploying artifacts according to DeployOptions.
-func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string) ([]tasks.Task, error) {
+func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string, naming images.ImageNaming) ([]tasks.Task, error) {
 	push := !opt.SkipPush && opt.kindCluster == ""
-	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, opt.kindCluster)
+	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, opt.kindCluster, naming)
 }
 
-func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string, kindCluster string) ([]tasks.Task, error) {
+func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string, kindCluster string, naming images.ImageNaming) ([]tasks.Task, error) {
 	if kindCluster != "" {
 		for _, plan := range plans {
 			if len(plan.imageNames) > 0 {
-				tag := os.Getenv("IMAGE_TAG")
-				if tag == "" || tag == "latest" {
+				if naming.Tag == "latest" {
 					return nil, fmt.Errorf("set IMAGE_TAG to a non-latest value so pods use imagePullPolicy IfNotPresent")
 				}
 				break
@@ -378,22 +376,16 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 			Name: fmt.Sprintf("deploy-%s", filepath.Base(plan.apRoot)),
 		}
 
-		buildTasks, err := images.BuildTasksForImages(r.Under(plan.apRoot), plan.apRoot, push, buildkitHost, plan.imageNames)
+		buildTasks, err := images.BuildTasksForImages(r.Under(plan.apRoot), plan.apRoot, push, buildkitHost, plan.imageNames, naming)
 		if err != nil {
 			return nil, fmt.Errorf("build failed during deploy for %s: %w", plan.apRoot, err)
 		}
 		group.Tasks = append(group.Tasks, buildTasks)
 
 		if kindCluster != "" && len(plan.imageNames) > 0 {
-			cfg, err := config.Load(plan.apRoot)
-			if err != nil {
-				return nil, err
-			}
-			imageRepo := cfg.ImageRepo()
-			tag := os.Getenv("IMAGE_TAG")
 			var fullImages []string
 			for _, img := range plan.imageNames {
-				fullImages = append(fullImages, images.FullImageName(imageRepo, img, tag))
+				fullImages = append(fullImages, naming.Ref(img).String())
 			}
 			group.Tasks = append(group.Tasks, &KindLoadTask{
 				RepoRoot:    plan.apRoot,
@@ -405,6 +397,7 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 		deployTasks := k8s.DeployTasksForManifests(plan.manifests, k8s.DeployTaskOptions{
 			Namespace:         namespace,
 			OriginalNamespace: originalNamespace,
+			Naming:            naming,
 		})
 		group.Tasks = append(group.Tasks, deployTasks)
 
@@ -440,7 +433,13 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		opt.kindCluster = cluster
 	}
 
-	allTasks, err := BuildDeployPlan(opt, r, buildkitHost)
+	cfg, err := config.Load(opt.RepoRoot)
+	if err != nil {
+		return err
+	}
+	naming := images.ResolveImageNaming(cfg)
+
+	allTasks, err := BuildDeployPlan(opt, r, buildkitHost, naming)
 	if err != nil {
 		return err
 	}

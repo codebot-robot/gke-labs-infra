@@ -100,7 +100,8 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 
 	// Step 3: Run all task discovery functions using scopes and shared tree
 	for _, scope := range scopes {
-		if _, err := images.BuildTasks(scope.Repo, scope.Dir, false, ""); err != nil {
+		naming := images.ResolveImageNaming(nil)
+		if _, err := images.BuildTasks(scope.Repo, scope.Dir, false, "", naming); err != nil {
 			t.Fatalf("BuildTasks failed for %s: %v", scope.Dir, err)
 		}
 		if _, err := k8s.DeployTasks(scope.Repo, scope.Dir); err != nil {

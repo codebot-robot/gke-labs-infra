@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
@@ -76,13 +77,19 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		return err
 	}
 
+	cfg, err := config.Load(opt.RepoRoot)
+	if err != nil {
+		return err
+	}
+	naming := images.ResolveImageNaming(cfg)
+
 	var allTasks []tasks.Task
 	for _, scope := range scopes {
 		group := &tasks.Group{
 			Name: fmt.Sprintf("build-%s", filepath.Base(scope.Dir)),
 		}
 
-		imageTasks, err := images.BuildTasks(scope.Repo, scope.Dir, opt.Push, buildkitHost)
+		imageTasks, err := images.BuildTasks(scope.Repo, scope.Dir, opt.Push, buildkitHost, naming)
 		if err != nil {
 			return err
 		}
