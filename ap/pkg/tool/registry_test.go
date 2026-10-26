@@ -15,8 +15,45 @@
 package tool
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
+
+const fakeSymlinkToolName = "fake-symlink-tool"
+
+func init() {
+	registry = append(registry, &Tool{
+		Name: fakeSymlinkToolName,
+		Prepare: func(ctx context.Context, repoRoot string, args []string) (*Invocation, error) {
+			fakeBin := os.Getenv("AP_TEST_FAKE_TOOL_BIN")
+			if fakeBin == "" {
+				return nil, fmt.Errorf("AP_TEST_FAKE_TOOL_BIN not set")
+			}
+			return &Invocation{
+				Binary: fakeBin,
+				Args:   args,
+			}, nil
+		},
+	})
+}
+
+func TestMain(m *testing.M) {
+	if t, ok := Resolve(os.Args[0]); ok {
+		repoRoot := FindRepoRoot()
+		if err := t.Exec(nil, repoRoot, os.Args[1:]); err != nil {
+			fmt.Fprintf(os.Stderr, "ap: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+	os.Exit(m.Run())
+}
 
 func TestResolveTool(t *testing.T) {
 	tests := []struct {
@@ -75,5 +112,86 @@ func TestResolveTool(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestToolSymlink_PreservesWorkingDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinking is not supported on Windows")
+	}
+
+	// Create a fake tool binary (a script that prints pwd and its arguments).
+	fakeBinDir := t.TempDir()
+	fakeBin := filepath.Join(fakeBinDir, "fake-tool-bin.sh")
+	script := "#!/bin/sh\npwd\nfor a in \"$@\"; do\n  echo \"arg: $a\"\ndone\n"
+	if err := os.WriteFile(fakeBin, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a repository structure with .ap and .git at the root.
+	repoDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoDir, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a subdirectory inside the repository.
+	subDir := filepath.Join(repoDir, "sub", "pkg")
+	if err := os.MkdirAll(subDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a symlink named fakeSymlinkToolName pointing to the test executable.
+	testExe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	symlinkDir := t.TempDir()
+	symlinkPath := filepath.Join(symlinkDir, fakeSymlinkToolName)
+	if err := os.Symlink(testExe, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	// Invoke the tool via its symlink from the subdirectory with a relative path argument.
+	relArg := filepath.Join("relative", "file.proto")
+	cmd := exec.Command("sh", "-c", "cd \"$1\" && exec \"$2\" \"$3\"", "sh", subDir, symlinkPath, relArg)
+
+	// Strip AP_ROOT and REPO_ROOT from environment so FindRoots discovers the root by walking up from subDir.
+	var env []string
+	for _, e := range os.Environ() {
+		if !strings.HasPrefix(e, "AP_ROOT=") && !strings.HasPrefix(e, "REPO_ROOT=") {
+			env = append(env, e)
+		}
+	}
+	cmd.Env = append(env, "AP_TEST_FAKE_TOOL_BIN="+fakeBin)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("invoking tool via symlink failed: %v\nOutput: %s", err, string(out))
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("unexpected output format, got %d lines: %q", len(lines), string(out))
+	}
+
+	gotPwd := lines[0]
+	// Resolve symlinks to handle OS temp dir symlinks (e.g. /tmp vs /private/tmp on macOS).
+	canonicalSubDir, err := filepath.EvalSymlinks(subDir)
+	if err != nil {
+		t.Fatalf("failed to eval symlinks for subDir: %v", err)
+	}
+	canonicalGotPwd, err := filepath.EvalSymlinks(gotPwd)
+	if err != nil {
+		t.Fatalf("failed to eval symlinks for gotPwd: %v", err)
+	}
+
+	if canonicalGotPwd != canonicalSubDir {
+		t.Errorf("working directory mismatch: got %q, want %q", canonicalGotPwd, canonicalSubDir)
+	}
+	if lines[1] != "arg: "+relArg {
+		t.Errorf("argument mismatch: got %q, want %q", lines[1], "arg: "+relArg)
 	}
 }

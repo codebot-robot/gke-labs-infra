@@ -17,9 +17,7 @@ package protoc
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"sort"
 	"strings"
 )
@@ -139,46 +137,4 @@ func PrepareProtoc(ctx context.Context, cfg *Config, args []string) (*ProtocEnvi
 		PluginBinDirs: pluginBinDirs,
 		Env:           env,
 	}, nil
-}
-
-// RunProtoc executes protoc with the provided arguments, ensuring the release zip include directory
-// and required plugins are available. The include directory is appended after user arguments so
-// user include paths take precedence.
-func RunProtoc(ctx context.Context, cfg *Config, workDir string, args []string, stdout, stderr io.Writer, stdin io.Reader) error {
-	env, err := PrepareProtoc(ctx, cfg, args)
-	if err != nil {
-		return err
-	}
-
-	finalArgs := make([]string, 0, len(args)+1)
-	finalArgs = append(finalArgs, args...)
-
-	hasUserInclude := false
-	hasInclude := false
-	for _, arg := range args {
-		if strings.HasPrefix(arg, "-I") || strings.HasPrefix(arg, "--proto_path") {
-			hasUserInclude = true
-		}
-		if arg == "-I"+env.IncludeDir || arg == env.IncludeDir {
-			hasInclude = true
-		}
-	}
-	if !hasUserInclude {
-		finalArgs = append(finalArgs, "-I.")
-	}
-	if !hasInclude && env.IncludeDir != "" {
-		finalArgs = append(finalArgs, "-I"+env.IncludeDir)
-	}
-
-	cmd := exec.CommandContext(ctx, env.ProtocBin, finalArgs...)
-	cmd.Dir = workDir
-	cmd.Env = env.Env
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	cmd.Stdin = stdin
-
-	if err := cmd.Run(); err != nil {
-		return err
-	}
-	return nil
 }

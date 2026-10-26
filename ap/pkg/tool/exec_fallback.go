@@ -27,7 +27,6 @@ func execProcess(inv *Invocation) error {
 	if len(cmd.Env) == 0 {
 		cmd.Env = os.Environ()
 	}
-	cmd.Dir = inv.Dir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Stdin = os.Stdin

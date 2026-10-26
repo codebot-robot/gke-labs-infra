@@ -22,11 +22,6 @@ import (
 )
 
 func execProcess(inv *Invocation) error {
-	if inv.Dir != "" && inv.Dir != "." {
-		if err := os.Chdir(inv.Dir); err != nil {
-			return err
-		}
-	}
 	argv := append([]string{inv.Binary}, inv.Args...)
 	env := inv.Env
 	if len(env) == 0 {
