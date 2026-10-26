@@ -28,6 +28,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
+	"k8s.io/klog/v2"
 )
 
 // Options specifies configuration for the test harness.
@@ -201,7 +202,16 @@ func (h *Harness) DockerBuild(tag, dockerfile, context string) {
 	h.runCmd("docker", "build", "-t", tag, "-f", dockerfile, context)
 }
 
+var loadImagesBackoffs = []time.Duration{
+	2 * time.Second,
+	4 * time.Second,
+	8 * time.Second,
+	16 * time.Second,
+	32 * time.Second,
+}
+
 // LoadImages loads docker images into the specified kind cluster using the given kind binary.
+// It retries on failure with exponential backoff.
 func LoadImages(ctx context.Context, kindBin, cluster string, images []string) error {
 	if kindBin == "" {
 		return fmt.Errorf("kindBin is required")
@@ -214,13 +224,26 @@ func LoadImages(ctx context.Context, kindBin, cluster string, images []string) e
 	if cluster != "" {
 		args = append(args, "--name", cluster)
 	}
-	cmd := exec.CommandContext(ctx, kindBin, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, err)
+
+	for attempt := 0; ; attempt++ {
+		cmd := exec.CommandContext(ctx, kindBin, args...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		err := cmd.Run()
+		if err == nil {
+			return nil
+		}
+		if attempt == len(loadImagesBackoffs) {
+			return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, err)
+		}
+		backoff := loadImagesBackoffs[attempt]
+		klog.Warningf("failed to load image(s) into kind cluster %q (attempt %d/%d): %v; retrying in %v...", cluster, attempt+1, len(loadImagesBackoffs)+1, err, backoff)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, ctx.Err())
+		case <-time.After(backoff):
+		}
 	}
-	return nil
 }
 
 // KindLoad loads a docker image into the kind cluster.
