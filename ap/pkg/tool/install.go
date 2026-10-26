@@ -24,15 +24,15 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 )
 
-// LinkOptions holds options for Link.
-type LinkOptions struct {
+// InstallOptions holds options for Install.
+type InstallOptions struct {
 	TargetDir  string
 	Executable string
 	Stdout     io.Writer
 }
 
-// DefaultLinkDir returns the default directory for linking tool symlinks (AP_CACHE_DIR/bin).
-func DefaultLinkDir() (string, error) {
+// DefaultInstallDir returns the default directory for installing tool symlinks (AP_CACHE_DIR/bin).
+func DefaultInstallDir() (string, error) {
 	cacheRoot, err := fileutils.CacheDir()
 	if err != nil {
 		return "", err
@@ -40,16 +40,16 @@ func DefaultLinkDir() (string, error) {
 	return filepath.Join(cacheRoot, "bin"), nil
 }
 
-// Link creates or refreshes symlinks for all registered tools pointing at the ap executable.
-func Link(opt LinkOptions) ([]string, error) {
+// Install creates or refreshes symlinks for all registered tools pointing at the ap executable.
+func Install(opt InstallOptions) ([]string, error) {
 	if runtime.GOOS == "windows" {
-		return nil, fmt.Errorf("ap tool link is not supported on Windows")
+		return nil, fmt.Errorf("ap tool install is not supported on Windows")
 	}
 
 	targetDir := opt.TargetDir
 	if targetDir == "" {
 		var err error
-		targetDir, err = DefaultLinkDir()
+		targetDir, err = DefaultInstallDir()
 		if err != nil {
 			return nil, err
 		}

@@ -404,7 +404,7 @@ func TestToolDocker_BuildxRewrite(t *testing.T) {
 	}
 }
 
-func TestToolLink(t *testing.T) {
+func TestToolInstall(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinking is not supported on Windows")
 	}
@@ -420,11 +420,11 @@ func TestToolLink(t *testing.T) {
 	buf := new(bytes.Buffer)
 	rootCmd.SetOut(buf)
 	rootCmd.SetErr(buf)
-	rootCmd.SetArgs([]string{"tool", "link", tempDir})
+	rootCmd.SetArgs([]string{"tool", "install", tempDir})
 
 	err := rootCmd.ExecuteContext(t.Context())
 	if err != nil {
-		t.Fatalf("unexpected error running ap tool link: %v\nOutput: %s", err, buf.String())
+		t.Fatalf("unexpected error running ap tool install: %v\nOutput: %s", err, buf.String())
 	}
 
 	output := buf.String()
@@ -452,18 +452,18 @@ func TestToolLink(t *testing.T) {
 
 	// Test refreshing existing links
 	buf.Reset()
-	rootCmd.SetArgs([]string{"tool", "link", tempDir})
+	rootCmd.SetArgs([]string{"tool", "install", tempDir})
 	if err := rootCmd.ExecuteContext(t.Context()); err != nil {
-		t.Fatalf("unexpected error refreshing ap tool link: %v\nOutput: %s", err, buf.String())
+		t.Fatalf("unexpected error refreshing ap tool install: %v\nOutput: %s", err, buf.String())
 	}
 
 	// Test default dir (AP_CACHE_DIR/bin)
 	cacheDir := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", cacheDir)
 	buf.Reset()
-	rootCmd.SetArgs([]string{"tool", "link"})
+	rootCmd.SetArgs([]string{"tool", "install"})
 	if err := rootCmd.ExecuteContext(t.Context()); err != nil {
-		t.Fatalf("unexpected error running ap tool link with default dir: %v\nOutput: %s", err, buf.String())
+		t.Fatalf("unexpected error running ap tool install with default dir: %v\nOutput: %s", err, buf.String())
 	}
 	defaultBinDir := filepath.Join(cacheDir, "bin")
 	for _, toolName := range expectedTools {

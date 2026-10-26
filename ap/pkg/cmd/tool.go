@@ -31,7 +31,7 @@ func BuildToolCommand(rootOpt *RootOptions) *cobra.Command {
 	for _, t := range tool.All() {
 		cmd.AddCommand(buildToolSubcommand(rootOpt, t))
 	}
-	cmd.AddCommand(BuildToolLinkCommand(rootOpt))
+	cmd.AddCommand(BuildToolInstallCommand(rootOpt))
 	cmd.AddCommand(BuildToolUpdateVersionsCommand(rootOpt))
 
 	return cmd
@@ -74,18 +74,18 @@ func buildToolSubcommand(rootOpt *RootOptions, t *tool.Tool) *cobra.Command {
 	return cmd
 }
 
-// BuildToolLinkCommand constructs the cobra command for "tool link".
-func BuildToolLinkCommand(rootOpt *RootOptions) *cobra.Command {
+// BuildToolInstallCommand constructs the cobra command for "tool install".
+func BuildToolInstallCommand(rootOpt *RootOptions) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "link [dir]",
-		Short: "Create symlinks for managed tools pointing to ap",
+		Use:   "install [dir]",
+		Short: "Install symlinks for managed tools pointing to ap",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var dir string
 			if len(args) > 0 {
 				dir = args[0]
 			}
-			_, err := tool.Link(tool.LinkOptions{
+			_, err := tool.Install(tool.InstallOptions{
 				TargetDir: dir,
 				Stdout:    cmd.OutOrStdout(),
 			})
