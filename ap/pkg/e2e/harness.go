@@ -225,36 +225,25 @@ func LoadImages(ctx context.Context, kindBin, cluster string, images []string) e
 		args = append(args, "--name", cluster)
 	}
 
-	backoffs := loadImagesBackoffs
-	totalAttempts := len(backoffs) + 1
-	var lastErr error
-
-	for attempt := 1; attempt <= totalAttempts; attempt++ {
-		if attempt > 1 {
-			backoff := backoffs[attempt-2]
-			klog.Warningf("failed to load image(s) into kind cluster %q (attempt %d/%d): %v; retrying in %v...", cluster, attempt-1, totalAttempts, lastErr, backoff)
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, ctx.Err())
-			case <-time.After(backoff):
-			}
-		}
-
-		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, err)
-		}
-
+	for attempt := 0; ; attempt++ {
 		cmd := exec.CommandContext(ctx, kindBin, args...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			lastErr = err
-			continue
+		err := cmd.Run()
+		if err == nil {
+			return nil
 		}
-		return nil
+		if attempt == len(loadImagesBackoffs) {
+			return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, err)
+		}
+		backoff := loadImagesBackoffs[attempt]
+		klog.Warningf("failed to load image(s) into kind cluster %q (attempt %d/%d): %v; retrying in %v...", cluster, attempt+1, len(loadImagesBackoffs)+1, err, backoff)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, ctx.Err())
+		case <-time.After(backoff):
+		}
 	}
-
-	return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, lastErr)
 }
 
 // KindLoad loads a docker image into the kind cluster.
