@@ -27,7 +27,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/kindload"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 	"github.com/spf13/cobra"
@@ -100,7 +100,7 @@ func (opt *DeployOptions) Resolve(args []string) error {
 		}
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ type targetFilter struct {
 	path string
 }
 
-func resolveDeployTargets(r *repo.Repo, repoRoot, currentAPRoot string, targets []string) ([]string, map[string]bool, map[string][]targetFilter, error) {
+func resolveDeployTargets(r *sourcetree.SourceTree, repoRoot, currentAPRoot string, targets []string) ([]string, map[string]bool, map[string][]targetFilter, error) {
 	if len(targets) == 0 {
 		targets = []string{"."}
 	}
@@ -211,7 +211,7 @@ func resolveDeployTargets(r *repo.Repo, repoRoot, currentAPRoot string, targets 
 	return roots, wholeRoot, filtersByRoot, nil
 }
 
-func selectManifests(r *repo.Repo, apRoot string, whole bool, filters []targetFilter) ([]string, error) {
+func selectManifests(r *sourcetree.SourceTree, apRoot string, whole bool, filters []targetFilter) ([]string, error) {
 	allManifests := r.Under(apRoot).FindManifests()
 	if whole || len(filters) == 0 {
 		return allManifests, nil
@@ -239,7 +239,7 @@ func selectManifests(r *repo.Repo, apRoot string, whole bool, filters []targetFi
 	return selectedManifests, nil
 }
 
-func referencedImages(r *repo.Repo, apRoot, repoRoot string, manifests []string) ([]string, error) {
+func referencedImages(r *sourcetree.SourceTree, apRoot, repoRoot string, manifests []string) ([]string, error) {
 	availableImages, err := images.FindImageNames(r, apRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find available images in %s: %w", apRoot, err)
@@ -275,7 +275,7 @@ func referencedImages(r *repo.Repo, apRoot, repoRoot string, manifests []string)
 	return imageNames, nil
 }
 
-func buildDeployPlans(r *repo.Repo, repoRoot, currentAPRoot string, targets []string) ([]deployPlan, error) {
+func buildDeployPlans(r *sourcetree.SourceTree, repoRoot, currentAPRoot string, targets []string) ([]deployPlan, error) {
 	roots, wholeRoot, filtersByRoot, err := resolveDeployTargets(r, repoRoot, currentAPRoot, targets)
 	if err != nil {
 		return nil, err
@@ -372,7 +372,7 @@ func getCurrentKubeContext(ctx context.Context, kubectlBin string) string {
 type KindLoadTask = kindload.KindLoadTask
 
 // BuildDeployPlan constructs the task tree for deploying artifacts according to DeployOptions.
-func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string, naming images.ImageNaming) ([]tasks.Task, error) {
+func BuildDeployPlan(opt DeployOptions, r *sourcetree.SourceTree, buildkitHost string, naming images.ImageNaming) ([]tasks.Task, error) {
 	tc := opt.TargetCluster
 	if opt.Cluster != "" && tc.KubeContext == "" {
 		resolved, err := ResolveTargetCluster(opt.Cluster, "")
@@ -391,7 +391,7 @@ func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string, namin
 	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, tc, naming, opt.KubectlBin)
 }
 
-func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster TargetCluster, naming images.ImageNaming, kubectlBin string) ([]tasks.Task, error) {
+func buildDeployTasks(r *sourcetree.SourceTree, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster TargetCluster, naming images.ImageNaming, kubectlBin string) ([]tasks.Task, error) {
 	var allTasks []tasks.Task
 
 	var originalNamespace string
@@ -485,7 +485,7 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
 		return err
 	}
@@ -501,5 +501,7 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r, KubectlBin: kubectlBin}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	scope := tasks.NewScope(opt.RepoRoot, opt.RepoRoot, r)
+	scope.KubectlBin = kubectlBin
+	return tasks.Run(ctx, scope, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

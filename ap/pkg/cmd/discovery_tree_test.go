@@ -26,12 +26,12 @@ import (
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
 func TestSingleWalkPerInvocation(t *testing.T) {
-	repo.ResetCache()
+	sourcetree.ResetCache()
 	tempDir := t.TempDir()
 
 	// Create repository tree
@@ -78,13 +78,13 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 	}
 
 	// At this point, the repository tree was walked once during Resolve
-	if count := repo.WalkCount(); count != 1 {
+	if count := sourcetree.WalkCount(); count != 1 {
 		t.Fatalf("expected WalkCount=1 after Resolve, got %d", count)
 	}
 
-	r, err := rootOpt.GetRepo()
+	r, err := rootOpt.GetSourceTree()
 	if err != nil {
-		t.Fatalf("GetRepo failed: %v", err)
+		t.Fatalf("GetSourceTree failed: %v", err)
 	}
 
 	// Step 2: Run DiscoverScopes with the shared repo
@@ -94,29 +94,29 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 	}
 
 	// Verify no additional walks happened
-	if count := repo.WalkCount(); count != 1 {
+	if count := sourcetree.WalkCount(); count != 1 {
 		t.Fatalf("expected WalkCount=1 after DiscoverScopes, got %d", count)
 	}
 
 	// Step 3: Run all task discovery functions using scopes and shared tree
 	for _, scope := range scopes {
 		naming := images.ResolveImageNaming(nil)
-		if _, err := images.BuildTasks(scope.Repo, scope.Dir, false, "", naming); err != nil {
+		if _, err := images.BuildTasks(scope.SourceTree, scope.Dir, false, "", naming); err != nil {
 			t.Fatalf("BuildTasks failed for %s: %v", scope.Dir, err)
 		}
-		if _, err := k8s.DeployTasks(scope.Repo, scope.Dir); err != nil {
+		if _, err := k8s.DeployTasks(scope.SourceTree, scope.Dir); err != nil {
 			t.Fatalf("DeployTasks failed for %s: %v", scope.Dir, err)
 		}
-		if _, err := golang.LintTasks(scope.Repo, scope.Dir); err != nil {
+		if _, err := golang.LintTasks(scope.SourceTree, scope.Dir); err != nil {
 			t.Fatalf("LintTasks failed for %s: %v", scope.Dir, err)
 		}
-		if _, err := golang.TestTasks(scope.Repo, scope.Dir); err != nil {
+		if _, err := golang.TestTasks(scope.SourceTree, scope.Dir); err != nil {
 			t.Fatalf("TestTasks failed for %s: %v", scope.Dir, err)
 		}
-		if _, err := format.FormatTasks(scope.Repo, scope.Dir); err != nil {
+		if _, err := format.FormatTasks(scope.SourceTree, scope.Dir); err != nil {
 			t.Fatalf("FormatTasks failed for %s: %v", scope.Dir, err)
 		}
-		if _, err := tasks.FindTaskScripts(scope.Repo, scope.Dir); err != nil {
+		if _, err := tasks.FindTaskScripts(scope.SourceTree, scope.Dir); err != nil {
 			t.Fatalf("FindTaskScripts failed for %s: %v", scope.Dir, err)
 		}
 	}
@@ -126,13 +126,13 @@ func TestSingleWalkPerInvocation(t *testing.T) {
 	}
 
 	// Verify that still only exactly ONE walk occurred throughout the entire lifecycle
-	if count := repo.WalkCount(); count != 1 {
+	if count := sourcetree.WalkCount(); count != 1 {
 		t.Fatalf("expected WalkCount to remain 1 after all discovery, got %d", count)
 	}
 }
 
 func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
-	repo.ResetCache()
+	sourcetree.ResetCache()
 	tempDir := t.TempDir()
 
 	files := map[string]string{
@@ -168,9 +168,9 @@ func TestSkipUniformlyInvisibleToAllConsumers(t *testing.T) {
 		t.Fatalf("config.Load failed: %v", err)
 	}
 
-	r, err := repo.Open(tempDir, repo.WithSkip(cfg.Skip...))
+	r, err := sourcetree.Open(tempDir, sourcetree.WithSkip(cfg.Skip...))
 	if err != nil {
-		t.Fatalf("repo.Open failed: %v", err)
+		t.Fatalf("sourcetree.Open failed: %v", err)
 	}
 
 	ignoredDir := filepath.Join(tempDir, "ignored")

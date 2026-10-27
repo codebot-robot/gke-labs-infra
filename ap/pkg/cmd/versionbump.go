@@ -55,7 +55,7 @@ func RunVersionBump(ctx context.Context, opt VersionBumpOptions) error {
 	if err := requireRepoRoot(opt.RootOptions); err != nil {
 		return err
 	}
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
 		return err
 	}

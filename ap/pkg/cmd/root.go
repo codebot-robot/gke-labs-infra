@@ -23,7 +23,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
@@ -31,18 +31,18 @@ import (
 
 // RootOptions holds the configuration for the root command.
 type RootOptions struct {
-	RepoRoot string
-	APRoot   string
-	APRoots  []string
-	DryRun   bool
-	RootFlag string
-	Repo     *repo.Repo
+	RepoRoot   string
+	APRoot     string
+	APRoots    []string
+	DryRun     bool
+	RootFlag   string
+	SourceTree *sourcetree.SourceTree
 }
 
-// GetRepo returns the repository tree associated with the root options.
-func (opt *RootOptions) GetRepo() (*repo.Repo, error) {
-	if opt.Repo != nil {
-		return opt.Repo, nil
+// GetSourceTree returns the source tree associated with the root options.
+func (opt *RootOptions) GetSourceTree() (*sourcetree.SourceTree, error) {
+	if opt.SourceTree != nil {
+		return opt.SourceTree, nil
 	}
 	if opt.RepoRoot == "" {
 		return nil, fmt.Errorf("repo root is not set")
@@ -55,11 +55,11 @@ func (opt *RootOptions) GetRepo() (*repo.Repo, error) {
 	if cfg != nil {
 		skips = cfg.Skip
 	}
-	r, err := repo.Open(opt.RepoRoot, repo.WithSkip(skips...))
+	r, err := sourcetree.Open(opt.RepoRoot, sourcetree.WithSkip(skips...))
 	if err != nil {
 		return nil, err
 	}
-	opt.Repo = r
+	opt.SourceTree = r
 	return r, nil
 }
 
@@ -98,7 +98,7 @@ func (opt *RootOptions) ResolveRoot() error {
 	// If absRoot is outside RepoRoot, anchor RepoRoot to absRoot
 	if opt.RepoRoot == "" || (!strings.HasPrefix(absRoot, opt.RepoRoot+string(filepath.Separator)) && absRoot != opt.RepoRoot) {
 		opt.RepoRoot = absRoot
-		opt.Repo = nil
+		opt.SourceTree = nil
 	}
 	return nil
 }
@@ -113,7 +113,7 @@ func (opt *RootOptions) Resolve(args []string) error {
 		return opt.ResolveRoot()
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
 		return err
 	}

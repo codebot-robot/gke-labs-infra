@@ -30,7 +30,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
 )
@@ -65,7 +65,7 @@ type candidateFileInfo struct {
 	originalContent []byte
 	mode            os.FileMode
 	marker          string
-	file            *repo.File
+	file            *sourcetree.File
 }
 
 // RunAudit performs the audit to find generated files lacking a generated-file header.
@@ -87,25 +87,12 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.APScope, opt
 	var targetScopes []*tasks.APScope
 	if len(scopes) > 0 {
 		targetScopes = scopes
-	} else {
-		targetScopes = []*tasks.APScope{{RepoRoot: repoRoot, Dir: repoRoot}}
 	}
 
 	// 2. Identify candidate files in live repo
-	var r *repo.Repo
+	var r *sourcetree.SourceTree
 	if len(targetScopes) > 0 {
-		var scopeRepoErr error
-		r, scopeRepoErr = targetScopes[0].GetRepo()
-		if scopeRepoErr != nil {
-			klog.V(2).Infof("could not get repo from scope: %v", scopeRepoErr)
-		}
-	}
-	if r == nil {
-		var repoOpenErr error
-		r, repoOpenErr = repo.Open(repoRoot)
-		if repoOpenErr != nil {
-			return fmt.Errorf("failed to open repo at %s: %w", repoRoot, repoOpenErr)
-		}
+		r = targetScopes[0].SourceTree
 	}
 
 	candidates, skippedUncommentable, err := findAuditCandidates(repoRoot, r, auditPaths)
@@ -172,7 +159,7 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.APScope, opt
 		skipPatterns = goCfg.Skip
 	}
 
-	scratchRepo, err := repo.Open(scratchDir, repo.WithSkip(skipPatterns...))
+	scratchRepo, err := sourcetree.Open(scratchDir, sourcetree.WithSkip(skipPatterns...))
 	if err != nil {
 		return fmt.Errorf("failed to open scratch repo: %w", err)
 	}
@@ -191,14 +178,14 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.APScope, opt
 	}
 	allTasks := []tasks.Task{genTasks}
 	for _, sc := range scratchScopes {
-		formatTasks, err := format.FormatTasks(sc.Repo, sc.Dir)
+		formatTasks, err := format.FormatTasks(sc.SourceTree, sc.Dir)
 		if err == nil && formatTasks != nil {
 			allTasks = append(allTasks, formatTasks)
 		}
 	}
 
 	var generatorErrors []string
-	runErr := tasks.Run(ctx, &tasks.APScope{RepoRoot: scratchDir, Dir: scratchDir, Repo: scratchRepo}, allTasks, tasks.RunOptions{
+	runErr := tasks.Run(ctx, &tasks.APScope{RepoRoot: scratchDir, Dir: scratchDir, SourceTree: scratchRepo}, allTasks, tasks.RunOptions{
 		DryRun:          false,
 		ContinueOnError: true,
 	})
@@ -207,10 +194,8 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.APScope, opt
 	}
 
 	// 7. Refresh scratch repo to see current state
-	repo.ResetCache()
-	scratchRepo, err = repo.Open(scratchDir, repo.WithSkip(skipPatterns...))
-	if err != nil {
-		return fmt.Errorf("failed to re-open scratch repo after generation: %w", err)
+	if err := scratchRepo.InvalidateAll(); err != nil {
+		return fmt.Errorf("failed to refresh scratch repo after generation: %w", err)
 	}
 
 	// 8. Classify candidate files
@@ -254,7 +239,7 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.APScope, opt
 		if fileObj != nil {
 			hasHeader = fileObj.IsGenerated()
 		} else {
-			hasHeader = repo.CheckIsGenerated(scratchFilePath)
+			hasHeader = sourcetree.CheckIsGenerated(scratchFilePath)
 		}
 
 		if !hasHeader {
@@ -311,10 +296,10 @@ func printAuditReport(findings []AuditFinding, skipped []string, genErrors []str
 	}
 }
 
-func findAuditCandidates(repoRoot string, r *repo.Repo, auditPaths []string) ([]*candidateFileInfo, []string, error) {
-	var auditIgnoreList *repo.IgnoreList
+func findAuditCandidates(repoRoot string, r *sourcetree.SourceTree, auditPaths []string) ([]*candidateFileInfo, []string, error) {
+	var auditIgnoreList *sourcetree.IgnoreList
 	if len(auditPaths) > 0 {
-		auditIgnoreList = repo.NewIgnoreList(auditPaths)
+		auditIgnoreList = sourcetree.NewIgnoreList(auditPaths)
 	}
 
 	var candidates []*candidateFileInfo
@@ -493,7 +478,7 @@ func copyFile(src, dst string, mode os.FileMode) (retErr error) {
 	return err
 }
 
-func discoverScratchScopes(r *repo.Repo, scratchDir string) ([]*tasks.APScope, error) {
+func discoverScratchScopes(r *sourcetree.SourceTree, scratchDir string) ([]*tasks.APScope, error) {
 	apRoots := r.APRoots()
 	if len(apRoots) == 0 {
 		apRoots = []string{scratchDir}
@@ -501,17 +486,17 @@ func discoverScratchScopes(r *repo.Repo, scratchDir string) ([]*tasks.APScope, e
 	var scopes []*tasks.APScope
 	for _, apRoot := range apRoots {
 		scope := &tasks.APScope{
-			RepoRoot: scratchDir,
-			Dir:      apRoot,
-			Repo:     r.Under(apRoot),
+			RepoRoot:   scratchDir,
+			Dir:        apRoot,
+			SourceTree: r.Under(apRoot),
 		}
-		buildScripts, err := tasks.FindTaskScripts(scope.Repo, apRoot, tasks.WithPrefix("build-"))
+		buildScripts, err := tasks.FindTaskScripts(scope.SourceTree, apRoot, tasks.WithPrefix("build-"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to find build scripts: %w", err)
 		}
 		scope.BuildTasks = append(scope.BuildTasks, buildScripts...)
 
-		e2eScripts, err := tasks.FindTaskScripts(scope.Repo, apRoot, tasks.WithPrefix("test-e2e"))
+		e2eScripts, err := tasks.FindTaskScripts(scope.SourceTree, apRoot, tasks.WithPrefix("test-e2e"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to find e2e scripts: %w", err)
 		}

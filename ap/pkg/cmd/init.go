@@ -27,6 +27,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/generate"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scaffold"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
@@ -153,20 +154,33 @@ func RunInit(ctx context.Context, opt InitOptions) error {
 	var allTasks []tasks.Task
 	allTasks = append(allTasks, task)
 
-	if opt.Generate {
+	var tree *sourcetree.SourceTree
+	if opt.Generate || opt.DryRun {
 		repoRoot := opt.RepoRoot
 		if repoRoot == "" {
 			repoRoot = targetDir
 		}
-		scopes := []*tasks.APScope{{RepoRoot: repoRoot, Dir: targetDir}}
-		genTasks, err := generate.GenerateTasks(repoRoot, scopes)
-		if err == nil && genTasks != nil {
-			allTasks = append(allTasks, genTasks)
+		if opt.RootOptions != nil {
+			if opt.RepoRoot == "" {
+				opt.RepoRoot = repoRoot
+			}
+			var err error
+			tree, err = opt.GetSourceTree()
+			if err != nil {
+				return err
+			}
+		}
+		scopes := []*tasks.APScope{{RepoRoot: repoRoot, Dir: targetDir, SourceTree: tree}}
+		if opt.Generate {
+			genTasks, err := generate.GenerateTasks(repoRoot, scopes)
+			if err == nil && genTasks != nil {
+				allTasks = append(allTasks, genTasks)
+			}
 		}
 	}
 
 	if opt.DryRun {
-		return tasks.Run(ctx, &tasks.APScope{RepoRoot: targetDir, Dir: targetDir}, allTasks, tasks.RunOptions{DryRun: true})
+		return tasks.Run(ctx, &tasks.APScope{RepoRoot: targetDir, Dir: targetDir, SourceTree: tree}, allTasks, tasks.RunOptions{DryRun: true})
 	}
 
 	if err := task.Run(ctx, nil); err != nil {

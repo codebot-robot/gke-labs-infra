@@ -24,7 +24,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
@@ -115,9 +115,9 @@ func TestHasGoFiles(t *testing.T) {
 				t.Fatalf("Failed to setup test: %v", err)
 			}
 
-			r, err := repo.Open(root)
+			r, err := sourcetree.Open(root)
 			if err != nil {
-				t.Fatalf("repo.Open failed: %v", err)
+				t.Fatalf("sourcetree.Open failed: %v", err)
 			}
 			got, err := hasGoFiles(r, root)
 			if err != nil {
@@ -132,7 +132,7 @@ func TestHasGoFiles(t *testing.T) {
 }
 
 func TestLintTasks_DroppedErrors(t *testing.T) {
-	setupModule := func(t *testing.T, apYAML string) (string, *repo.Repo) {
+	setupModule := func(t *testing.T, apYAML string) (string, *sourcetree.SourceTree) {
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
 			t.Fatal(err)
@@ -155,7 +155,7 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 			}
 			skips = cfg.Skip
 		}
-		r, err := repo.Open(dir, repo.WithSkip(skips...))
+		r, err := sourcetree.Open(dir, sourcetree.WithSkip(skips...))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -223,7 +223,7 @@ func TestLintTasks_DroppedErrors(t *testing.T) {
 }
 
 func TestLintTasks_SkipGenerated(t *testing.T) {
-	setupModule := func(t *testing.T, apYAML string) (string, *repo.Repo) {
+	setupModule := func(t *testing.T, apYAML string) (string, *sourcetree.SourceTree) {
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
 			t.Fatal(err)
@@ -246,7 +246,7 @@ func TestLintTasks_SkipGenerated(t *testing.T) {
 			}
 			skips = cfg.Skip
 		}
-		r, err := repo.Open(dir, repo.WithSkip(skips...))
+		r, err := sourcetree.Open(dir, sourcetree.WithSkip(skips...))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -308,7 +308,7 @@ func findAnalyzersTask(taskGroup tasks.Task) *AnalyzersTask {
 }
 
 func TestLintTasks_PerCheckOverrides(t *testing.T) {
-	setupModule := func(t *testing.T, apYAML string) (string, *repo.Repo) {
+	setupModule := func(t *testing.T, apYAML string) (string, *sourcetree.SourceTree) {
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
 			t.Fatal(err)
@@ -331,7 +331,7 @@ func TestLintTasks_PerCheckOverrides(t *testing.T) {
 			}
 			skips = cfg.Skip
 		}
-		r, err := repo.Open(dir, repo.WithSkip(skips...))
+		r, err := sourcetree.Open(dir, sourcetree.WithSkip(skips...))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -413,7 +413,7 @@ lint:
 		if err := os.WriteFile(filepath.Join(apDir, "go.yaml"), []byte(yamlContent), 0644); err != nil {
 			t.Fatal(err)
 		}
-		r, err := repo.Open(dir)
+		r, err := sourcetree.Open(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -425,7 +425,7 @@ lint:
 		if at == nil {
 			t.Fatalf("expected AnalyzersTask to be found")
 		}
-		err = at.Run(t.Context(), &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r})
+		err = at.Run(t.Context(), &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r})
 		if err == nil {
 			t.Fatalf("expected unused parameter violation, got nil")
 		}
@@ -442,7 +442,7 @@ lint:
 		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc Foo(unusedParam int) {}\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
-		r, err := repo.Open(dir)
+		r, err := sourcetree.Open(dir)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -454,7 +454,7 @@ lint:
 		if at == nil {
 			t.Fatalf("expected AnalyzersTask to be found")
 		}
-		err = at.Run(t.Context(), &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r})
+		err = at.Run(t.Context(), &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r})
 		if err != nil {
 			t.Fatalf("expected no violation when unusedparameters is not enabled, got %v", err)
 		}
@@ -462,7 +462,7 @@ lint:
 }
 
 func TestLintTasks_TestOnlyImports(t *testing.T) {
-	setupModule := func(t *testing.T, apYAML string) (string, *repo.Repo) {
+	setupModule := func(t *testing.T, apYAML string) (string, *sourcetree.SourceTree) {
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
 			t.Fatal(err)
@@ -485,7 +485,7 @@ func TestLintTasks_TestOnlyImports(t *testing.T) {
 			}
 			skips = cfg.Skip
 		}
-		r, err := repo.Open(dir, repo.WithSkip(skips...))
+		r, err := sourcetree.Open(dir, sourcetree.WithSkip(skips...))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -571,7 +571,7 @@ lint:
 }
 
 func TestLintTasks_CloseWriter(t *testing.T) {
-	setupModule := func(t *testing.T, yamlContent string) (string, *repo.Repo) {
+	setupModule := func(t *testing.T, yamlContent string) (string, *sourcetree.SourceTree) {
 		t.Helper()
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module test\n\ngo 1.27\n"), 0644); err != nil {
@@ -595,7 +595,7 @@ func TestLintTasks_CloseWriter(t *testing.T) {
 			}
 			skips = cfg.Skip
 		}
-		r, err := repo.Open(dir, repo.WithSkip(skips...))
+		r, err := sourcetree.Open(dir, sourcetree.WithSkip(skips...))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -688,7 +688,7 @@ func TestLintTasks_ContinueOnError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r, err := repo.Open(dir)
+	r, err := sourcetree.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -816,7 +816,7 @@ func TestLintTasks_PackageLoadError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\ninvalid syntax here\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r, err := repo.Open(dir)
+	r, err := sourcetree.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -832,7 +832,7 @@ func TestLintTasks_PackageLoadError(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r})
+	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r})
 	if err == nil {
 		t.Fatalf("expected task.Run to fail on package load error, got nil")
 	}
@@ -854,7 +854,7 @@ func TestLintTasks_MultiGOOS_LinuxOnDarwin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := repo.Open(dir)
+	r, err := sourcetree.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -878,7 +878,7 @@ func TestLintTasks_MultiGOOS_LinuxOnDarwin(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r})
+	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r})
 	if err == nil {
 		t.Fatalf("expected unused error in foo_linux.go to be reported on simulated darwin, got nil")
 	}
@@ -899,7 +899,7 @@ func TestLintTasks_MultiGOOS_SingleLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := repo.Open(dir)
+	r, err := sourcetree.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -915,7 +915,7 @@ func TestLintTasks_MultiGOOS_SingleLoad(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r})
+	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r})
 	if err != nil {
 		t.Fatalf("unexpected error from task.Run: %v", err)
 	}
@@ -944,7 +944,7 @@ func TestLintTasks_MultiGOOS_VendorIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := repo.Open(dir)
+	r, err := sourcetree.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -966,7 +966,7 @@ func TestLintTasks_MultiGOOS_VendorIgnored(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r})
+	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -999,7 +999,7 @@ lint:
 		t.Fatal(err)
 	}
 
-	r, err := repo.Open(dir)
+	r, err := sourcetree.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1043,7 +1043,7 @@ func main() {
 
 	baselinePath := filepath.Join(dir, ".ap", "droppederrors-baseline.txt")
 
-	r, err := repo.Open(dir)
+	r, err := sourcetree.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1061,7 +1061,7 @@ func main() {
 	task.BaselinePath = baselinePath
 
 	ctx := t.Context()
-	scope := &tasks.APScope{RepoRoot: dir, Dir: dir, Repo: r}
+	scope := &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r}
 	if err := task.Run(ctx, scope); err != nil {
 		t.Fatalf("write baseline failed: %v", err)
 	}
@@ -1099,7 +1099,7 @@ func main() {
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(codeV2), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r, err = repo.Open(dir)
+	r, err = sourcetree.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1136,7 +1136,7 @@ func main() {
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(codeV3), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r, err = repo.Open(dir)
+	r, err = sourcetree.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

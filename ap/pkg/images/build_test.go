@@ -25,7 +25,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
@@ -89,9 +89,9 @@ func TestHasImages(t *testing.T) {
 			os.MkdirAll(root, 0755)
 			tt.setup(root)
 
-			r, err := repo.Open(root)
+			r, err := sourcetree.Open(root)
 			if err != nil {
-				t.Fatalf("repo.Open failed: %v", err)
+				t.Fatalf("sourcetree.Open failed: %v", err)
 			}
 			got, err := HasImages(r, root)
 			if err != nil {
@@ -114,7 +114,7 @@ func TestBuildTasks(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "images", "foo"), 0755)
 	os.WriteFile(filepath.Join(tmpDir, "images", "foo", "Dockerfile"), []byte("FROM scratch"), 0644)
 
-	r, err := repo.Open(tmpDir)
+	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestFindImageNames(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "sub", "images", "img-c"), 0755)
 	os.WriteFile(filepath.Join(tmpDir, "sub", "images", "img-c", "Dockerfile"), []byte("FROM scratch"), 0644)
 
-	r, err := repo.Open(tmpDir)
+	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestBuildTasksForImages(t *testing.T) {
 	os.MkdirAll(filepath.Join(tmpDir, "images", "b"), 0755)
 	os.WriteFile(filepath.Join(tmpDir, "images", "b", "Dockerfile"), []byte("FROM scratch"), 0644)
 
-	r, err := repo.Open(tmpDir)
+	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,13 +288,13 @@ func TestBuildTasks_PortForward(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := repo.Open(tmpDir)
+	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	emptyDir := t.TempDir()
-	emptyRepo, err := repo.Open(emptyDir)
+	emptyRepo, err := sourcetree.Open(emptyDir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -55,7 +55,7 @@ func RunE2e(ctx context.Context, opt E2eOptions) error {
 		return err
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
 		return err
 	}
@@ -76,5 +76,5 @@ func RunE2e(ctx context.Context, opt E2eOptions) error {
 		}
 	}
 
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, SourceTree: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
@@ -80,7 +81,17 @@ func TestRunAudit_DryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := RunAudit(t.Context(), tempDir, nil, AuditOptions{DryRun: true})
+	r, err := sourcetree.Open(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := &tasks.APScope{
+		RepoRoot:   tempDir,
+		Dir:        tempDir,
+		SourceTree: r,
+	}
+
+	err = RunAudit(t.Context(), tempDir, []*tasks.APScope{scope}, AuditOptions{DryRun: true})
 	if err != nil {
 		t.Fatalf("RunAudit with DryRun failed: %v", err)
 	}
@@ -122,12 +133,18 @@ EOF
 		t.Fatal(err)
 	}
 
+	r, err := sourcetree.Open(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// Informational mode: should succeed (exit 0) and find generated_no_header.yaml
 	scope := &tasks.APScope{
-		RepoRoot: tempDir,
-		Dir:      tempDir,
+		RepoRoot:   tempDir,
+		Dir:        tempDir,
+		SourceTree: r,
 	}
-	err := RunAudit(t.Context(), tempDir, []*tasks.APScope{scope}, AuditOptions{Strict: false})
+	err = RunAudit(t.Context(), tempDir, []*tasks.APScope{scope}, AuditOptions{Strict: false})
 	if err != nil {
 		t.Fatalf("RunAudit (non-strict) failed: %v", err)
 	}
@@ -178,12 +195,18 @@ EOF
 		t.Fatal(err)
 	}
 
+	r, err := sourcetree.Open(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	scope := &tasks.APScope{
-		RepoRoot: tempDir,
-		Dir:      tempDir,
+		RepoRoot:   tempDir,
+		Dir:        tempDir,
+		SourceTree: r,
 	}
 	// Strict mode should succeed because the generated file HAS a header!
-	err := RunAudit(t.Context(), tempDir, []*tasks.APScope{scope}, AuditOptions{Strict: true})
+	err = RunAudit(t.Context(), tempDir, []*tasks.APScope{scope}, AuditOptions{Strict: true})
 	if err != nil {
 		t.Fatalf("RunAudit (strict) failed unexpectedly: %v", err)
 	}

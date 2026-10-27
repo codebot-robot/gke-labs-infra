@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
 func TestFindTaskScripts(t *testing.T) {
@@ -46,7 +46,7 @@ func TestFindTaskScripts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := repo.Open(tmpDir)
+	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,28 +78,18 @@ func TestFindTaskScripts(t *testing.T) {
 	}
 }
 
-func TestAPScopeGetRepo(t *testing.T) {
-	// Nil repo should return an error
-	scope := &APScope{
-		Dir: "/some/path",
-	}
-	if _, err := scope.GetRepo(); err == nil {
-		t.Fatalf("expected error from GetRepo() when Repo is nil, got nil")
-	}
-
-	// Non-nil repo should return the repo
+func TestAPScopeSourceTree(t *testing.T) {
 	tmpDir := t.TempDir()
-	r, err := repo.Open(tmpDir)
+	tree, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope.Repo = r
-	got, err := scope.GetRepo()
-	if err != nil {
-		t.Fatalf("unexpected error from GetRepo(): %v", err)
+	scope := &APScope{
+		Dir:        tmpDir,
+		SourceTree: tree,
 	}
-	if got != r {
-		t.Fatalf("GetRepo() = %v, want %v", got, r)
+	if scope.SourceTree != tree {
+		t.Fatalf("SourceTree = %v, want %v", scope.SourceTree, tree)
 	}
 }
 

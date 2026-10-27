@@ -19,7 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
 // ResolveTargets resolves directory specifiers to a list of AP root directories.
@@ -29,7 +29,7 @@ import (
 //	./... - Current AP root and all child AP roots
 //	//... - Repository root AP root and all child AP roots
 //	//foo - The AP root at repoRoot/foo
-func ResolveTargets(r *repo.Repo, repoRoot, currentAPRoot string, args []string) ([]string, error) {
+func ResolveTargets(r *sourcetree.SourceTree, repoRoot, currentAPRoot string, args []string) ([]string, error) {
 	if len(args) == 0 {
 		args = []string{"."}
 	}

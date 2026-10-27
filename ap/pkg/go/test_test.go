@@ -19,14 +19,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
 func TestHasGoTests(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// 1. Non-existent directory should return false, nil
-	r1, err := repo.Open(tmpDir)
+	r1, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestHasGoTests(t *testing.T) {
 	if err := os.Mkdir(emptyDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	r2, err := repo.Open(emptyDir)
+	r2, err := sourcetree.Open(emptyDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestHasGoTests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(noTestDir, "foo.go"), []byte("package foo"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r3, err := repo.Open(noTestDir)
+	r3, err := sourcetree.Open(noTestDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestHasGoTests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(withTestDir, "foo_test.go"), []byte("package foo"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r4, err := repo.Open(withTestDir)
+	r4, err := sourcetree.Open(withTestDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestHasGoTests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(subNested, "bar_test.go"), []byte("package bar"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r5, err := repo.Open(nestedDir)
+	r5, err := sourcetree.Open(nestedDir)
 	if err != nil {
 		t.Fatal(err)
 	}

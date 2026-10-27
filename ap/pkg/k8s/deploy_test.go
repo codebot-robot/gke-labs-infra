@@ -20,7 +20,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
 func TestFindManifests(t *testing.T) {
@@ -97,9 +97,9 @@ func TestFindManifests(t *testing.T) {
 				}
 			}
 
-			r, err := repo.Open(root)
+			r, err := sourcetree.Open(root)
 			if err != nil {
-				t.Fatalf("repo.Open failed: %v", err)
+				t.Fatalf("sourcetree.Open failed: %v", err)
 			}
 
 			got, err := findManifests(r, root)

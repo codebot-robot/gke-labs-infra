@@ -55,7 +55,7 @@ func RunFormat(ctx context.Context, opt FormatOptions) error {
 		return err
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
 		return err
 	}
@@ -70,5 +70,5 @@ func RunFormat(ctx context.Context, opt FormatOptions) error {
 		allTasks = append(allTasks, t)
 	}
 
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, SourceTree: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
 }

@@ -55,7 +55,7 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 		return err
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
 		return err
 	}
@@ -77,5 +77,5 @@ func RunTest(ctx context.Context, opt TestOptions) error {
 		}
 	}
 
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, SourceTree: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun, ContinueOnError: true})
 }

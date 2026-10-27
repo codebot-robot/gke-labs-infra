@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
 )
@@ -92,12 +92,12 @@ func (t *GoE2eTask) GetChildren() []tasks.Task {
 }
 
 // HasGoTests returns true if the directory or any subdirectory contains a .go file with a _test.go suffix.
-func HasGoTests(r *repo.Repo, dir string) (bool, error) {
+func HasGoTests(r *sourcetree.SourceTree, dir string) (bool, error) {
 	return r.Under(dir).HasGoTests(), nil
 }
 
 // TestTasks returns a task group for running go tests in discovered modules.
-func TestTasks(r *repo.Repo, root string) (tasks.Task, error) {
+func TestTasks(r *sourcetree.SourceTree, root string) (tasks.Task, error) {
 	modules := r.Under(root).Modules()
 
 	buildDir := filepath.Join(root, ".build", "test-results", "go")
@@ -139,12 +139,12 @@ func TestTasks(r *repo.Repo, root string) (tasks.Task, error) {
 }
 
 // Test runs go tests in discovered modules.
-func Test(ctx context.Context, r *repo.Repo, root string) error {
+func Test(ctx context.Context, r *sourcetree.SourceTree, root string) error {
 	t, err := TestTasks(r, root)
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r})
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, SourceTree: r})
 }
 
 // RunGoTestOptions holds options for running go tests.

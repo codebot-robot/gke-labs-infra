@@ -14,12 +14,12 @@
 
 package walker
 
-import "github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+import "github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 
 // IgnoreList matches paths against a list of patterns, similar to .gitignore.
-type IgnoreList = repo.IgnoreList
+type IgnoreList = sourcetree.IgnoreList
 
 // NewIgnoreList creates a new IgnoreList.
 func NewIgnoreList(patterns []string) *IgnoreList {
-	return repo.NewIgnoreList(patterns)
+	return sourcetree.NewIgnoreList(patterns)
 }

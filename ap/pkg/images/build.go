@@ -28,7 +28,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	toolDocker "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
 	"k8s.io/klog/v2"
@@ -427,7 +427,7 @@ func (t *DockerBuildTask) GetChildren() []tasks.Task {
 }
 
 // FindImageNames returns the sorted names of all Docker images defined in the given root.
-func FindImageNames(r *repo.Repo, root string) ([]string, error) {
+func FindImageNames(r *sourcetree.SourceTree, root string) ([]string, error) {
 	dockerfiles, err := findDockerfiles(r, root)
 	if err != nil {
 		return nil, err
@@ -450,7 +450,7 @@ func FindImageNames(r *repo.Repo, root string) ([]string, error) {
 }
 
 // BuildTasksForImages returns a task group for building only the specified docker images.
-func BuildTasksForImages(r *repo.Repo, root string, push bool, buildkitHost string, imageNames []string, naming ImageNaming) (tasks.Task, error) {
+func BuildTasksForImages(r *sourcetree.SourceTree, root string, push bool, buildkitHost string, imageNames []string, naming ImageNaming) (tasks.Task, error) {
 	dockerfiles, err := findDockerfiles(r, root)
 	if err != nil {
 		return nil, err
@@ -511,7 +511,7 @@ func BuildTasksForImages(r *repo.Repo, root string, push bool, buildkitHost stri
 }
 
 // BuildTasks returns a task group for building all docker images found in images/<name>/Dockerfile.
-func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string, naming ImageNaming) (tasks.Task, error) {
+func BuildTasks(r *sourcetree.SourceTree, root string, push bool, buildkitHost string, naming ImageNaming) (tasks.Task, error) {
 	allImages, err := FindImageNames(r, root)
 	if err != nil {
 		return nil, err
@@ -520,7 +520,7 @@ func BuildTasks(r *repo.Repo, root string, push bool, buildkitHost string, namin
 }
 
 // Build builds docker images found in images/<name>/Dockerfile.
-func Build(ctx context.Context, r *repo.Repo, root string, push bool, buildkitHost string) error {
+func Build(ctx context.Context, r *sourcetree.SourceTree, root string, push bool, buildkitHost string) error {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return err
@@ -530,11 +530,11 @@ func Build(ctx context.Context, r *repo.Repo, root string, push bool, buildkitHo
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r})
+	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, SourceTree: r})
 }
 
 // HasImages returns true if there are any images to build under root.
-func HasImages(r *repo.Repo, root string) (bool, error) {
+func HasImages(r *sourcetree.SourceTree, root string) (bool, error) {
 	dockerfiles, err := findDockerfiles(r, root)
 	if err != nil {
 		return false, err
@@ -553,7 +553,7 @@ func HasImages(r *repo.Repo, root string) (bool, error) {
 	return false, nil
 }
 
-func findDockerfiles(r *repo.Repo, root string) ([]string, error) {
+func findDockerfiles(r *sourcetree.SourceTree, root string) ([]string, error) {
 	return r.Under(root).FindDockerfiles(), nil
 }
 
