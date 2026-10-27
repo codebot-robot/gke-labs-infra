@@ -47,7 +47,7 @@ Running `ap generate --verify` (or `ap verify-generate`) perturbs each generated
 
 ## Deployment
 
-The `ap deploy` command builds container images and applies Kubernetes manifests. When the current context is a kind cluster, `ap deploy` works with no `IMAGE_PREFIX`, building locally, loading images with `kind load docker-image`, and applying; `IMAGE_TAG` must be non-`latest` for now so pods use `imagePullPolicy: IfNotPresent`.
+The `ap deploy` command builds container images and applies Kubernetes manifests. Built images deployed with `:latest` are pinned by digest (`tag@sha256`) in applied manifests so redeploying always rolls pods to the new image. When the current context is a kind cluster, `ap deploy` works with no `IMAGE_PREFIX`, building locally, loading images with `kind load docker-image` using a unique content-addressed tag, and applying.
 
 ## Configuration Files
 

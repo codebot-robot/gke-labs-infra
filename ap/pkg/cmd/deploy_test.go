@@ -333,7 +333,7 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 		}
 	})
 
-	t.Run("fails fast on unset or latest IMAGE_TAG", func(t *testing.T) {
+	t.Run("allows unset or latest IMAGE_TAG", func(t *testing.T) {
 		for _, tag := range []string{"", "latest"} {
 			t.Run(fmt.Sprintf("tag=%q", tag), func(t *testing.T) {
 				tempDir := setupFixtureRepo(t)
@@ -361,12 +361,12 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 				}
 				naming := images.ResolveImageNaming(cfg)
 
-				_, err = BuildDeployPlan(opt, r, "", naming)
-				if err == nil {
-					t.Fatalf("expected error for tag %q, got nil", tag)
+				allTasks, err := BuildDeployPlan(opt, r, "", naming)
+				if err != nil {
+					t.Fatalf("expected success for tag %q, got error: %v", tag, err)
 				}
-				if !strings.Contains(err.Error(), "set IMAGE_TAG to a non-latest value so pods use imagePullPolicy IfNotPresent") {
-					t.Errorf("unexpected error message: %v", err)
+				if len(allTasks) == 0 {
+					t.Fatalf("expected tasks for tag %q, got none", tag)
 				}
 			})
 		}
@@ -1212,4 +1212,89 @@ func TestDeploy_RunDeploy_NonexistentNamespaceFailsEarly(t *testing.T) {
 	if !strings.Contains(err.Error(), "target namespace \"nonexistent-ns\" does not exist") {
 		t.Errorf("expected error to mention 'target namespace \"nonexistent-ns\" does not exist', got: %v", err)
 	}
+}
+
+func TestDeploy_DryRun_ResolvedReferences(t *testing.T) {
+	tempDir := setupFixtureRepo(t)
+
+	// 1. Push path with default tag (:latest)
+	t.Run("default tag in push path prints resolved reference pinned by digest", func(t *testing.T) {
+		t.Setenv("IMAGE_TAG", "")
+		opt := DeployOptions{
+			RootOptions: &RootOptions{
+				RepoRoot: tempDir,
+				APRoot:   tempDir,
+				DryRun:   true,
+			},
+			BuildkitHost: "k8s://autodeploy-system/buildkit",
+		}
+		if err := opt.Resolve([]string{"./k8s"}); err != nil {
+			t.Fatalf("opt.Resolve failed: %v", err)
+		}
+
+		out := captureStdout(t, func() {
+			if err := RunDeploy(t.Context(), opt); err != nil {
+				t.Fatalf("RunDeploy failed: %v", err)
+			}
+		})
+
+		if !strings.Contains(out, "images.local/a:latest (pinned by digest)") {
+			t.Errorf("expected dry-run output to contain 'images.local/a:latest (pinned by digest)', got:\n%s", out)
+		}
+	})
+
+	// 2. Explicit unique tag in push path
+	t.Run("unique IMAGE_TAG in push path prints resolved tagged reference without suffix", func(t *testing.T) {
+		t.Setenv("IMAGE_TAG", "v2.0")
+		opt := DeployOptions{
+			RootOptions: &RootOptions{
+				RepoRoot: tempDir,
+				APRoot:   tempDir,
+				DryRun:   true,
+			},
+			BuildkitHost: "k8s://autodeploy-system/buildkit",
+		}
+		if err := opt.Resolve([]string{"./k8s"}); err != nil {
+			t.Fatalf("opt.Resolve failed: %v", err)
+		}
+
+		out := captureStdout(t, func() {
+			if err := RunDeploy(t.Context(), opt); err != nil {
+				t.Fatalf("RunDeploy failed: %v", err)
+			}
+		})
+
+		if !strings.Contains(out, "images.local/a:v2.0") {
+			t.Errorf("expected dry-run output to contain 'images.local/a:v2.0', got:\n%s", out)
+		}
+		if strings.Contains(out, "pinned by digest") || strings.Contains(out, "unique tag") {
+			t.Errorf("expected explicit tag not to have suffix, got:\n%s", out)
+		}
+	})
+
+	// 3. Kind path prints unique tag form
+	t.Run("kind mode prints unique tag form", func(t *testing.T) {
+		t.Setenv("IMAGE_TAG", "")
+		opt := DeployOptions{
+			RootOptions: &RootOptions{
+				RepoRoot: tempDir,
+				APRoot:   tempDir,
+				DryRun:   true,
+			},
+			kindCluster: "test-cluster",
+		}
+		if err := opt.Resolve([]string{"./k8s"}); err != nil {
+			t.Fatalf("opt.Resolve failed: %v", err)
+		}
+
+		out := captureStdout(t, func() {
+			if err := RunDeploy(t.Context(), opt); err != nil {
+				t.Fatalf("RunDeploy failed: %v", err)
+			}
+		})
+
+		if !strings.Contains(out, "images.local/a:latest (unique tag)") {
+			t.Errorf("expected dry-run output to contain 'images.local/a:latest (unique tag)', got:\n%s", out)
+		}
+	})
 }

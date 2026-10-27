@@ -430,8 +430,14 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 		return "docker-buildx", nil
 	}
 
+	origEnsureDocker := ensureDocker
+	defer func() { ensureDocker = origEnsureDocker }()
+	ensureDocker = func(ctx context.Context, repoRoot string) (string, error) {
+		return "docker", nil
+	}
+
 	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		if (name == "docker-buildx" || name == "docker") && len(args) > 0 && (args[0] == "inspect" || (args[0] == "buildx" && len(args) > 1 && args[1] == "inspect")) {
+		if (name == "docker-buildx" || name == "docker") && len(args) > 0 && (args[0] == "inspect" || (args[0] == "buildx" && len(args) > 1 && args[1] == "inspect") || (args[0] == "image" && len(args) > 1 && args[1] == "inspect")) {
 			// Mock 'inspect' to simulate support/lack of support for multi-platform
 			return exec.CommandContext(ctx, "echo", "Driver: "+driverMock)
 		}
@@ -751,7 +757,9 @@ func TestDockerBuildTask_ToolDocker(t *testing.T) {
 	defer func() { execCommandContext = origExec }()
 
 	execCommandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		executedCmd = name
+		if len(args) > 0 && args[0] == "build" {
+			executedCmd = name
+		}
 		cmd := exec.CommandContext(ctx, "echo", "mocked")
 		return cmd
 	}

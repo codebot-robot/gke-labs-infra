@@ -16,24 +16,36 @@ package imageref
 
 import "strings"
 
-// ImageRef represents a reference to an image with prefix, name, and tag.
+// ImageRef represents a reference to an image with prefix, name, tag, and optional digest.
 // Tag is never empty ("latest" when unset).
 type ImageRef struct {
 	Prefix string
 	Name   string
 	Tag    string
+	Digest string
 }
 
 // String returns the image reference formatted as prefix/name:tag, or name:tag if prefix is empty.
+// When Digest is present, it returns prefix/name:tag@sha256:<digest>.
 func (r ImageRef) String() string {
 	tag := r.Tag
 	if tag == "" {
 		tag = "latest"
 	}
+	var nameTag string
 	if r.Prefix != "" {
-		return r.Prefix + "/" + r.Name + ":" + tag
+		nameTag = r.Prefix + "/" + r.Name + ":" + tag
+	} else {
+		nameTag = r.Name + ":" + tag
 	}
-	return r.Name + ":" + tag
+	if r.Digest != "" {
+		digest := r.Digest
+		if !strings.HasPrefix(digest, "sha256:") {
+			digest = "sha256:" + digest
+		}
+		return nameTag + "@" + digest
+	}
+	return nameTag
 }
 
 // ImageNaming holds the naming conventions for images in a build or deploy run.
@@ -41,19 +53,54 @@ type ImageNaming struct {
 	Prefix    string
 	Tag       string
 	InCluster bool
+	KindMode  bool
+	refs      map[string]*ImageRef
+}
+
+// NewImageNaming creates an ImageNaming value with an initialized references map.
+func NewImageNaming(prefix, tag string, inCluster bool) ImageNaming {
+	if prefix == "" {
+		prefix = "images.local"
+	}
+	if tag == "" {
+		tag = "latest"
+	}
+	return ImageNaming{
+		Prefix:    prefix,
+		Tag:       tag,
+		InCluster: inCluster,
+		refs:      make(map[string]*ImageRef),
+	}
+}
+
+// WithRefs returns a copy of ImageNaming with an initialized references map.
+func (n ImageNaming) WithRefs() ImageNaming {
+	if n.refs == nil {
+		n.refs = make(map[string]*ImageRef)
+	}
+	return n
 }
 
 // Ref returns an ImageRef for the given image name.
-func (n ImageNaming) Ref(name string) ImageRef {
+func (n ImageNaming) Ref(name string) *ImageRef {
+	if n.refs != nil {
+		if ref, ok := n.refs[name]; ok {
+			return ref
+		}
+	}
 	tag := n.Tag
 	if tag == "" {
 		tag = "latest"
 	}
-	return ImageRef{
+	ref := &ImageRef{
 		Prefix: n.Prefix,
 		Name:   name,
 		Tag:    tag,
 	}
+	if n.refs != nil {
+		n.refs[name] = ref
+	}
+	return ref
 }
 
 // PushPrefix returns the registry prefix to use when pushing images.

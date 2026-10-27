@@ -497,7 +497,27 @@ func (t *KubectlApplyTask) GetName() string {
 }
 
 func (t *KubectlApplyTask) GetChildren() []tasks.Task {
-	return nil
+	referenced, err := FindReferencedImagesInFile(t.ManifestPath)
+	if err != nil || len(referenced) == 0 {
+		return nil
+	}
+
+	var children []tasks.Task
+	for _, img := range referenced {
+		ref := t.Naming.Ref(img)
+		refStr := ref.String()
+		if t.Naming.Tag == "latest" {
+			if t.Naming.KindMode {
+				refStr = fmt.Sprintf("%s (unique tag)", refStr)
+			} else {
+				refStr = fmt.Sprintf("%s (pinned by digest)", refStr)
+			}
+		}
+		children = append(children, &tasks.DummyTask{
+			Name: refStr,
+		})
+	}
+	return children
 }
 
 func getCRDNames(content []byte) ([]string, error) {

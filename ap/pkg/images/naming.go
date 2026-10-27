@@ -44,9 +44,5 @@ func ResolveImageNaming(cfg *config.Config) ImageNaming {
 	if tag == "" {
 		tag = "latest"
 	}
-	return ImageNaming{
-		Prefix:    prefix,
-		Tag:       tag,
-		InCluster: k8s.IsInCluster(),
-	}
+	return imageref.NewImageNaming(prefix, tag, k8s.IsInCluster())
 }
