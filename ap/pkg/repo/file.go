@@ -92,37 +92,41 @@ type File struct {
 	apRoot string // Enclosing AP root directory path
 	module string // Enclosing Go module directory path
 
-	isGeneratedOnce sync.Once
-	isGenerated     bool
-	generatedHeader string
+	mu sync.Mutex
 
-	hasGoGenerateOnce sync.Once
-	hasGoGenerate     bool
+	isGeneratedValid bool
+	isGenerated      bool
+	generatedHeader  string
 
-	referencedGOOSOnce sync.Once
-	referencedGOOS     []string
+	hasGoGenerateValid bool
+	hasGoGenerate      bool
 
-	mu        sync.Mutex
+	referencedGOOSValid bool
+	referencedGOOS      []string
+
 	hash      string
 	hashErr   error
 	metaSize  int64
 	metaMtime int64
 	metaInode uint64
 
-	infoOnce sync.Once
-	info     os.FileInfo
+	infoValid bool
+	info      os.FileInfo
 }
 
 // Info returns an os.FileInfo representation of the file, resolved lazily.
 func (f *File) Info() os.FileInfo {
-	f.infoOnce.Do(func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.infoValid {
 		fi, err := os.Stat(f.Path)
 		if err != nil {
 			f.info = &fileInfo{name: f.Name}
-			return
+		} else {
+			f.info = fi
 		}
-		f.info = fi
-	})
+		f.infoValid = true
+	}
 	return f.info
 }
 
@@ -146,9 +150,12 @@ func (f *File) HasGoGenerate() bool {
 	if !strings.HasSuffix(f.Name, ".go") {
 		return false
 	}
-	f.hasGoGenerateOnce.Do(func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.hasGoGenerateValid {
 		f.hasGoGenerate = f.scanGoGenerate()
-	})
+		f.hasGoGenerateValid = true
+	}
 	return f.hasGoGenerate
 }
 
@@ -174,15 +181,23 @@ func (f *File) scanGoGenerate() bool {
 // A file is generated if any of its first 30 lines contains a comment
 // starting with "Code generated" and ending with "DO NOT EDIT."
 func (f *File) IsGenerated() bool {
-	f.isGeneratedOnce.Do(func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.isGeneratedValid {
 		f.isGenerated, f.generatedHeader = f.scanGenerated()
-	})
+		f.isGeneratedValid = true
+	}
 	return f.isGenerated
 }
 
 // GeneratedHeader returns the matched generated header line if the file is generated.
 func (f *File) GeneratedHeader() string {
-	_ = f.IsGenerated()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.isGeneratedValid {
+		f.isGenerated, f.generatedHeader = f.scanGenerated()
+		f.isGeneratedValid = true
+	}
 	return f.generatedHeader
 }
 
@@ -257,7 +272,8 @@ func CheckIsGenerated(path string) bool {
 }
 
 // Hash returns a hex-encoded SHA-256 hash of the file content, memoized in the tree.
-// It uses a fast path keyed on size, mtime (nanoseconds), and inode.
+// It uses a fast path keyed on size, mtime (nanoseconds), and inode, re-stating on each
+// call and recomputing only when they changed.
 var contentReadCounter int64
 
 // ContentReadCount returns the total number of files opened and read for hashing.
@@ -272,29 +288,36 @@ func ResetContentReadCount() {
 
 // Hash returns a hex-encoded SHA-256 hash of the file content, memoized in the tree
 // and backed by the persistent hashes.bin cache.
-// It uses a fast path keyed on size, mtime (nanoseconds), and inode.
+// It uses a fast path keyed on size, mtime (nanoseconds), and inode, re-stating on each
+// call and recomputing only when they changed.
 func (f *File) Hash() (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.computeHash()
+	return f.computeHashLocked()
 }
 
-func (f *File) computeHash() (string, error) {
-	fi, err := os.Lstat(f.Path)
+func (f *File) computeHashLocked() (string, error) {
+	fi, err := os.Stat(f.Path)
 	if err != nil {
+		f.hash = ""
+		f.hashErr = err
 		return "", err
 	}
 
+	size := fi.Size()
+	mtime := fi.ModTime().UnixNano()
 	var ino uint64
 	if stat, ok := fi.Sys().(*syscall.Stat_t); ok {
 		ino = stat.Ino
 	}
 
-	mtime := fi.ModTime().UnixNano()
-	size := fi.Size()
-
 	if f.hash != "" && f.metaSize == size && f.metaMtime == mtime && f.metaInode == ino {
 		return f.hash, nil
+	}
+
+	// Content changed; invalidate memoized file attributes
+	if f.hash != "" {
+		f.invalidateCachedInfoLocked()
 	}
 
 	// Consult persistent hashes.bin cache if available
@@ -309,6 +332,7 @@ func (f *File) computeHash() (string, error) {
 				if recSize == size && recMtime == mtime && recInode == ino {
 					contentHash := hex.EncodeToString(payload[24:56])
 					f.hash = contentHash
+					f.hashErr = nil
 					f.metaSize = size
 					f.metaMtime = mtime
 					f.metaInode = ino
@@ -320,10 +344,13 @@ func (f *File) computeHash() (string, error) {
 
 	h, err := hashFilePath(f.Path)
 	if err != nil {
+		f.hash = ""
+		f.hashErr = err
 		return "", err
 	}
 
 	f.hash = h
+	f.hashErr = nil
 	f.metaSize = size
 	f.metaMtime = mtime
 	f.metaInode = ino
@@ -369,25 +396,35 @@ func hashFilePath(path string) (retHash string, retErr error) {
 	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
-// Refresh clears memoized metadata, IsGenerated, and Hash, forcing them to re-evaluate.
-func (f *File) Refresh() {
-	f.infoOnce = sync.Once{}
-	f.info = nil
-	f.isGeneratedOnce = sync.Once{}
-	f.isGenerated = false
-	f.generatedHeader = ""
-	f.hasGoGenerateOnce = sync.Once{}
-	f.hasGoGenerate = false
-	f.referencedGOOSOnce = sync.Once{}
-	f.referencedGOOS = nil
-
+// InvalidateCachedInfo clears memoized metadata, IsGenerated, HasGoGenerate,
+// ReferencedGOOS, and Hash, forcing them to re-evaluate on next access.
+func (f *File) InvalidateCachedInfo() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.invalidateCachedInfoLocked()
+}
+
+func (f *File) invalidateCachedInfoLocked() {
+	f.infoValid = false
+	f.info = nil
+	f.isGeneratedValid = false
+	f.isGenerated = false
+	f.generatedHeader = ""
+	f.hasGoGenerateValid = false
+	f.hasGoGenerate = false
+	f.referencedGOOSValid = false
+	f.referencedGOOS = nil
 	f.hash = ""
 	f.hashErr = nil
 	f.metaSize = 0
 	f.metaMtime = 0
 	f.metaInode = 0
+}
+
+// Refresh clears memoized metadata, IsGenerated, and Hash, forcing them to re-evaluate.
+// Deprecated: use InvalidateCachedInfo instead.
+func (f *File) Refresh() {
+	f.InvalidateCachedInfo()
 }
 
 // ReferencedGOOS returns any known GOOS values referenced by this Go file
@@ -396,9 +433,12 @@ func (f *File) ReferencedGOOS() []string {
 	if !strings.HasSuffix(f.Name, ".go") {
 		return nil
 	}
-	f.referencedGOOSOnce.Do(func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.referencedGOOSValid {
 		f.referencedGOOS = f.scanReferencedGOOS()
-	})
+		f.referencedGOOSValid = true
+	}
 	return f.referencedGOOS
 }
 
