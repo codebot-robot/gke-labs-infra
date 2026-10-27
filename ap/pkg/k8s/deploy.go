@@ -634,7 +634,7 @@ func Deploy(ctx context.Context, r *sourcetree.SourceTree, root string) error {
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, SourceTree: r})
+	return t.Run(ctx, tasks.NewScope(root, root, r))
 }
 
 func findManifests(r *sourcetree.SourceTree, root string) ([]string, error) {

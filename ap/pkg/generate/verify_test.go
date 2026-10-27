@@ -169,7 +169,7 @@ generate:
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := &tasks.APScope{RepoRoot: root, Dir: root, SourceTree: r}
+	scope := tasks.NewScope(root, root, r)
 
 	files, err := FindGeneratedFiles(root, []*tasks.APScope{scope})
 	if err != nil {
@@ -228,7 +228,7 @@ func TestRunVerify_SuccessAndMtimePreservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := &tasks.APScope{RepoRoot: root, Dir: root, SourceTree: r}
+	scope := tasks.NewScope(root, root, r)
 
 	genTask := &tasks.FuncTask{
 		Name: "ap-test",
@@ -275,7 +275,7 @@ func TestRunVerify_UnrestoredMarkerDetected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := &tasks.APScope{RepoRoot: root, Dir: root, SourceTree: r}
+	scope := tasks.NewScope(root, root, r)
 
 	noopTask := &tasks.FuncTask{
 		Name: "ap-test",
@@ -318,7 +318,7 @@ func TestRunVerify_StaleMarkerDetected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := &tasks.APScope{RepoRoot: root, Dir: root, SourceTree: r}
+	scope := tasks.NewScope(root, root, r)
 
 	noopTask := &tasks.FuncTask{
 		Name: "ap-test",

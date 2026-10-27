@@ -586,7 +586,7 @@ func Lint(ctx context.Context, r *sourcetree.SourceTree, root string) error {
 	if err != nil {
 		return err
 	}
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, SourceTree: r}, []tasks.Task{task}, tasks.RunOptions{})
+	return tasks.Run(ctx, tasks.NewScope(root, root, r), []tasks.Task{task}, tasks.RunOptions{})
 }
 
 // hasGoFiles returns true if the directory or any of its subdirectories

@@ -535,9 +535,9 @@ func TestBuildDeployPlan_DryRunClusterKind(t *testing.T) {
 	if err := opt.Resolve(nil); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
-		t.Fatalf("opt.GetRepo failed: %v", err)
+		t.Fatalf("opt.GetSourceTree failed: %v", err)
 	}
 
 	cfg, err := config.Load(tempDir)
@@ -628,9 +628,9 @@ func TestBuildDeployPlan_DryRunClusterNonKind(t *testing.T) {
 	if err := opt.Resolve(nil); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
-		t.Fatalf("opt.GetRepo failed: %v", err)
+		t.Fatalf("opt.GetSourceTree failed: %v", err)
 	}
 
 	cfg, err := config.Load(tempDir)

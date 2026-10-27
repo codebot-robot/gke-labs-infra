@@ -260,7 +260,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 			}
 			fmt.Printf("  - %s\n", filepath.ToSlash(rel))
 		}
-		return tasks.Run(ctx, &tasks.APScope{RepoRoot: repoRoot, Dir: repoRoot, SourceTree: r}, allTasks, tasks.RunOptions{DryRun: true})
+		return tasks.Run(ctx, tasks.NewScope(repoRoot, repoRoot, r), allTasks, tasks.RunOptions{DryRun: true})
 	}
 
 	// Perturb each generated file that exists on disk, recording pre-run hash and mtime
@@ -347,7 +347,7 @@ func RunVerify(ctx context.Context, repoRoot string, scopes []*tasks.APScope, al
 	}()
 
 	// Run generation tasks
-	runErr := tasks.Run(ctx, &tasks.APScope{RepoRoot: repoRoot, Dir: repoRoot, SourceTree: r}, allTasks, tasks.RunOptions{DryRun: false})
+	runErr := tasks.Run(ctx, tasks.NewScope(repoRoot, repoRoot, r), allTasks, tasks.RunOptions{DryRun: false})
 	if runErr != nil {
 		findings = append(findings, fmt.Sprintf("generation tasks failed: %v", runErr))
 	}

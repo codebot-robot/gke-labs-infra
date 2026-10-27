@@ -23,8 +23,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"k8s.io/klog/v2"
 )
+
+func newTestScope(t *testing.T) *APScope {
+	dir := t.TempDir()
+	tree, err := sourcetree.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NewScope(dir, dir, tree)
+}
 
 type fakeRetryableTask struct {
 	name     string
@@ -89,7 +99,7 @@ func TestRunTask_Retry(t *testing.T) {
 			},
 		}
 
-		scope := &APScope{RepoRoot: t.TempDir()}
+		scope := newTestScope(t)
 		start := time.Now()
 		err := RunTask(t.Context(), scope, task)
 		elapsed := time.Since(start)
@@ -139,7 +149,7 @@ func TestRunTask_Retry(t *testing.T) {
 			},
 		}
 
-		scope := &APScope{RepoRoot: t.TempDir()}
+		scope := newTestScope(t)
 		err := RunTask(t.Context(), scope, task)
 		if err == nil {
 			t.Fatal("expected RunTask to fail on persistent error, got nil")
@@ -186,7 +196,7 @@ func TestRunTask_Retry(t *testing.T) {
 			},
 		}
 
-		scope := &APScope{RepoRoot: t.TempDir()}
+		scope := newTestScope(t)
 		err := RunTask(t.Context(), scope, task)
 		if err == nil {
 			t.Fatal("expected RunTask to fail immediately on refused error, got nil")
@@ -231,7 +241,7 @@ func TestRunTask_Retry(t *testing.T) {
 			cancel()
 		}()
 
-		scope := &APScope{RepoRoot: t.TempDir()}
+		scope := newTestScope(t)
 		err := RunTask(ctx, scope, task)
 		if err == nil {
 			t.Fatal("expected error on cancelled context, got nil")
@@ -258,7 +268,7 @@ func TestRunTask_Retry(t *testing.T) {
 			},
 		}
 
-		scope := &APScope{RepoRoot: t.TempDir()}
+		scope := newTestScope(t)
 		err := RunTask(t.Context(), scope, task)
 		if ranCount != 1 {
 			t.Errorf("expected 1 attempt, got %d", ranCount)

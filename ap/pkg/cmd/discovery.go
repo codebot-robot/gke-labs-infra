@@ -31,11 +31,7 @@ func DiscoverScopes(r *sourcetree.SourceTree, repoRoot string, apRoots []string)
 	var scopes []*tasks.APScope
 
 	for _, apRoot := range apRoots {
-		scope := &tasks.APScope{
-			RepoRoot:   repoRoot,
-			Dir:        apRoot,
-			SourceTree: r.Under(apRoot),
-		}
+		scope := tasks.NewScope(repoRoot, apRoot, r.Under(apRoot))
 
 		// Discover e2e scripts
 		e2eScripts, err := tasks.FindTaskScripts(scope.SourceTree, apRoot, tasks.WithPrefix("test-e2e"))

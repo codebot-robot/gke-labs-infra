@@ -84,13 +84,19 @@ func TestAPScopeSourceTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := &APScope{
-		Dir:        tmpDir,
-		SourceTree: tree,
-	}
+	scope := NewScope(tmpDir, tmpDir, tree)
 	if scope.SourceTree != tree {
 		t.Fatalf("SourceTree = %v, want %v", scope.SourceTree, tree)
 	}
+
+	// NewScope must panic if tree is nil
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Errorf("expected panic when tree is nil, got nil")
+		}
+	}()
+	_ = NewScope(tmpDir, tmpDir, nil)
 }
 
 func TestGroupRun_ContinueOnError(t *testing.T) {
@@ -128,8 +134,12 @@ func TestGroupRun_ContinueOnError(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	scope := &APScope{}
-	err := group.Run(ctx, scope)
+	tree, err := sourcetree.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := NewScope(t.TempDir(), t.TempDir(), tree)
+	err = group.Run(ctx, scope)
 	if err == nil {
 		t.Fatalf("expected error from Group.Run(), got nil")
 	}
@@ -182,8 +192,12 @@ func TestGroupRun_FailFast(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	scope := &APScope{}
-	err := group.Run(ctx, scope)
+	tree, err := sourcetree.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := NewScope(t.TempDir(), t.TempDir(), tree)
+	err = group.Run(ctx, scope)
 	if err == nil {
 		t.Fatalf("expected error from Group.Run(), got nil")
 	}
@@ -222,10 +236,14 @@ func TestTasksRun_ContinueOnError(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	scope := &APScope{}
+	tree, err := sourcetree.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := NewScope(t.TempDir(), t.TempDir(), tree)
 
 	// Test fail-fast
-	err := Run(ctx, scope, ts, RunOptions{ContinueOnError: false})
+	err = Run(ctx, scope, ts, RunOptions{ContinueOnError: false})
 	if !ran1 || ran2 {
 		t.Errorf("fail-fast: expected ran1=true, ran2=false, got ran1=%v, ran2=%v", ran1, ran2)
 	}
@@ -321,7 +339,11 @@ func TestTaskScript_ResolvesApOnPath(t *testing.T) {
 	tempCache := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", tempCache)
 	t.Setenv("AP_EXECUTABLE", fakeAp)
-	if err := ts.Run(t.Context(), &APScope{Dir: tmpDir, RepoRoot: tmpDir}); err != nil {
+	tree, err := sourcetree.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.Run(t.Context(), NewScope(tmpDir, tmpDir, tree)); err != nil {
 		t.Fatalf("task run failed: %v", err)
 	}
 
@@ -349,10 +371,11 @@ func TestParallelGroup(t *testing.T) {
 		allowTask2Finish := make(chan struct{})
 
 		var outBuf syncBuffer
-		scope := &APScope{
-			Stdout: &outBuf,
-			Stderr: &outBuf,
+		tree, err := sourcetree.Open(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
 		}
+		scope := NewScope(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf)
 
 		recordActive := func() func() {
 			curr := atomic.AddInt64(&activeCount, 1)
@@ -490,10 +513,11 @@ func TestParallelGroup(t *testing.T) {
 		var task2Ran atomic.Bool
 
 		var outBuf syncBuffer
-		scope := &APScope{
-			Stdout: &outBuf,
-			Stderr: &outBuf,
+		tree, err := sourcetree.Open(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
 		}
+		scope := NewScope(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf)
 
 		g := &Group{
 			Name:            "test-cancel-group",
@@ -530,7 +554,7 @@ func TestParallelGroup(t *testing.T) {
 			},
 		}
 
-		err := g.Run(t.Context(), scope)
+		err = g.Run(t.Context(), scope)
 		if !errors.Is(err, errFail) {
 			t.Fatalf("expected first error errFail, got %v", err)
 		}
@@ -563,10 +587,11 @@ func TestParallelGroup(t *testing.T) {
 
 		var ranA, ranB, ranC atomic.Bool
 		var outBuf syncBuffer
-		scope := &APScope{
-			Stdout: &outBuf,
-			Stderr: &outBuf,
+		tree, err := sourcetree.Open(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
 		}
+		scope := NewScope(t.TempDir(), t.TempDir(), tree).WithOutput(&outBuf, &outBuf)
 
 		g := &Group{
 			Name:            "test-continue-group",
@@ -600,7 +625,7 @@ func TestParallelGroup(t *testing.T) {
 			},
 		}
 
-		err := g.Run(t.Context(), scope)
+		err = g.Run(t.Context(), scope)
 		if err == nil {
 			t.Fatalf("expected error from g.Run(), got nil")
 		}

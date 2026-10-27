@@ -66,10 +66,8 @@ func (t *LegacyScriptTask) Run(ctx context.Context, scope *tasks.APScope) error 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to run %s: %w", t.Name, err)
 	}
-	if scope != nil && scope.SourceTree != nil {
-		if err := scope.SourceTree.InvalidateAll(); err != nil {
-			return fmt.Errorf("failed to invalidate repo tree after %s: %w", t.Name, err)
-		}
+	if err := scope.SourceTree.InvalidateAll(); err != nil {
+		return fmt.Errorf("failed to invalidate repo tree after %s: %w", t.Name, err)
 	}
 	return nil
 }
@@ -97,10 +95,8 @@ func (t *GoGenerateTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go generate failed in %s: %w", t.Dir, err)
 	}
-	if scope != nil && scope.SourceTree != nil {
-		if err := scope.SourceTree.InvalidateAll(); err != nil {
-			return fmt.Errorf("failed to invalidate repo tree after go generate in %s: %w", t.Dir, err)
-		}
+	if err := scope.SourceTree.InvalidateAll(); err != nil {
+		return fmt.Errorf("failed to invalidate repo tree after go generate in %s: %w", t.Dir, err)
 	}
 	return nil
 }
@@ -135,11 +131,7 @@ type BuiltinGeneratorTask struct {
 
 func (t *BuiltinGeneratorTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running built-in generator: %s", t.Name)
-	var r *sourcetree.SourceTree
-	if scope != nil {
-		r = scope.SourceTree
-	}
-	return t.RunFunc(ctx, r, scope.RepoRoot)
+	return t.RunFunc(ctx, scope.SourceTree, scope.RepoRoot)
 }
 
 func (t *BuiltinGeneratorTask) GetName() string {
@@ -243,7 +235,7 @@ func Run(ctx context.Context, repoRoot string, scopes []*tasks.APScope) error {
 	if len(scopes) > 0 {
 		r = scopes[0].SourceTree
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: repoRoot, Dir: repoRoot, SourceTree: r})
+	return t.Run(ctx, tasks.NewScope(repoRoot, repoRoot, r))
 }
 
 func getSuffix(repoRoot, apRoot string) string {

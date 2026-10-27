@@ -85,11 +85,7 @@ func TestRunAudit_DryRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := &tasks.APScope{
-		RepoRoot:   tempDir,
-		Dir:        tempDir,
-		SourceTree: r,
-	}
+	scope := tasks.NewScope(tempDir, tempDir, r)
 
 	err = RunAudit(t.Context(), tempDir, []*tasks.APScope{scope}, AuditOptions{DryRun: true})
 	if err != nil {
@@ -139,11 +135,7 @@ EOF
 	}
 
 	// Informational mode: should succeed (exit 0) and find generated_no_header.yaml
-	scope := &tasks.APScope{
-		RepoRoot:   tempDir,
-		Dir:        tempDir,
-		SourceTree: r,
-	}
+	scope := tasks.NewScope(tempDir, tempDir, r)
 	err = RunAudit(t.Context(), tempDir, []*tasks.APScope{scope}, AuditOptions{Strict: false})
 	if err != nil {
 		t.Fatalf("RunAudit (non-strict) failed: %v", err)
@@ -200,11 +192,7 @@ EOF
 		t.Fatal(err)
 	}
 
-	scope := &tasks.APScope{
-		RepoRoot:   tempDir,
-		Dir:        tempDir,
-		SourceTree: r,
-	}
+	scope := tasks.NewScope(tempDir, tempDir, r)
 	// Strict mode should succeed because the generated file HAS a header!
 	err = RunAudit(t.Context(), tempDir, []*tasks.APScope{scope}, AuditOptions{Strict: true})
 	if err != nil {

@@ -530,7 +530,7 @@ func Build(ctx context.Context, r *sourcetree.SourceTree, root string, push bool
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, SourceTree: r})
+	return t.Run(ctx, tasks.NewScope(root, root, r))
 }
 
 // HasImages returns true if there are any images to build under root.

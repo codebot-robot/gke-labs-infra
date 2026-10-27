@@ -454,10 +454,11 @@ func TestDockerBuildTask_Platforms(t *testing.T) {
 		Push:       true,
 	}
 
-	scope := &tasks.APScope{
-		RepoRoot: tmpDir,
-		Dir:      tmpDir,
+	r, err := sourcetree.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
 	}
+	scope := tasks.NewScope(tmpDir, tmpDir, r)
 
 	calls = nil
 	if err := task.Run(t.Context(), scope); err != nil {
@@ -780,10 +781,11 @@ func TestDockerBuildTask_ToolDocker(t *testing.T) {
 		Push:       false,
 	}
 
-	scope := &tasks.APScope{
-		RepoRoot: tmpDir,
-		Dir:      tmpDir,
+	r, err := sourcetree.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
 	}
+	scope := tasks.NewScope(tmpDir, tmpDir, r)
 
 	if err := task.Run(t.Context(), scope); err != nil {
 		t.Fatalf("unexpected error running task: %v", err)

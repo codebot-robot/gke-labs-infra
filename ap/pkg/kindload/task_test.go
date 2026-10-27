@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
@@ -141,11 +142,17 @@ func TestKindLoadTask_SharedReferenceMutation(t *testing.T) {
 
 func TestKindLoadTask_Run(t *testing.T) {
 	t.Run("empty images is a no-op", func(t *testing.T) {
+		tempDir := t.TempDir()
+		tree, err := sourcetree.Open(tempDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope := tasks.NewScope(tempDir, tempDir, tree)
 		task := &KindLoadTask{
 			ClusterName: "test-cluster",
 			Images:      nil,
 		}
-		if err := task.Run(t.Context(), &tasks.APScope{}); err != nil {
+		if err := task.Run(t.Context(), scope); err != nil {
 			t.Fatalf("expected nil for empty images, got: %v", err)
 		}
 	})
@@ -181,7 +188,13 @@ exit 0
 			Images:      []*imageref.ImageRef{ref1, ref2},
 		}
 
-		if err := task.Run(t.Context(), &tasks.APScope{RepoRoot: tempDir}); err != nil {
+		tree, err := sourcetree.Open(tempDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		scope := tasks.NewScope(tempDir, tempDir, tree)
+
+		if err := task.Run(t.Context(), scope); err != nil {
 			t.Fatalf("task.Run failed: %v", err)
 		}
 

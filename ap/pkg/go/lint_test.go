@@ -425,7 +425,7 @@ lint:
 		if at == nil {
 			t.Fatalf("expected AnalyzersTask to be found")
 		}
-		err = at.Run(t.Context(), &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r})
+		err = at.Run(t.Context(), tasks.NewScope(dir, dir, r))
 		if err == nil {
 			t.Fatalf("expected unused parameter violation, got nil")
 		}
@@ -454,7 +454,7 @@ lint:
 		if at == nil {
 			t.Fatalf("expected AnalyzersTask to be found")
 		}
-		err = at.Run(t.Context(), &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r})
+		err = at.Run(t.Context(), tasks.NewScope(dir, dir, r))
 		if err != nil {
 			t.Fatalf("expected no violation when unusedparameters is not enabled, got %v", err)
 		}
@@ -780,9 +780,14 @@ func TestLintTasks_GovulncheckAndDroppedErrorsBothReport(t *testing.T) {
 		Tasks:           []tasks.Task{modGroup},
 	}
 
-	ctx := context.Background()
-	scope := &tasks.APScope{}
-	err := outerGroup.Run(ctx, scope)
+	ctx := t.Context()
+	tmpDir := t.TempDir()
+	tree, err := sourcetree.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := tasks.NewScope(tmpDir, tmpDir, tree)
+	err = outerGroup.Run(ctx, scope)
 	if err == nil {
 		t.Fatalf("expected error from outerGroup.Run(), got nil")
 	}
@@ -832,7 +837,7 @@ func TestLintTasks_PackageLoadError(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r})
+	err = task.Run(ctx, tasks.NewScope(dir, dir, r))
 	if err == nil {
 		t.Fatalf("expected task.Run to fail on package load error, got nil")
 	}
@@ -878,7 +883,7 @@ func TestLintTasks_MultiGOOS_LinuxOnDarwin(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r})
+	err = task.Run(ctx, tasks.NewScope(dir, dir, r))
 	if err == nil {
 		t.Fatalf("expected unused error in foo_linux.go to be reported on simulated darwin, got nil")
 	}
@@ -915,7 +920,7 @@ func TestLintTasks_MultiGOOS_SingleLoad(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r})
+	err = task.Run(ctx, tasks.NewScope(dir, dir, r))
 	if err != nil {
 		t.Fatalf("unexpected error from task.Run: %v", err)
 	}
@@ -966,7 +971,7 @@ func TestLintTasks_MultiGOOS_VendorIgnored(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	err = task.Run(ctx, &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r})
+	err = task.Run(ctx, tasks.NewScope(dir, dir, r))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1061,7 +1066,7 @@ func main() {
 	task.BaselinePath = baselinePath
 
 	ctx := t.Context()
-	scope := &tasks.APScope{RepoRoot: dir, Dir: dir, SourceTree: r}
+	scope := tasks.NewScope(dir, dir, r)
 	if err := task.Run(ctx, scope); err != nil {
 		t.Fatalf("write baseline failed: %v", err)
 	}

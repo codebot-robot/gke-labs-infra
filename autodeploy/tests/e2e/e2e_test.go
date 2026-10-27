@@ -26,6 +26,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/kindload"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 )
@@ -70,7 +71,11 @@ func TestAutodeploy(t *testing.T) {
 			ClusterName: clusterName,
 			Images:      refs,
 		}
-		scope := &tasks.APScope{RepoRoot: repoRoot}
+		tree, err := sourcetree.Open(repoRoot)
+		if err != nil {
+			t.Fatalf("failed to open sourcetree: %v", err)
+		}
+		scope := tasks.NewScope(repoRoot, repoRoot, tree)
 		if err := tasks.RunTask(t.Context(), scope, task); err != nil {
 			t.Fatalf("failed to load image(s) %v: %v", images, err)
 		}

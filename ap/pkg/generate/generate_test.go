@@ -276,7 +276,7 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root, SourceTree: r}}
+	scopes := []*tasks.APScope{tasks.NewScope(root, root, r)}
 	if err := runGithubActionsGenerator(t.Context(), r, root, scopes); err != nil {
 		t.Fatalf("runGithubActionsGenerator: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestGenerateTasks_DevTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root, SourceTree: r}}
+	scopes := []*tasks.APScope{tasks.NewScope(root, root, r)}
 
 	// 1. dev/tasks does not exist -> should succeed
 	task, err := GenerateTasks(root, scopes)
@@ -377,7 +377,7 @@ func TestGenerateTasks_DevTasks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scopes = []*tasks.APScope{{Dir: root, RepoRoot: root, SourceTree: r}}
+	scopes = []*tasks.APScope{tasks.NewScope(root, root, r)}
 
 	task, err = GenerateTasks(root, scopes)
 	if err != nil {
@@ -440,7 +440,7 @@ func TestGenerateIdempotence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope1 := &tasks.APScope{Dir: root, RepoRoot: root, SourceTree: r1}
+	scope1 := tasks.NewScope(root, root, r1)
 	task1, err := GenerateTasks(root, []*tasks.APScope{scope1})
 	if err != nil {
 		t.Fatalf("GenerateTasks run 1 failed: %v", err)
@@ -468,7 +468,7 @@ func TestGenerateIdempotence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope2 := &tasks.APScope{Dir: root, RepoRoot: root, SourceTree: r2}
+	scope2 := tasks.NewScope(root, root, r2)
 	task2, err := GenerateTasks(root, []*tasks.APScope{scope2})
 	if err != nil {
 		t.Fatalf("GenerateTasks run 2 failed: %v", err)

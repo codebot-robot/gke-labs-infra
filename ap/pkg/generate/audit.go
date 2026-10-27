@@ -185,7 +185,7 @@ func RunAudit(ctx context.Context, repoRoot string, scopes []*tasks.APScope, opt
 	}
 
 	var generatorErrors []string
-	runErr := tasks.Run(ctx, &tasks.APScope{RepoRoot: scratchDir, Dir: scratchDir, SourceTree: scratchRepo}, allTasks, tasks.RunOptions{
+	runErr := tasks.Run(ctx, tasks.NewScope(scratchDir, scratchDir, scratchRepo), allTasks, tasks.RunOptions{
 		DryRun:          false,
 		ContinueOnError: true,
 	})
@@ -485,11 +485,7 @@ func discoverScratchScopes(r *sourcetree.SourceTree, scratchDir string) ([]*task
 	}
 	var scopes []*tasks.APScope
 	for _, apRoot := range apRoots {
-		scope := &tasks.APScope{
-			RepoRoot:   scratchDir,
-			Dir:        apRoot,
-			SourceTree: r.Under(apRoot),
-		}
+		scope := tasks.NewScope(scratchDir, apRoot, r.Under(apRoot))
 		buildScripts, err := tasks.FindTaskScripts(scope.SourceTree, apRoot, tasks.WithPrefix("build-"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to find build scripts: %w", err)

@@ -144,7 +144,7 @@ func Test(ctx context.Context, r *sourcetree.SourceTree, root string) error {
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, SourceTree: r})
+	return t.Run(ctx, tasks.NewScope(root, root, r))
 }
 
 // RunGoTestOptions holds options for running go tests.

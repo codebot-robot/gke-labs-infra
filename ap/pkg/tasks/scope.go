@@ -16,7 +16,6 @@ package tasks
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"sync"
