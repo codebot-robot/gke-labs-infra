@@ -322,9 +322,23 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 		if kindLoads[0].ClusterName != "my-cluster" {
 			t.Errorf("cluster = %q, want 'my-cluster'", kindLoads[0].ClusterName)
 		}
+		if got := kindLoads[0].GetName(); got != "kind-load (cluster: my-cluster): 2 images" {
+			t.Errorf("GetName() = %q, want %q", got, "kind-load (cluster: my-cluster): 2 images")
+		}
+		var gotImages []string
+		for _, img := range kindLoads[0].Images {
+			gotImages = append(gotImages, img.String())
+		}
 		expectedImages := []string{"images.local/a:v1.0", "images.local/b:v1.0"}
-		if !reflect.DeepEqual(kindLoads[0].Images, expectedImages) {
-			t.Errorf("images = %v, want %v", kindLoads[0].Images, expectedImages)
+		if !reflect.DeepEqual(gotImages, expectedImages) {
+			t.Errorf("images = %v, want %v", gotImages, expectedImages)
+		}
+		var childNames []string
+		for _, child := range kindLoads[0].GetChildren() {
+			childNames = append(childNames, child.GetName())
+		}
+		if !reflect.DeepEqual(childNames, expectedImages) {
+			t.Errorf("children = %v, want %v", childNames, expectedImages)
 		}
 		for i, push := range buildTasksPush {
 			if push {
@@ -1216,6 +1230,7 @@ func TestDeploy_RunDeploy_NonexistentNamespaceFailsEarly(t *testing.T) {
 
 func TestDeploy_DryRun_ResolvedReferences(t *testing.T) {
 	tempDir := setupFixtureRepo(t)
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "nonexistent"))
 
 	// 1. Push path with default tag (:latest)
 	t.Run("default tag in push path prints resolved reference pinned by digest", func(t *testing.T) {
@@ -1295,6 +1310,12 @@ func TestDeploy_DryRun_ResolvedReferences(t *testing.T) {
 
 		if !strings.Contains(out, "images.local/a:latest (unique tag)") {
 			t.Errorf("expected dry-run output to contain 'images.local/a:latest (unique tag)', got:\n%s", out)
+		}
+		if !strings.Contains(out, "kind-load (cluster: test-cluster): 1 images") {
+			t.Errorf("expected dry-run output to contain 'kind-load (cluster: test-cluster): 1 images', got:\n%s", out)
+		}
+		if !strings.Contains(out, "images.local/a:latest\n") {
+			t.Errorf("expected dry-run output to list image to load 'images.local/a:latest', got:\n%s", out)
 		}
 	})
 }

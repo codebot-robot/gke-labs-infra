@@ -27,9 +27,8 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
-	toolDocker "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/kindload"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
-	"k8s.io/klog/v2"
 )
 
 // Options specifies configuration for the test harness.
@@ -203,52 +202,10 @@ func (h *Harness) DockerBuild(tag, dockerfile, context string) {
 	h.runCmd("docker", "build", "-t", tag, "-f", dockerfile, context)
 }
 
-var loadImagesBackoffs = []time.Duration{
-	2 * time.Second,
-	4 * time.Second,
-	8 * time.Second,
-	16 * time.Second,
-	32 * time.Second,
-}
-
 // LoadImages loads docker images into the specified kind cluster using the given kind binary.
 // It retries on failure with exponential backoff.
 func LoadImages(ctx context.Context, kindBin, cluster string, images []string) error {
-	if kindBin == "" {
-		return fmt.Errorf("kindBin is required")
-	}
-	if len(images) == 0 {
-		return nil
-	}
-	args := []string{"load", "docker-image"}
-	args = append(args, images...)
-	if cluster != "" {
-		args = append(args, "--name", cluster)
-	}
-
-	for attempt := 0; ; attempt++ {
-		cmd := exec.CommandContext(ctx, kindBin, args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(kindBin))
-		if dockerBin, err := toolDocker.EnsureDocker(ctx, ""); err == nil && dockerBin != "" {
-			cmd.Env = fileutils.PrependPath(cmd.Env, filepath.Dir(dockerBin))
-		}
-		err := cmd.Run()
-		if err == nil {
-			return nil
-		}
-		if attempt == len(loadImagesBackoffs) {
-			return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, err)
-		}
-		backoff := loadImagesBackoffs[attempt]
-		klog.Warningf("failed to load image(s) into kind cluster %q (attempt %d/%d): %v; retrying in %v...", cluster, attempt+1, len(loadImagesBackoffs)+1, err, backoff)
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, ctx.Err())
-		case <-time.After(backoff):
-		}
-	}
+	return kindload.LoadImages(ctx, kindBin, cluster, images)
 }
 
 // KindLoad loads a docker image into the kind cluster.
