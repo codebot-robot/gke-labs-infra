@@ -43,6 +43,7 @@ When making changes to an AP-managed project, coding agents should follow this v
 -   **Images**: `ap` automatically builds Docker images found in the `images/<image-name>` directory. Built images deployed with `:latest` are pinned by digest (`tag@sha256`) in applied manifests so redeploying always rolls pods to the new image.
 -   **Kubernetes**: `ap` deploys Kubernetes manifests located in the `k8s` directory.
 -   **Kind**: When the current context is a kind cluster, `ap deploy` works with no `IMAGE_PREFIX`, building locally, loading images with `kind load docker-image` using a unique tag, and applying.
+-   **Cluster**: Use `--cluster=kind://<name>` to target a specific kind cluster or `--cluster=<context>` to target a kubeconfig context.
 
 ## Tool Management
 
