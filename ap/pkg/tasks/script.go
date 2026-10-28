@@ -121,8 +121,8 @@ func (t *TaskScript) Run(ctx context.Context, scope *APScope) error {
 		return fmt.Errorf("failed to prepare script environment for %s: %w", t.Name, err)
 	}
 	cmd.Env = env
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = scope.GetStdout()
+	cmd.Stderr = scope.GetStderr()
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("task %s failed: %w", t.Name, err)
 	}

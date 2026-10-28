@@ -22,7 +22,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 )
@@ -340,4 +342,293 @@ func TestTaskScript_ResolvesApOnPath(t *testing.T) {
 	if !strings.Contains(string(out), "fake-ap-version") {
 		t.Errorf("unexpected output: %s", string(out))
 	}
+}
+
+func TestParallelGroup(t *testing.T) {
+	// 1. Verify concurrency actually happens, bounded by the limit,
+	// and output blocks are whole and in completion order.
+	t.Run("ConcurrencyAndCompletionOrder", func(t *testing.T) {
+		const limit = 2
+		var activeCount int64
+		var maxActive int64
+
+		startTask0 := make(chan struct{})
+		startTask1 := make(chan struct{})
+		allowTask1Finish := make(chan struct{})
+		allowTask0Finish := make(chan struct{})
+		allowTask2Finish := make(chan struct{})
+
+		var outBuf syncBuffer
+		scope := &APScope{
+			Stdout: &outBuf,
+			Stderr: &outBuf,
+		}
+
+		recordActive := func() func() {
+			curr := atomic.AddInt64(&activeCount, 1)
+			for {
+				old := atomic.LoadInt64(&maxActive)
+				if curr <= old || atomic.CompareAndSwapInt64(&maxActive, old, curr) {
+					break
+				}
+			}
+			return func() {
+				atomic.AddInt64(&activeCount, -1)
+			}
+		}
+
+		g := &Group{
+			Name:       "test-parallel-group",
+			Parallel:   true,
+			maxWorkers: limit,
+			Tasks: []Task{
+				&FuncTask{
+					Name: "task-0",
+					RunFn: func(ctx context.Context, s *APScope) error {
+						done := recordActive()
+						defer done()
+						close(startTask0)
+						// Wait for task 1 to be active too
+						<-startTask1
+						// Wait for permission to finish (after task 1 has finished)
+						<-allowTask0Finish
+						fmt.Fprintln(s.GetStdout(), "stdout line from task 0")
+						fmt.Fprintln(s.GetStderr(), "stderr line from task 0")
+						return nil
+					},
+				},
+				&FuncTask{
+					Name: "task-1",
+					RunFn: func(ctx context.Context, s *APScope) error {
+						done := recordActive()
+						defer done()
+						// Wait for task 0 to start
+						<-startTask0
+						close(startTask1)
+						<-allowTask1Finish
+						fmt.Fprintln(s.GetStdout(), "stdout line from task 1")
+						fmt.Fprintln(s.GetStderr(), "stderr line from task 1")
+						return nil
+					},
+				},
+				&FuncTask{
+					Name: "task-2",
+					RunFn: func(ctx context.Context, s *APScope) error {
+						done := recordActive()
+						defer done()
+						<-allowTask2Finish
+						fmt.Fprintln(s.GetStdout(), "output from task 2")
+						return nil
+					},
+				},
+			},
+		}
+
+		// Run in background goroutine while we orchestrate completion order
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- g.Run(t.Context(), scope)
+		}()
+
+		// Both task 0 and task 1 have started
+		<-startTask1
+
+		// Verify that at least 2 tasks ran concurrently
+		// and that task 2 did NOT start while tasks 0 and 1 were active (bounded by limit=2)
+		if got := atomic.LoadInt64(&activeCount); got != 2 {
+			t.Errorf("expected activeCount == 2 while task 0 and task 1 are running, got %d", got)
+		}
+
+		// Allow task 1 to finish first!
+		close(allowTask1Finish)
+		// Wait briefly to ensure task 1 completes and prints before task 0
+		time.Sleep(20 * time.Millisecond)
+
+		// Allow task 0 to finish second!
+		close(allowTask0Finish)
+		// Wait briefly to ensure task 0 completes and prints before task 2
+		time.Sleep(20 * time.Millisecond)
+
+		// Allow task 2 to finish third!
+		close(allowTask2Finish)
+
+		if err := <-errCh; err != nil {
+			t.Fatalf("unexpected group run error: %v", err)
+		}
+
+		// Assert concurrency occurred and was bounded by limit
+		if maxActive != limit {
+			t.Errorf("expected maxActive == %d, got %d", limit, maxActive)
+		}
+
+		outStr := outBuf.String()
+
+		// Verify output blocks are whole and in completion order:
+		// task-1 must appear before task-0, because task-1 completed first!
+		idx1 := strings.Index(outStr, "=== task-1 (ok,")
+		idx0 := strings.Index(outStr, "=== task-0 (ok,")
+		idx2 := strings.Index(outStr, "=== task-2 (ok,")
+
+		if idx1 == -1 || idx0 == -1 || idx2 == -1 {
+			t.Fatalf("missing expected task headers in output:\n%s", outStr)
+		}
+
+		if !(idx1 < idx0 && idx0 < idx2) {
+			t.Errorf("expected completion order task-1 < task-0 < task-2, got indices task-1:%d, task-0:%d, task-2:%d in:\n%s",
+				idx1, idx0, idx2, outStr)
+		}
+
+		// Verify task-1 block is whole (header followed by its stdout/stderr before any other task header)
+		task1Block := outStr[idx1:idx0]
+		if !strings.Contains(task1Block, "stdout line from task 1") || !strings.Contains(task1Block, "stderr line from task 1") {
+			t.Errorf("task-1 block is not whole:\n%s", task1Block)
+		}
+
+		// Verify task-0 block is whole
+		task0Block := outStr[idx0:idx2]
+		if !strings.Contains(task0Block, "stdout line from task 0") || !strings.Contains(task0Block, "stderr line from task 0") {
+			t.Errorf("task-0 block is not whole:\n%s", task0Block)
+		}
+	})
+
+	// 2. First-error cancellation without ContinueOnError
+	t.Run("FirstErrorCancellation", func(t *testing.T) {
+		const limit = 2
+		errFail := errors.New("boom failure")
+		task1Started := make(chan struct{})
+		var task1Cancelled atomic.Bool
+		var task2Ran atomic.Bool
+
+		var outBuf syncBuffer
+		scope := &APScope{
+			Stdout: &outBuf,
+			Stderr: &outBuf,
+		}
+
+		g := &Group{
+			Name:            "test-cancel-group",
+			Parallel:        true,
+			ContinueOnError: false,
+			maxWorkers:      limit,
+			Tasks: []Task{
+				&FuncTask{
+					Name: "task-0",
+					RunFn: func(ctx context.Context, s *APScope) error {
+						// Wait for task 1 to be actively running
+						<-task1Started
+						fmt.Fprintln(s.GetStderr(), "task-0 failed details")
+						return errFail
+					},
+				},
+				&FuncTask{
+					Name: "task-1",
+					RunFn: func(ctx context.Context, s *APScope) error {
+						close(task1Started)
+						// Wait for context cancellation
+						<-ctx.Done()
+						task1Cancelled.Store(true)
+						return ctx.Err()
+					},
+				},
+				&FuncTask{
+					Name: "task-2",
+					RunFn: func(ctx context.Context, s *APScope) error {
+						task2Ran.Store(true)
+						return nil
+					},
+				},
+			},
+		}
+
+		err := g.Run(t.Context(), scope)
+		if !errors.Is(err, errFail) {
+			t.Fatalf("expected first error errFail, got %v", err)
+		}
+
+		if !task1Cancelled.Load() {
+			t.Errorf("expected task-1 to receive context cancellation")
+		}
+		if task2Ran.Load() {
+			t.Errorf("expected queued task-2 not to run after cancellation")
+		}
+
+		outStr := outBuf.String()
+		// Must contain task-0 completion block with FAILED
+		if !strings.Contains(outStr, "=== task-0 (FAILED,") {
+			t.Errorf("expected '=== task-0 (FAILED,' in output:\n%s", outStr)
+		}
+		// Must contain failure summary with task-0 output
+		if !strings.Contains(outStr, "=== FAILURE SUMMARY ===") {
+			t.Errorf("expected failure summary in output:\n%s", outStr)
+		}
+		if !strings.Contains(outStr, "task-0 failed details") {
+			t.Errorf("expected task-0 failed details in failure summary:\n%s", outStr)
+		}
+	})
+
+	// 3. ContinueOnError runs all tasks and joins errors
+	t.Run("ContinueOnError", func(t *testing.T) {
+		errA := errors.New("error A")
+		errC := errors.New("error C")
+
+		var ranA, ranB, ranC atomic.Bool
+		var outBuf syncBuffer
+		scope := &APScope{
+			Stdout: &outBuf,
+			Stderr: &outBuf,
+		}
+
+		g := &Group{
+			Name:            "test-continue-group",
+			Parallel:        true,
+			ContinueOnError: true,
+			Tasks: []Task{
+				&FuncTask{
+					Name: "task-a",
+					RunFn: func(ctx context.Context, s *APScope) error {
+						ranA.Store(true)
+						fmt.Fprintln(s.GetStderr(), "task-a error output")
+						return errA
+					},
+				},
+				&FuncTask{
+					Name: "task-b",
+					RunFn: func(ctx context.Context, s *APScope) error {
+						ranB.Store(true)
+						fmt.Fprintln(s.GetStdout(), "task-b ok output")
+						return nil
+					},
+				},
+				&FuncTask{
+					Name: "task-c",
+					RunFn: func(ctx context.Context, s *APScope) error {
+						ranC.Store(true)
+						fmt.Fprintln(s.GetStderr(), "task-c error output")
+						return errC
+					},
+				},
+			},
+		}
+
+		err := g.Run(t.Context(), scope)
+		if err == nil {
+			t.Fatalf("expected error from g.Run(), got nil")
+		}
+
+		if !ranA.Load() || !ranB.Load() || !ranC.Load() {
+			t.Errorf("expected all tasks to run, got ranA=%v, ranB=%v, ranC=%v", ranA.Load(), ranB.Load(), ranC.Load())
+		}
+
+		if !errors.Is(err, errA) || !errors.Is(err, errC) {
+			t.Errorf("expected joined error containing errA and errC, got %v", err)
+		}
+
+		outStr := outBuf.String()
+		if !strings.Contains(outStr, "=== FAILURE SUMMARY ===") {
+			t.Errorf("expected failure summary in output:\n%s", outStr)
+		}
+		if !strings.Contains(outStr, "task-a error output") || !strings.Contains(outStr, "task-c error output") {
+			t.Errorf("expected failed tasks output in failure summary:\n%s", outStr)
+		}
+	})
 }

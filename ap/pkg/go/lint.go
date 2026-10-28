@@ -50,8 +50,8 @@ func (t *GoVetTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running go vet in %s", t.Dir)
 	vetCmd := exec.CommandContext(ctx, "go", "vet", "./...")
 	vetCmd.Dir = t.Dir
-	vetCmd.Stdout = os.Stdout
-	vetCmd.Stderr = os.Stderr
+	vetCmd.Stdout = scope.GetStdout()
+	vetCmd.Stderr = scope.GetStderr()
 	if err := vetCmd.Run(); err != nil {
 		return fmt.Errorf("go vet failed in %s: %w", t.Dir, err)
 	}
@@ -75,8 +75,8 @@ func (t *GovulncheckTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running govulncheck in %s", t.Dir)
 	vulnCmd := exec.CommandContext(ctx, "go", "run", "golang.org/x/vuln/cmd/govulncheck@latest", "./...")
 	vulnCmd.Dir = t.Dir
-	vulnCmd.Stdout = os.Stdout
-	vulnCmd.Stderr = os.Stderr
+	vulnCmd.Stdout = scope.GetStdout()
+	vulnCmd.Stderr = scope.GetStderr()
 	if err := vulnCmd.Run(); err != nil {
 		return fmt.Errorf("govulncheck failed in %s: %w", t.Dir, err)
 	}
@@ -187,8 +187,17 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 			continue
 		}
 
-		if n := packages.PrintErrors(pkgs); n > 0 {
-			return fmt.Errorf("failed to load packages in %s: %d error(s)", t.Dir, n)
+		var pkgErrors int
+		for _, pkg := range pkgs {
+			for _, err := range pkg.Errors {
+				if _, writeErr := fmt.Fprintln(scope.GetStderr(), err); writeErr != nil {
+					klog.V(2).Infof("failed to write package error: %v", writeErr)
+				}
+				pkgErrors++
+			}
+		}
+		if pkgErrors > 0 {
+			return fmt.Errorf("failed to load packages in %s: %d error(s)", t.Dir, pkgErrors)
 		}
 
 		for _, pkg := range pkgs {
@@ -360,7 +369,9 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 					continue
 				}
 			}
-			fmt.Printf("Wrote %d baseline entries to %s\n", len(finalEntries), baselinePath)
+			if _, err := fmt.Fprintf(scope.GetStdout(), "Wrote %d baseline entries to %s\n", len(finalEntries), baselinePath); err != nil {
+				klog.V(2).Infof("failed to write baseline message: %v", err)
+			}
 			continue
 		}
 
@@ -376,7 +387,9 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 
 		newFindings, staleEntries := baseline.Match(findings, baselineEntries, allCheckedFiles, baselineRoot)
 		for _, stale := range staleEntries {
-			fmt.Printf("stale baseline entry: %s (remove from baseline)\n", stale)
+			if _, err := fmt.Fprintf(scope.GetStdout(), "stale baseline entry: %s (remove from baseline)\n", stale); err != nil {
+				klog.V(2).Infof("failed to write stale entry: %v", err)
+			}
 		}
 
 		findingsToReport := newFindings
@@ -389,9 +402,13 @@ func (t *AnalyzersTask) Run(ctx context.Context, scope *tasks.APScope) error {
 			if msg == "" {
 				msg = f.Detail
 			}
-			fmt.Fprintf(os.Stderr, "%s: %s\n", f.Pos, msg)
+			if _, err := fmt.Fprintf(scope.GetStderr(), "%s: %s\n", f.Pos, msg); err != nil {
+				klog.V(2).Infof("failed to write diagnostic: %v", err)
+			}
 			for _, rel := range f.Related {
-				fmt.Fprintf(os.Stderr, "%s:\t%s\n", rel.Pos, rel.Message)
+				if _, err := fmt.Fprintf(scope.GetStderr(), "%s:\t%s\n", rel.Pos, rel.Message); err != nil {
+					klog.V(2).Infof("failed to write related info: %v", err)
+				}
 			}
 		}
 
@@ -559,6 +576,7 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 		Name:            "go-lints",
 		Tasks:           moduleTasks,
 		ContinueOnError: true,
+		Parallel:        true,
 	}, nil
 }
 

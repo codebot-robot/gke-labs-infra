@@ -16,6 +16,8 @@ package tasks
 
 import (
 	"fmt"
+	"io"
+	"os"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 )
@@ -26,6 +28,9 @@ type APScope struct {
 	Dir      string
 	Repo     *repo.Repo
 
+	Stdout io.Writer
+	Stderr io.Writer
+
 	// Discovered Tasks
 	BuildTasks    []Task
 	E2ETasks      []Task
@@ -33,6 +38,30 @@ type APScope struct {
 	LintTasks     []Task
 	GenerateTasks []Task
 	FormatTasks   []Task
+}
+
+// GetStdout returns the configured stdout writer, or os.Stdout if unset.
+func (s *APScope) GetStdout() io.Writer {
+	if s.Stdout != nil {
+		return s.Stdout
+	}
+	return os.Stdout
+}
+
+// GetStderr returns the configured stderr writer, or os.Stderr if unset.
+func (s *APScope) GetStderr() io.Writer {
+	if s.Stderr != nil {
+		return s.Stderr
+	}
+	return os.Stderr
+}
+
+// WithOutput returns a shallow copy of the scope with custom stdout and stderr writers.
+func (s *APScope) WithOutput(stdout, stderr io.Writer) *APScope {
+	clone := *s
+	clone.Stdout = stdout
+	clone.Stderr = stderr
+	return &clone
 }
 
 // GetRepo returns the repository tree associated with this scope.
