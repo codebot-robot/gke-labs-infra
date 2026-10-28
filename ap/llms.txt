@@ -46,7 +46,7 @@ When making changes to an AP-managed project, coding agents should follow this v
 
 ## Tool Management
 
-- `ap tool install [dir]` creates symlinks for managed tools (`kind`, `docker`, `docker-buildx`, `protoc`, `go`) pointing to `ap` for busybox-style dispatch to pinned tool binaries.
+- `ap tool install [dir]` creates symlinks for managed tools (`kind`, `kubectl`, `docker`, `docker-buildx`, `protoc`, `go`) pointing to `ap` for busybox-style dispatch to pinned tool binaries.
 
 ## Kubernetes Manifests
 

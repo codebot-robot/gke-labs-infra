@@ -34,6 +34,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
 	gotool "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/go"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/protoc"
 )
 
@@ -127,6 +128,10 @@ func loadDockerConfig(repoRoot string) (*docker.Config, error) {
 
 func loadKindConfig(repoRoot string) (*kind.Config, error) {
 	return loadToolConfig(repoRoot, kind.LoadConfig, kind.DefaultConfig)
+}
+
+func loadKubectlConfig(repoRoot string) (*kubectl.Config, error) {
+	return loadToolConfig(repoRoot, kubectl.LoadConfig, kubectl.DefaultConfig)
 }
 
 func loadProtocConfig(repoRoot string) (*protoc.Config, error) {
@@ -236,6 +241,37 @@ var registry = []*Tool{
 		},
 		Update: func(ctx context.Context, repoRoot string) error {
 			return kind.Update(ctx, repoRoot)
+		},
+	},
+	{
+		Name:       "kubectl",
+		Short:      "Run kubectl with pinned binary",
+		UpdateFlag: "kubectl",
+		UpdateDesc: "Update kubectl versions in ap/pkg/tool/kubectl/versions.yaml",
+		Ensure: func(ctx context.Context, repoRoot string) (string, error) {
+			cfg, err := loadKubectlConfig(repoRoot)
+			if err != nil {
+				return "", err
+			}
+			return kubectl.EnsureKubectl(ctx, cfg.Kubectl)
+		},
+		Prepare: func(ctx context.Context, repoRoot string, args []string) (*Invocation, error) {
+			cfg, err := loadKubectlConfig(repoRoot)
+			if err != nil {
+				return nil, err
+			}
+			kubectlBin, err := kubectl.EnsureKubectl(ctx, cfg.Kubectl)
+			if err != nil {
+				return nil, fmt.Errorf("failed to prepare kubectl: %w", err)
+			}
+			return &Invocation{
+				Binary: kubectlBin,
+				Args:   args,
+				Env:    fileutils.PrependPath(os.Environ(), filepath.Dir(kubectlBin)),
+			}, nil
+		},
+		Update: func(ctx context.Context, repoRoot string) error {
+			return kubectl.Update(ctx, repoRoot)
 		},
 	},
 	{
