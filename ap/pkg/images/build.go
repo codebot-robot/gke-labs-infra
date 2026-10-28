@@ -252,7 +252,7 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, root, fullImageName, 
 		namespace, service := parts[0], parts[1]
 
 		pfTask := &k8s.PortForwardTask{
-			Child: &tasks.DummyTask{
+			Child: &tasks.FuncTask{
 				Name: "run-buildctl",
 				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
 					cmd := execCommandContext(ctx, "buildctl", buildctlArgs...)

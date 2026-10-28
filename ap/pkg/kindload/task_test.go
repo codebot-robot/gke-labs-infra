@@ -203,3 +203,11 @@ exit 0
 		}
 	})
 }
+
+func TestKindLoadTask_RetryPolicy(t *testing.T) {
+	task := &KindLoadTask{}
+	policy := task.RetryPolicy()
+	if !reflect.DeepEqual(policy, tasks.Backoff(DefaultBackoffs)) {
+		t.Errorf("task.RetryPolicy() = %v, want %v", policy, tasks.Backoff(DefaultBackoffs))
+	}
+}

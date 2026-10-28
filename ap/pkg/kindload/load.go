@@ -23,8 +23,8 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	toolDocker "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/docker"
-	"k8s.io/klog/v2"
 )
 
 // DefaultBackoffs defines the default retry backoffs for loading images into kind.
@@ -36,17 +36,11 @@ var DefaultBackoffs = []time.Duration{
 	32 * time.Second,
 }
 
-// KindLoadRetryPolicy defines the default backoffs used when retrying kind load docker-image.
-var KindLoadRetryPolicy = DefaultBackoffs
+// KindLoadRetryPolicy defines the default retry policy used when retrying kind load docker-image.
+var KindLoadRetryPolicy tasks.RetryPolicy = tasks.Backoff(DefaultBackoffs)
 
 // LoadImages loads docker images into the specified kind cluster using the given kind binary.
-// It retries on failure with exponential backoff.
 func LoadImages(ctx context.Context, kindBin, cluster string, images []string) error {
-	return LoadImagesWithBackoffs(ctx, kindBin, cluster, images, DefaultBackoffs)
-}
-
-// LoadImagesWithBackoffs loads docker images into the specified kind cluster using the given kind binary and backoff durations.
-func LoadImagesWithBackoffs(ctx context.Context, kindBin, cluster string, images []string, backoffs []time.Duration) error {
 	if kindBin == "" {
 		return fmt.Errorf("kindBin is required")
 	}
@@ -59,27 +53,15 @@ func LoadImagesWithBackoffs(ctx context.Context, kindBin, cluster string, images
 		args = append(args, "--name", cluster)
 	}
 
-	for attempt := 0; ; attempt++ {
-		cmd := exec.CommandContext(ctx, kindBin, args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(kindBin))
-		if dockerBin, err := toolDocker.EnsureDocker(ctx, ""); err == nil && dockerBin != "" {
-			cmd.Env = fileutils.PrependPath(cmd.Env, filepath.Dir(dockerBin))
-		}
-		err := cmd.Run()
-		if err == nil {
-			return nil
-		}
-		if attempt >= len(backoffs) {
-			return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, err)
-		}
-		backoff := backoffs[attempt]
-		klog.Warningf("failed to load image(s) into kind cluster %q (attempt %d/%d): %v; retrying in %v...", cluster, attempt+1, len(backoffs)+1, err, backoff)
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, ctx.Err())
-		case <-time.After(backoff):
-		}
+	cmd := exec.CommandContext(ctx, kindBin, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(kindBin))
+	if dockerBin, err := toolDocker.EnsureDocker(ctx, ""); err == nil && dockerBin != "" {
+		cmd.Env = fileutils.PrependPath(cmd.Env, filepath.Dir(dockerBin))
 	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to load image(s) into kind cluster %q: %w", cluster, err)
+	}
+	return nil
 }
