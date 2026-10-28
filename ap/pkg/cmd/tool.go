@@ -97,10 +97,11 @@ func BuildToolInstallCommand(rootOpt *RootOptions) *cobra.Command {
 
 // ToolUpdateVersionsOptions holds flags for "tool update-versions".
 type ToolUpdateVersionsOptions struct {
-	Protoc bool
-	Docker bool
-	Buildx bool
-	Kind   bool
+	Protoc  bool
+	Docker  bool
+	Buildx  bool
+	Kind    bool
+	Kubectl bool
 }
 
 // BuildToolUpdateVersionsCommand constructs the cobra command for "tool update-versions".
@@ -110,6 +111,11 @@ func BuildToolUpdateVersionsCommand(rootOpt *RootOptions) *cobra.Command {
 		Short: "Update baked-in tool release versions and checksums in versions.yaml",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if rootOpt.RootFlag != "" {
+				if err := rootOpt.ResolveRoot(); err != nil {
+					return err
+				}
+			}
 			repoRoot := rootOpt.RepoRoot
 			if repoRoot == "" {
 				repoRoot = rootOpt.APRoot
@@ -122,6 +128,9 @@ func BuildToolUpdateVersionsCommand(rootOpt *RootOptions) *cobra.Command {
 				}
 			}
 
+			// If any flag was explicitly set to true, only run tools that were explicitly set to true.
+			// Otherwise (e.g. no flags or only false flags given), run all tools whose flag is true.
+			anyExplicitlyEnabled := false
 			for _, t := range tool.All() {
 				if t.Update == nil {
 					continue
@@ -129,6 +138,29 @@ func BuildToolUpdateVersionsCommand(rootOpt *RootOptions) *cobra.Command {
 				flagName := t.UpdateFlag
 				if flagName == "" {
 					flagName = t.Name
+				}
+				if cmd.Flags().Changed(flagName) {
+					enabled, err := cmd.Flags().GetBool(flagName)
+					if err != nil {
+						return err
+					}
+					if enabled {
+						anyExplicitlyEnabled = true
+						break
+					}
+				}
+			}
+
+			for _, t := range tool.All() {
+				if t.Update == nil {
+					continue
+				}
+				flagName := t.UpdateFlag
+				if flagName == "" {
+					flagName = t.Name
+				}
+				if anyExplicitlyEnabled && !cmd.Flags().Changed(flagName) {
+					continue
 				}
 				enabled, err := cmd.Flags().GetBool(flagName)
 				if err != nil {

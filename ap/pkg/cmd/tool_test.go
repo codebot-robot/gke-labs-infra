@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -171,8 +172,59 @@ func TestToolUpdateVersions_Command(t *testing.T) {
 	if !strings.Contains(out, "update-versions") {
 		t.Errorf("expected help output to mention update-versions, got: %s", out)
 	}
-	if !strings.Contains(out, "--protoc") || !strings.Contains(out, "--docker") || !strings.Contains(out, "--buildx") || !strings.Contains(out, "--kind") || !strings.Contains(out, "--go") {
-		t.Errorf("expected help output to mention --protoc, --docker, --buildx, --kind, and --go flags, got: %s", out)
+	if !strings.Contains(out, "--protoc") || !strings.Contains(out, "--docker") || !strings.Contains(out, "--buildx") || !strings.Contains(out, "--kind") || !strings.Contains(out, "--kubectl") || !strings.Contains(out, "--go") {
+		t.Errorf("expected help output to mention --protoc, --docker, --buildx, --kind, --kubectl, and --go flags, got: %s", out)
+	}
+}
+
+func TestToolUpdateVersions_KubectlOnly(t *testing.T) {
+	dummyHash := "c04487523e7aa7d1493f7808174c899db93d7a9cf57531420cd76b9bd415f8f4"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/stable.txt":
+			_, _ = fmt.Fprintln(w, "v1.37.2")
+		case "/stable-1.36.txt":
+			_, _ = fmt.Fprintln(w, "v1.36.6")
+		default:
+			if strings.HasSuffix(r.URL.Path, ".sha256") {
+				_, _ = fmt.Fprintln(w, dummyHash)
+				return
+			}
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	tempRepo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tempRepo, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	targetDir := filepath.Join(tempRepo, "ap", "pkg", "tool", "kubectl")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("KUBECTL_RELEASE_FEED_URL", server.URL+"/stable.txt")
+	t.Setenv("KUBECTL_DOWNLOAD_BASE_URL", server.URL)
+
+	rootCmd := BuildRootCommand()
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"tool", "update-versions", "--kubectl", "--root", tempRepo})
+
+	err := rootCmd.ExecuteContext(t.Context())
+	if err != nil {
+		t.Fatalf("unexpected error running ap tool update-versions --kubectl: %v\nOutput: %s", err, buf.String())
+	}
+
+	yamlPath := filepath.Join(targetDir, "versions.yaml")
+	data, err := os.ReadFile(yamlPath)
+	if err != nil {
+		t.Fatalf("reading generated versions.yaml: %v", err)
+	}
+	if !strings.Contains(string(data), "v1.37.2") {
+		t.Errorf("expected versions.yaml to contain v1.37.2, got: %s", string(data))
 	}
 }
 
@@ -219,6 +271,58 @@ func TestToolKind_DryRun(t *testing.T) {
 	}
 	if !strings.Contains(output, "version") {
 		t.Errorf("expected output to contain 'version', got: %s", output)
+	}
+}
+
+func TestToolKubectl_DryRun(t *testing.T) {
+	tempCache := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", tempCache)
+
+	tempDir := t.TempDir()
+	apDir := filepath.Join(tempDir, ".ap")
+	if err := os.MkdirAll(apDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(apDir, "kubectl.yaml"), []byte("kubectl: \"v1.37.2\"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	binName := "kubectl"
+	if runtime.GOOS == "windows" {
+		binName = "kubectl.exe"
+	}
+	kubectlBinDir := filepath.Join(tempCache, "tools", "kubectl", "v1.37.2", "bin")
+	if err := os.MkdirAll(kubectlBinDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(kubectlBinDir, binName), []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("AP_ROOT", tempDir)
+
+	rootCmd := BuildRootCommand()
+	buf := new(bytes.Buffer)
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
+	rootCmd.SetArgs([]string{"tool", "kubectl", "--dry-run", "--", "version", "--client"})
+
+	err := rootCmd.ExecuteContext(t.Context())
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error running ap tool kubectl --dry-run: %v\nOutput: %s", err, output)
+	}
+
+	expectedPrefix := fmt.Sprintf("[dry-run] %s", filepath.Join(tempCache, "tools", "kubectl", "v1.37.2", "bin", binName))
+	if !strings.HasPrefix(output, expectedPrefix) {
+		t.Errorf("expected dry-run output to start with %q, got: %s", expectedPrefix, output)
+	}
+	if !strings.Contains(output, "version") {
+		t.Errorf("expected output to contain 'version', got: %s", output)
+	}
+	if !strings.Contains(output, "--client") {
+		t.Errorf("expected output to contain '--client', got: %s", output)
 	}
 }
 
@@ -428,7 +532,7 @@ func TestToolInstall(t *testing.T) {
 	}
 
 	output := buf.String()
-	expectedTools := []string{"kind", "docker", "docker-buildx", "protoc", "go"}
+	expectedTools := []string{"kind", "kubectl", "docker", "docker-buildx", "protoc", "go"}
 	for _, toolName := range expectedTools {
 		linkPath := filepath.Join(tempDir, toolName)
 		fi, err := os.Lstat(linkPath)
