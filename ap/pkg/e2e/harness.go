@@ -27,7 +27,9 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/kindload"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 )
 
@@ -51,6 +53,7 @@ type Harness struct {
 	namespace   string
 	skipCleanup bool
 	kindBin     string
+	repoRoot    string
 }
 
 // NewHarness creates a new e2e test harness.
@@ -90,13 +93,24 @@ func (h *Harness) KindBin() string {
 	return h.KindCommand()
 }
 
+// RepoRoot returns the repository root path.
+func (h *Harness) RepoRoot() string {
+	if h.repoRoot == "" {
+		dir, err := os.Getwd()
+		if err != nil {
+			if h.t != nil {
+				h.t.Fatalf("failed to get current working directory: %v", err)
+			}
+			return ""
+		}
+		h.repoRoot = findRepoRoot(dir)
+	}
+	return h.repoRoot
+}
+
 func (h *Harness) ensureKind() {
 	h.t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		h.t.Fatalf("failed to get current working directory: %v", err)
-	}
-	repoRoot := findRepoRoot(dir)
+	repoRoot := h.RepoRoot()
 	bin, err := kind.EnsureKindForRepo(h.t.Context(), repoRoot)
 	if err != nil {
 		h.t.Fatalf("failed to prepare kind tool: %v", err)
@@ -212,7 +226,16 @@ func LoadImages(ctx context.Context, kindBin, cluster string, images []string) e
 func (h *Harness) KindLoad(tag string) {
 	h.t.Helper()
 	h.t.Logf("Loading image %s into kind cluster %s", tag, h.clusterName)
-	if err := LoadImages(h.t.Context(), h.KindCommand(), h.clusterName, []string{tag}); err != nil {
+	ref, err := imageref.ParseImageRef(tag)
+	if err != nil {
+		h.t.Fatalf("failed to parse image tag %q: %v", tag, err)
+	}
+	task := &kindload.KindLoadTask{
+		ClusterName: h.clusterName,
+		Images:      []*imageref.ImageRef{ref},
+	}
+	scope := &tasks.APScope{RepoRoot: h.RepoRoot()}
+	if err := tasks.RunTask(h.t.Context(), scope, task); err != nil {
 		h.t.Fatalf("KindLoad failed: %v", err)
 	}
 }

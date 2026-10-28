@@ -513,7 +513,7 @@ func (t *KubectlApplyTask) GetChildren() []tasks.Task {
 				refStr = fmt.Sprintf("%s (pinned by digest)", refStr)
 			}
 		}
-		children = append(children, &tasks.DummyTask{
+		children = append(children, &tasks.FuncTask{
 			Name: refStr,
 		})
 	}

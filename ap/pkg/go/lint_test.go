@@ -729,42 +729,42 @@ func TestLintTasks_GovulncheckAndDroppedErrorsBothReport(t *testing.T) {
 		Name:            "go-lint-test",
 		ContinueOnError: true,
 		Tasks: []tasks.Task{
-			&tasks.DummyTask{
+			&tasks.FuncTask{
 				Name: "go-vet",
 				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
 					ranVet = true
 					return nil
 				},
 			},
-			&tasks.DummyTask{
+			&tasks.FuncTask{
 				Name: "govulncheck",
 				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
 					ranVuln = true
 					return errVuln
 				},
 			},
-			&tasks.DummyTask{
+			&tasks.FuncTask{
 				Name: "unused-check",
 				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
 					ranUnused = true
 					return nil
 				},
 			},
-			&tasks.DummyTask{
+			&tasks.FuncTask{
 				Name: "testcontext-check",
 				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
 					ranTC = true
 					return nil
 				},
 			},
-			&tasks.DummyTask{
+			&tasks.FuncTask{
 				Name: "replace-empty-interface-with-any-check",
 				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
 					ranAny = true
 					return nil
 				},
 			},
-			&tasks.DummyTask{
+			&tasks.FuncTask{
 				Name: "droppederrors-check",
 				RunFn: func(ctx context.Context, scope *tasks.APScope) error {
 					ranDropped = true

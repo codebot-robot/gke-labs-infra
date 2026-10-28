@@ -111,21 +111,21 @@ func TestGroupRun_ContinueOnError(t *testing.T) {
 		Name:            "go-lint-testmodule",
 		ContinueOnError: true,
 		Tasks: []Task{
-			&DummyTask{
+			&FuncTask{
 				Name: "check-a",
 				RunFn: func(ctx context.Context, scope *APScope) error {
 					ranA = true
 					return errA
 				},
 			},
-			&DummyTask{
+			&FuncTask{
 				Name: "check-b",
 				RunFn: func(ctx context.Context, scope *APScope) error {
 					ranB = true
 					return nil
 				},
 			},
-			&DummyTask{
+			&FuncTask{
 				Name: "check-c",
 				RunFn: func(ctx context.Context, scope *APScope) error {
 					ranC = true
@@ -172,14 +172,14 @@ func TestGroupRun_FailFast(t *testing.T) {
 		Name:            "build-images",
 		ContinueOnError: false,
 		Tasks: []Task{
-			&DummyTask{
+			&FuncTask{
 				Name: "task-a",
 				RunFn: func(ctx context.Context, scope *APScope) error {
 					ranA = true
 					return errA
 				},
 			},
-			&DummyTask{
+			&FuncTask{
 				Name: "task-b",
 				RunFn: func(ctx context.Context, scope *APScope) error {
 					ranB = true
@@ -213,14 +213,14 @@ func TestTasksRun_ContinueOnError(t *testing.T) {
 
 	var ran1, ran2 bool
 	ts := []Task{
-		&DummyTask{
+		&FuncTask{
 			Name: "t1",
 			RunFn: func(ctx context.Context, scope *APScope) error {
 				ran1 = true
 				return err1
 			},
 		},
-		&DummyTask{
+		&FuncTask{
 			Name: "t2",
 			RunFn: func(ctx context.Context, scope *APScope) error {
 				ran2 = true

@@ -16,7 +16,6 @@ package tasks
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -29,57 +28,6 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"k8s.io/klog/v2"
 )
-
-// APScope represents the context for an ap root directory
-type APScope struct {
-	RepoRoot string
-	Dir      string
-	Repo     *repo.Repo
-
-	// Discovered Tasks
-	BuildTasks    []Task
-	E2ETasks      []Task
-	TestTasks     []Task
-	LintTasks     []Task
-	GenerateTasks []Task
-	FormatTasks   []Task
-}
-
-// GetRepo returns the repository tree associated with this scope.
-func (s *APScope) GetRepo() (*repo.Repo, error) {
-	if s.Repo != nil {
-		return s.Repo, nil
-	}
-	if s.Dir != "" {
-		return nil, fmt.Errorf("repo is not set on scope %s", s.Dir)
-	}
-	return nil, fmt.Errorf("repo is not set on scope")
-}
-
-// Task is the interface that all tasks must implement.
-type Task interface {
-	Run(ctx context.Context, scope *APScope) error
-	GetName() string
-	GetChildren() []Task
-}
-
-// DummyTask represents a task that just runs a function.
-type DummyTask struct {
-	Name  string
-	RunFn func(ctx context.Context, scope *APScope) error
-}
-
-func (t *DummyTask) Run(ctx context.Context, scope *APScope) error {
-	return t.RunFn(ctx, scope)
-}
-
-func (t *DummyTask) GetName() string {
-	return t.Name
-}
-
-func (t *DummyTask) GetChildren() []Task {
-	return nil
-}
 
 // ensureIsolatedAp copies the current running ap binary into a dedicated cache bin directory
 // (e.g. <cacheRoot>/bin/ap) so that other binaries in the same directory as ap are not dragged into PATH.
@@ -189,42 +137,6 @@ func (t *TaskScript) GetChildren() []Task {
 	return nil
 }
 
-// Group represents a collection of tasks.
-type Group struct {
-	Name            string
-	Tasks           []Task
-	ContinueOnError bool
-}
-
-func (g *Group) Run(ctx context.Context, scope *APScope) error {
-	var errs []error
-	var failedNames []string
-	for _, t := range g.Tasks {
-		if err := t.Run(ctx, scope); err != nil {
-			if !g.ContinueOnError {
-				return err
-			}
-			errs = append(errs, err)
-			failedNames = append(failedNames, strings.TrimSuffix(t.GetName(), "-check"))
-		}
-	}
-	if len(errs) > 0 {
-		if len(g.Tasks) > 1 {
-			klog.Errorf("%s: %d of %d failed: %s", g.Name, len(failedNames), len(g.Tasks), strings.Join(failedNames, ", "))
-		}
-		return errors.Join(errs...)
-	}
-	return nil
-}
-
-func (g *Group) GetName() string {
-	return g.Name
-}
-
-func (g *Group) GetChildren() []Task {
-	return g.Tasks
-}
-
 type FindOptions struct {
 	Prefix        string
 	ExcludePrefix string
@@ -277,45 +189,4 @@ func FindTaskScripts(r *repo.Repo, root string, opts ...FindOption) ([]Task, err
 	})
 
 	return tasks, nil
-}
-
-// RunOptions holds options for running tasks.
-type RunOptions struct {
-	DryRun          bool
-	ContinueOnError bool
-}
-
-// Run executes a list of tasks.
-func Run(ctx context.Context, scope *APScope, ts []Task, opts RunOptions) error {
-	if opts.DryRun {
-		for _, task := range ts {
-			PrintTree(task, 0)
-		}
-		return nil
-	}
-	defer func() {
-		if scope != nil && scope.Repo != nil {
-			if saveErr := scope.Repo.Save(); saveErr != nil {
-				klog.V(2).Infof("failed to save repo hash cache: %v", saveErr)
-			}
-		}
-	}()
-	var errs []error
-	for _, task := range ts {
-		if err := task.Run(ctx, scope); err != nil {
-			if !opts.ContinueOnError {
-				return err
-			}
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
-}
-
-// PrintTree prints the task tree to stdout.
-func PrintTree(t Task, indent int) {
-	fmt.Printf("%s%s\n", strings.Repeat("  ", indent), t.GetName())
-	for _, child := range t.GetChildren() {
-		PrintTree(child, indent+1)
-	}
 }

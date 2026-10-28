@@ -230,7 +230,7 @@ func TestRunVerify_SuccessAndMtimePreservation(t *testing.T) {
 	}
 	scope := &tasks.APScope{RepoRoot: root, Dir: root, Repo: r}
 
-	genTask := &tasks.DummyTask{
+	genTask := &tasks.FuncTask{
 		Name: "ap-test",
 		RunFn: func(_ context.Context, _ *tasks.APScope) error {
 			return fileutils.WriteFileAtomic(targetFile, []byte(initialContent), 0755)
@@ -277,7 +277,7 @@ func TestRunVerify_UnrestoredMarkerDetected(t *testing.T) {
 	}
 	scope := &tasks.APScope{RepoRoot: root, Dir: root, Repo: r}
 
-	noopTask := &tasks.DummyTask{
+	noopTask := &tasks.FuncTask{
 		Name: "ap-test",
 		RunFn: func(_ context.Context, _ *tasks.APScope) error {
 			return nil
@@ -320,7 +320,7 @@ func TestRunVerify_StaleMarkerDetected(t *testing.T) {
 	}
 	scope := &tasks.APScope{RepoRoot: root, Dir: root, Repo: r}
 
-	noopTask := &tasks.DummyTask{
+	noopTask := &tasks.FuncTask{
 		Name: "ap-test",
 		RunFn: func(_ context.Context, _ *tasks.APScope) error {
 			return nil

@@ -24,7 +24,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/e2e"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/kindload"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 )
 
@@ -50,18 +52,35 @@ func TestAutodeploy(t *testing.T) {
 	runCmd(t, repoRoot, "go", "run", "./ap", "deploy", "--root=autodeploy", "--skip-push")
 	runCmd(t, repoRoot, "go", "run", "./ap", "deploy", "--root=in-cluster-image-registry", "--skip-push")
 
-	kindBin, err := kind.EnsureKindForRepo(t.Context(), repoRoot)
-	if err != nil {
+	if _, err := kind.EnsureKindForRepo(t.Context(), repoRoot); err != nil {
 		t.Fatalf("failed to prepare kind tool: %v", err)
+	}
+
+	loadImages := func(images []string) {
+		t.Helper()
+		var refs []*imageref.ImageRef
+		for _, img := range images {
+			ref, err := imageref.ParseImageRef(img)
+			if err != nil {
+				t.Fatalf("failed to parse image %q: %v", img, err)
+			}
+			refs = append(refs, ref)
+		}
+		task := &kindload.KindLoadTask{
+			ClusterName: clusterName,
+			Images:      refs,
+		}
+		scope := &tasks.APScope{RepoRoot: repoRoot}
+		if err := tasks.RunTask(t.Context(), scope, task); err != nil {
+			t.Fatalf("failed to load image(s) %v: %v", images, err)
+		}
 	}
 
 	// 1. Load only the node-agent image first so the DaemonSet can start.
 	// We wait for the DaemonSet to become ready and containerd to stabilize
 	// BEFORE loading other images, as node-agent updates the containerd config
 	// and restarts containerd, which would wipe or corrupt other loaded images.
-	if err := e2e.LoadImages(t.Context(), kindBin, clusterName, []string{fmt.Sprintf("%s/%s:%s", imagePrefix, "in-cluster-image-registry-node-agent", imageTag)}); err != nil {
-		t.Fatalf("failed to load node-agent image: %v", err)
-	}
+	loadImages([]string{fmt.Sprintf("%s/%s:%s", imagePrefix, "in-cluster-image-registry-node-agent", imageTag)})
 
 	// Wait for the DaemonSet to start up initially
 	waitForDaemonSet(t, "node-agent", "in-cluster-image-registry-system", 5*time.Minute)
@@ -79,14 +98,10 @@ func TestAutodeploy(t *testing.T) {
 		"ap-golang",
 	}
 	for _, img := range imagesToLoad {
-		if err := e2e.LoadImages(t.Context(), kindBin, clusterName, []string{fmt.Sprintf("%s/%s:%s", imagePrefix, img, imageTag)}); err != nil {
-			t.Fatalf("failed to load %s image: %v", img, err)
-		}
+		loadImages([]string{fmt.Sprintf("%s/%s:%s", imagePrefix, img, imageTag)})
 		if img == "ap-golang" {
 			runCmd(t, repoRoot, "docker", "tag", fmt.Sprintf("%s/%s:%s", imagePrefix, img, imageTag), "images.local/ap-golang:latest")
-			if err := e2e.LoadImages(t.Context(), kindBin, clusterName, []string{"images.local/ap-golang:latest"}); err != nil {
-				t.Fatalf("failed to load images.local/ap-golang:latest image: %v", err)
-			}
+			loadImages([]string{"images.local/ap-golang:latest"})
 		}
 	}
 

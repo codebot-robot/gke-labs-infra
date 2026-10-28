@@ -70,9 +70,13 @@ func (t *KindLoadTask) GetName() string {
 func (t *KindLoadTask) GetChildren() []tasks.Task {
 	var children []tasks.Task
 	for _, ref := range t.Images {
-		children = append(children, &tasks.DummyTask{
+		children = append(children, &tasks.FuncTask{
 			Name: ref.String(),
 		})
 	}
 	return children
+}
+
+func (t *KindLoadTask) RetryPolicy() tasks.RetryPolicy {
+	return tasks.Backoff(DefaultBackoffs)
 }

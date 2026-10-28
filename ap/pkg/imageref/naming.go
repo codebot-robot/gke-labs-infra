@@ -48,6 +48,20 @@ func (r ImageRef) String() string {
 	return nameTag
 }
 
+// ParseImageRef parses an image string into an *ImageRef.
+func ParseImageRef(s string) (*ImageRef, error) {
+	r, err := Parse(s)
+	if err != nil {
+		return nil, err
+	}
+	return &ImageRef{
+		Prefix: r.Registry,
+		Name:   r.Repository,
+		Tag:    r.Tag,
+		Digest: r.Digest,
+	}, nil
+}
+
 // ImageNaming holds the naming conventions for images in a build or deploy run.
 type ImageNaming struct {
 	Prefix    string
