@@ -396,8 +396,11 @@ roles                                          rbac.authorization.k8s.io/v1     
 customresourcedefinitions         crd,crds     apiextensions.k8s.io/v1                false        CustomResourceDefinition
 `
 
+	var capturedCmdName string
 	resolver := NewKubectlScopeResolver()
+	resolver.KubectlBin = "/opt/tools/kubectl"
 	resolver.execCmd = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		capturedCmdName = name
 		return []byte(mockOutput), nil
 	}
 
@@ -424,5 +427,9 @@ customresourcedefinitions         crd,crds     apiextensions.k8s.io/v1          
 		if !tt.wantErr && got != tt.wantNS {
 			t.Errorf("IsNamespaced(%v) = %v, want %v", tt.gvk, got, tt.wantNS)
 		}
+	}
+
+	if capturedCmdName != "/opt/tools/kubectl" {
+		t.Errorf("expected execCmd name %q, got %q", "/opt/tools/kubectl", capturedCmdName)
 	}
 }

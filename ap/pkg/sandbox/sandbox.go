@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sandbox/api"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/klog/v2"
@@ -35,14 +36,19 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 	podName := "ap-sandbox"
 	image := "local/ap-golang:latest"
 
+	kubectlBin, err := kubectl.EnsureKubectlForRepo(ctx, root)
+	if err != nil {
+		return fmt.Errorf("failed to ensure kubectl: %w", err)
+	}
+
 	klog.Infof("Ensuring sandbox pod %s is running...", podName)
 
 	// Check if pod exists
-	checkCmd := exec.CommandContext(ctx, "kubectl", "get", "pod", podName, "--no-headers")
+	checkCmd := exec.CommandContext(ctx, kubectlBin, "get", "pod", podName, "--no-headers")
 	if err := checkCmd.Run(); err != nil {
 		// Pod doesn't exist, create it
 		klog.Infof("Creating pod %s...", podName)
-		runCmd := exec.CommandContext(ctx, "kubectl", "run", podName,
+		runCmd := exec.CommandContext(ctx, kubectlBin, "run", podName,
 			"--image="+image,
 			"--restart=Never",
 			"--", "serve")
@@ -52,7 +58,7 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 
 		// Wait for pod to be ready
 		klog.Infof("Waiting for pod %s to be ready...", podName)
-		waitCmd := exec.CommandContext(ctx, "kubectl", "wait", "--for=condition=Ready", "pod/"+podName, "--timeout=60s")
+		waitCmd := exec.CommandContext(ctx, kubectlBin, "wait", "--for=condition=Ready", "pod/"+podName, "--timeout=60s")
 		if err := waitCmd.Run(); err != nil {
 			return fmt.Errorf("pod did not become ready: %w", err)
 		}
@@ -61,7 +67,7 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 	// Port forward
 	klog.Infof("Setting up port-forward...")
 	localPort := 50051
-	pfCmd := exec.CommandContext(ctx, "kubectl", "port-forward", "pod/"+podName, fmt.Sprintf("%d:%d", localPort, localPort))
+	pfCmd := exec.CommandContext(ctx, kubectlBin, "port-forward", "pod/"+podName, fmt.Sprintf("%d:%d", localPort, localPort))
 	// Redirect pf output to avoid noise
 	pfCmd.Stdout = nil
 	pfCmd.Stderr = nil
@@ -78,7 +84,6 @@ func Run(ctx context.Context, root string, args []string) (retErr error) {
 
 	// Wait for port-forward to be ready by trying to connect
 	var conn *grpc.ClientConn
-	var err error
 	for i := 0; i < 10; i++ {
 		conn, err = grpc.Dial(fmt.Sprintf("localhost:%d", localPort), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(), grpc.WithTimeout(1*time.Second))
 		if err == nil {

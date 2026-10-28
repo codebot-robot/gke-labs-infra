@@ -1549,7 +1549,9 @@ func TestDeploy_RunDeploy_NonexistentNamespaceFailsEarly(t *testing.T) {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
-	restore := k8s.SetCheckNamespaceExistsForTest(func(ctx context.Context, ns, kubeContext string) error {
+	var capturedKubectlBin string
+	restore := k8s.SetCheckNamespaceExistsForTest(func(ctx context.Context, ns, kubeContext, kubectlBin string) error {
+		capturedKubectlBin = kubectlBin
 		return fmt.Errorf("target namespace %q does not exist: not found", ns)
 	})
 	defer restore()
@@ -1560,6 +1562,9 @@ func TestDeploy_RunDeploy_NonexistentNamespaceFailsEarly(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "target namespace \"nonexistent-ns\" does not exist") {
 		t.Errorf("expected error to mention 'target namespace \"nonexistent-ns\" does not exist', got: %v", err)
+	}
+	if capturedKubectlBin == "" {
+		t.Errorf("expected non-empty kubectlBin passed to CheckNamespaceExists, got %q", capturedKubectlBin)
 	}
 }
 

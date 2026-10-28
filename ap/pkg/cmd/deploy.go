@@ -29,6 +29,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/kindload"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 	"github.com/spf13/cobra"
 )
 
@@ -40,6 +41,7 @@ type DeployOptions struct {
 	Namespace    string
 	Cluster      string
 	Targets      []string
+	KubectlBin   string
 
 	TargetCluster TargetCluster
 	kindCluster   string
@@ -355,9 +357,10 @@ func ResolveTargetCluster(clusterFlag string, currentContext string) (TargetClus
 }
 
 var execCommandContext = exec.CommandContext
+var ensureKubectl = kubectl.EnsureKubectlForRepo
 
-func getCurrentKubeContext(ctx context.Context) string {
-	cmd := execCommandContext(ctx, "kubectl", "config", "current-context")
+func getCurrentKubeContext(ctx context.Context, kubectlBin string) string {
+	cmd := execCommandContext(ctx, kubectlBin, "config", "current-context")
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -385,10 +388,10 @@ func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string, namin
 		naming.KindMode = true
 	}
 	push := !opt.SkipPush && tc.KindCluster == ""
-	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, tc, naming)
+	return buildDeployTasks(r, opt.plans, push, buildkitHost, opt.Namespace, tc, naming, opt.KubectlBin)
 }
 
-func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster TargetCluster, naming images.ImageNaming) ([]tasks.Task, error) {
+func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost string, namespace string, targetCluster TargetCluster, naming images.ImageNaming, kubectlBin string) ([]tasks.Task, error) {
 	var allTasks []tasks.Task
 
 	var originalNamespace string
@@ -428,6 +431,7 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 			OriginalNamespace: originalNamespace,
 			Naming:            naming,
 			KubeContext:       targetCluster.KubeContext,
+			KubectlBin:        kubectlBin,
 		})
 		group.Tasks = append(group.Tasks, deployTasks)
 
@@ -443,6 +447,16 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
+	kubectlBin := opt.KubectlBin
+	if kubectlBin == "" {
+		var err error
+		kubectlBin, err = ensureKubectl(ctx, opt.RepoRoot)
+		if err != nil {
+			return fmt.Errorf("failed to ensure kubectl: %w", err)
+		}
+		opt.KubectlBin = kubectlBin
+	}
+
 	if opt.Cluster != "" && opt.TargetCluster.KubeContext == "" {
 		tc, err := ResolveTargetCluster(opt.Cluster, "")
 		if err != nil {
@@ -450,7 +464,7 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		}
 		opt.TargetCluster = tc
 	} else if opt.Cluster == "" && opt.TargetCluster.KindCluster == "" && opt.kindCluster == "" {
-		tc, err := ResolveTargetCluster("", getCurrentKubeContext(ctx))
+		tc, err := ResolveTargetCluster("", getCurrentKubeContext(ctx, kubectlBin))
 		if err != nil {
 			return err
 		}
@@ -461,7 +475,7 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 	}
 
 	if !opt.DryRun && opt.Namespace != "" {
-		if err := k8s.DefaultCheckNamespaceCached(ctx, opt.Namespace, opt.TargetCluster.KubeContext); err != nil {
+		if err := k8s.DefaultCheckNamespaceCached(ctx, opt.Namespace, opt.TargetCluster.KubeContext, kubectlBin); err != nil {
 			return err
 		}
 	}
@@ -487,5 +501,5 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r, KubectlBin: kubectlBin}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

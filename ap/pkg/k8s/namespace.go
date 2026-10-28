@@ -87,6 +87,7 @@ type KubectlScopeResolver struct {
 	byKind      map[string]bool
 	execCmd     func(ctx context.Context, name string, args ...string) ([]byte, error)
 	KubeContext string
+	KubectlBin  string
 }
 
 // NewKubectlScopeResolver creates a new KubectlScopeResolver.
@@ -119,6 +120,10 @@ func (r *KubectlScopeResolver) IsNamespaced(gvk GroupVersionKind) (bool, error) 
 }
 
 func (r *KubectlScopeResolver) load(ctx context.Context) error {
+	bin := r.KubectlBin
+	if bin == "" {
+		return fmt.Errorf("kubectl binary is required")
+	}
 	var out []byte
 	var err error
 	var args []string
@@ -127,9 +132,9 @@ func (r *KubectlScopeResolver) load(ctx context.Context) error {
 	}
 	args = append(args, "api-resources")
 	if r.execCmd != nil {
-		out, err = r.execCmd(ctx, "kubectl", args...)
+		out, err = r.execCmd(ctx, bin, args...)
 	} else {
-		cmd := exec.CommandContext(ctx, "kubectl", args...)
+		cmd := exec.CommandContext(ctx, bin, args...)
 		out, err = cmd.Output()
 	}
 	if err != nil {
@@ -209,9 +214,10 @@ func (r *KubectlScopeResolver) parseOutput(output string) error {
 }
 
 // NewDiscoveryScopeResolver creates a ScopeResolver using discovery from "kubectl api-resources".
-func NewDiscoveryScopeResolver(kubeContext string) (ScopeResolver, error) {
+func NewDiscoveryScopeResolver(kubeContext, kubectlBin string) (ScopeResolver, error) {
 	resolver := NewKubectlScopeResolver()
 	resolver.KubeContext = kubeContext
+	resolver.KubectlBin = kubectlBin
 	return resolver, nil
 }
 
@@ -227,17 +233,18 @@ var (
 )
 
 // GetDiscoveryScopeResolver returns a cached or newly initialized discovery ScopeResolver.
-func GetDiscoveryScopeResolver(kubeContext string) (ScopeResolver, error) {
+func GetDiscoveryScopeResolver(kubeContext, kubectlBin string) (ScopeResolver, error) {
 	discoveryResolverMu.Lock()
 	defer discoveryResolverMu.Unlock()
-	if r, ok := cachedDiscoveryMap[kubeContext]; ok {
+	cacheKey := kubeContext + "|" + kubectlBin
+	if r, ok := cachedDiscoveryMap[cacheKey]; ok {
 		return r, nil
 	}
-	resolver, err := NewDiscoveryScopeResolver(kubeContext)
+	resolver, err := NewDiscoveryScopeResolver(kubeContext, kubectlBin)
 	if err != nil {
 		return nil, err
 	}
-	cachedDiscoveryMap[kubeContext] = resolver
+	cachedDiscoveryMap[cacheKey] = resolver
 	return resolver, nil
 }
 
@@ -249,7 +256,7 @@ func ResetDiscoveryScopeResolver() {
 }
 
 // DefaultCheckNamespaceCached checks if the target namespace exists in the cluster, caching successful checks.
-func DefaultCheckNamespaceCached(ctx context.Context, namespace, kubeContext string) error {
+func DefaultCheckNamespaceCached(ctx context.Context, namespace, kubeContext, kubectlBin string) error {
 	cacheKey := namespace
 	if kubeContext != "" {
 		cacheKey = kubeContext + "/" + namespace
@@ -261,7 +268,7 @@ func DefaultCheckNamespaceCached(ctx context.Context, namespace, kubeContext str
 		return nil
 	}
 
-	if err := CheckNamespaceExists(ctx, namespace, kubeContext); err != nil {
+	if err := CheckNamespaceExists(ctx, namespace, kubeContext, kubectlBin); err != nil {
 		return err
 	}
 
@@ -293,7 +300,7 @@ func (m MapScopeResolver) IsNamespaced(gvk GroupVersionKind) (bool, error) {
 var CheckNamespaceExistsFn = checkNamespaceExistsDefault
 
 // SetCheckNamespaceExistsForTest overrides CheckNamespaceExistsFn for tests and returns a restore function.
-func SetCheckNamespaceExistsForTest(fn func(ctx context.Context, namespace, kubeContext string) error) func() {
+func SetCheckNamespaceExistsForTest(fn func(ctx context.Context, namespace, kubeContext, kubectlBin string) error) func() {
 	prev := CheckNamespaceExistsFn
 	CheckNamespaceExistsFn = fn
 	return func() {
@@ -303,17 +310,20 @@ func SetCheckNamespaceExistsForTest(fn func(ctx context.Context, namespace, kube
 
 // CheckNamespaceExists checks whether the target namespace exists in the cluster.
 // It fails if the namespace does not exist, without creating it implicitly.
-func CheckNamespaceExists(ctx context.Context, namespace, kubeContext string) error {
-	return CheckNamespaceExistsFn(ctx, namespace, kubeContext)
+func CheckNamespaceExists(ctx context.Context, namespace, kubeContext, kubectlBin string) error {
+	return CheckNamespaceExistsFn(ctx, namespace, kubeContext, kubectlBin)
 }
 
-func checkNamespaceExistsDefault(ctx context.Context, namespace, kubeContext string) error {
+func checkNamespaceExistsDefault(ctx context.Context, namespace, kubeContext, kubectlBin string) error {
+	if kubectlBin == "" {
+		return fmt.Errorf("kubectl binary is required")
+	}
 	var args []string
 	if kubeContext != "" {
 		args = append(args, "--context", kubeContext)
 	}
 	args = append(args, "get", "namespace", namespace, "-o", "name")
-	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	cmd := exec.CommandContext(ctx, kubectlBin, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		trimmed := strings.TrimSpace(string(out))
 		if trimmed != "" {

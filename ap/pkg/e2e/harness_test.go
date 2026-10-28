@@ -47,6 +47,32 @@ func TestHarness_KindCommandPointsIntoCache(t *testing.T) {
 	}
 }
 
+func TestHarness_KubectlCommandPointsIntoCache(t *testing.T) {
+	tempCache := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", tempCache)
+
+	// Pre-populate cache so test runs without network requests
+	version := "v1.37.2"
+	binDir := filepath.Join(tempCache, "tools", "kubectl", version, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	fakeBin := filepath.Join(binDir, "kubectl")
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	h := &Harness{t: t}
+	cmdPath := h.KubectlCommand()
+	if !strings.HasPrefix(cmdPath, tempCache) {
+		t.Errorf("expected kubectl command path %q to point into cache dir %q", cmdPath, tempCache)
+	}
+	expectedSuffix := filepath.Join("tools", "kubectl", version, "bin", "kubectl")
+	if !strings.HasSuffix(cmdPath, expectedSuffix) {
+		t.Errorf("expected kubectl command path %q to end with %q", cmdPath, expectedSuffix)
+	}
+}
+
 func TestLoadImages_Delegation(t *testing.T) {
 	err := LoadImages(t.Context(), "", "ap-cluster", []string{"test-image:latest"})
 	if err == nil {
@@ -79,5 +105,5 @@ data:
   key: value
 `)
 
-	h.runCmd("kubectl", "get", "configmap", "test-cm", "-n", h.Namespace())
+	h.runCmd(h.KubectlCommand(), "get", "configmap", "test-cm", "-n", h.Namespace())
 }

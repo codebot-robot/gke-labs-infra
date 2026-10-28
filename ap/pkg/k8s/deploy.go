@@ -393,6 +393,7 @@ type DeployTaskOptions struct {
 	CheckNamespace    func(ctx context.Context, namespace string) error
 	Naming            imageref.ImageNaming
 	KubeContext       string
+	KubectlBin        string
 }
 
 // KubectlApplyTask represents a task to apply a single k8s manifest.
@@ -404,9 +405,22 @@ type KubectlApplyTask struct {
 	CheckNamespace    func(ctx context.Context, namespace string) error
 	Naming            imageref.ImageNaming
 	KubeContext       string
+	KubectlBin        string
 }
 
 func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error {
+	kubectlBin := t.KubectlBin
+	if kubectlBin == "" && scope != nil {
+		var err error
+		kubectlBin, err = scope.EnsureKubectl(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to ensure kubectl: %w", err)
+		}
+	}
+	if kubectlBin == "" {
+		return fmt.Errorf("kubectl binary is required")
+	}
+
 	naming := t.Naming
 	if naming.Tag == "" && naming.Prefix == "" {
 		cfg, err := config.Load(scope.RepoRoot)
@@ -439,7 +453,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		checkFn := t.CheckNamespace
 		if checkFn == nil {
 			checkFn = func(ctx context.Context, ns string) error {
-				return DefaultCheckNamespaceCached(ctx, ns, t.KubeContext)
+				return DefaultCheckNamespaceCached(ctx, ns, t.KubeContext, kubectlBin)
 			}
 		}
 		if err := checkFn(ctx, t.Namespace); err != nil {
@@ -449,7 +463,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		resolver := t.ScopeResolver
 		if resolver == nil {
 			var err error
-			resolver, err = GetDiscoveryScopeResolver(t.KubeContext)
+			resolver, err = GetDiscoveryScopeResolver(t.KubeContext, kubectlBin)
 			if err != nil {
 				return fmt.Errorf("failed to get discovery scope resolver: %w", err)
 			}
@@ -470,7 +484,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 		applyArgs = append(applyArgs, "--context", t.KubeContext)
 	}
 	applyArgs = append(applyArgs, "apply", "-f", "-")
-	cmd := exec.CommandContext(ctx, "kubectl", applyArgs...)
+	cmd := exec.CommandContext(ctx, kubectlBin, applyArgs...)
 	cmd.Stdin = bytes.NewBufferString(replaced)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -491,7 +505,7 @@ func (t *KubectlApplyTask) Run(ctx context.Context, scope *tasks.APScope) error 
 				waitArgs = append(waitArgs, "--context", t.KubeContext)
 			}
 			waitArgs = append(waitArgs, "wait", "--for=condition=Established", "customresourcedefinition/"+name, "--timeout=60s")
-			waitCmd := exec.CommandContext(ctx, "kubectl", waitArgs...)
+			waitCmd := exec.CommandContext(ctx, kubectlBin, waitArgs...)
 			waitCmd.Stdout = os.Stdout
 			waitCmd.Stderr = os.Stderr
 			if err := waitCmd.Run(); err != nil {
@@ -595,6 +609,7 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 			CheckNamespace:    opt.CheckNamespace,
 			Naming:            opt.Naming,
 			KubeContext:       opt.KubeContext,
+			KubectlBin:        opt.KubectlBin,
 		})
 	}
 
