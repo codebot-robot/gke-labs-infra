@@ -23,12 +23,12 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/e2e"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/k8s"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/kindload"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
-	toolKind "github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 	"github.com/spf13/cobra"
 )
 
@@ -309,64 +309,8 @@ func getCurrentKubeContext(ctx context.Context) string {
 	return strings.TrimSpace(string(out))
 }
 
-// KindLoadTask loads docker images into a kind cluster using the tool-managed kind binary.
-type KindLoadTask struct {
-	// RepoRoot is the path to the repository root directory, used to locate
-	// tool configuration for resolving the pinned kind binary.
-	RepoRoot string
-
-	// ClusterName is the name of the kind cluster where images will be loaded.
-	ClusterName string
-
-	// ImageNames holds logical image names (e.g. "my-app") corresponding to
-	// images/<name>/Dockerfile in the repo. When set alongside Naming, these names
-	// are resolved dynamically at execution time via Naming.Ref(name).String()
-	// so that content-addressed unique tags generated during the preceding Docker
-	// build are accurately picked up for loading.
-	ImageNames []string
-
-	// Naming holds the image naming conventions and shared image references.
-	Naming images.ImageNaming
-
-	// Images contains fully-qualified image reference strings (e.g.
-	// "images.local/my-app:v1.0"). At plan time this is populated with base
-	// references for task inspection; it also serves as a direct fallback if
-	// ImageNames is empty (such as in unit tests).
-	Images []string
-}
-
-func (t *KindLoadTask) Run(ctx context.Context, scope *tasks.APScope) error {
-	imagesToLoad := t.Images
-	if len(t.ImageNames) > 0 {
-		imagesToLoad = nil
-		for _, img := range t.ImageNames {
-			imagesToLoad = append(imagesToLoad, t.Naming.Ref(img).String())
-		}
-	}
-	if len(imagesToLoad) == 0 {
-		return nil
-	}
-	root := t.RepoRoot
-	if root == "" {
-		root = scope.RepoRoot
-	}
-	kindBin, err := toolKind.EnsureKindForRepo(ctx, root)
-	if err != nil {
-		return fmt.Errorf("failed to ensure kind tool: %w", err)
-	}
-	return e2e.LoadImages(ctx, kindBin, t.ClusterName, imagesToLoad)
-}
-
-func (t *KindLoadTask) GetName() string {
-	if t.ClusterName != "" {
-		return fmt.Sprintf("kind-load (cluster: %s)", t.ClusterName)
-	}
-	return "kind-load"
-}
-
-func (t *KindLoadTask) GetChildren() []tasks.Task {
-	return nil
-}
+// KindLoadTask is an alias to kindload.KindLoadTask.
+type KindLoadTask = kindload.KindLoadTask
 
 // BuildDeployPlan constructs the task tree for deploying artifacts according to DeployOptions.
 func BuildDeployPlan(opt DeployOptions, r *repo.Repo, buildkitHost string, naming images.ImageNaming) ([]tasks.Task, error) {
@@ -401,16 +345,14 @@ func buildDeployTasks(r *repo.Repo, plans []deployPlan, push bool, buildkitHost 
 		group.Tasks = append(group.Tasks, buildTasks)
 
 		if kindCluster != "" && len(plan.imageNames) > 0 {
-			var fullImages []string
+			var imageRefs []*imageref.ImageRef
 			for _, img := range plan.imageNames {
-				fullImages = append(fullImages, naming.Ref(img).String())
+				imageRefs = append(imageRefs, naming.Ref(img))
 			}
 			group.Tasks = append(group.Tasks, &KindLoadTask{
 				RepoRoot:    plan.apRoot,
 				ClusterName: kindCluster,
-				ImageNames:  plan.imageNames,
-				Naming:      naming,
-				Images:      fullImages,
+				Images:      imageRefs,
 			})
 		}
 
@@ -449,8 +391,10 @@ func RunDeploy(ctx context.Context, opt DeployOptions) error {
 		return err
 	}
 
-	if cluster, ok := ParseKindClusterFromContext(getCurrentKubeContext(ctx)); ok {
-		opt.kindCluster = cluster
+	if opt.kindCluster == "" {
+		if cluster, ok := ParseKindClusterFromContext(getCurrentKubeContext(ctx)); ok {
+			opt.kindCluster = cluster
+		}
 	}
 
 	cfg, err := config.Load(opt.RepoRoot)
