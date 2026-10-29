@@ -30,6 +30,7 @@ import (
 const (
 	CategoryDroppedError               = "dropped-error"
 	CategoryErrorOnlyCheckedForSuccess = "error-only-checked-for-success"
+	CategoryErrorDiscarded             = "error-discarded"
 )
 
 // Entry represents a single tolerated finding site in a baseline file.
@@ -143,7 +144,7 @@ func Parse(data []byte) ([]Entry, error) {
 			continue
 		}
 		if len(parts) > 4 {
-			if parts[2] == CategoryErrorOnlyCheckedForSuccess || parts[2] == CategoryDroppedError {
+			if parts[2] == CategoryErrorOnlyCheckedForSuccess || parts[2] == CategoryDroppedError || parts[2] == CategoryErrorDiscarded {
 				entries = append(entries, Entry{
 					File:          filepath.ToSlash(parts[0]),
 					EnclosingFunc: parts[1],

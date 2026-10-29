@@ -27,4 +27,20 @@ func test() {
 	if err == nil {
 		println("ok")
 	}
+
+	if err := fail(); err != nil {
+		_ = err // want "error discarded"
+	}
+
+	defer func() {
+		if closeErr := fail(); closeErr != nil {
+			_ = closeErr // want "error discarded"
+		}
+	}()
+}
+
+func testNegative() error {
+	err := fail()
+	_ = err // no finding
+	return err
 }

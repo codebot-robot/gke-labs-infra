@@ -846,3 +846,51 @@ func main() {
 		t.Fatalf("expected 1 finding with UseDefaultExcludes false, got %d: %+v", len(res.Findings), res.Findings)
 	}
 }
+
+func TestChecker_CategoryErrorDiscarded(t *testing.T) {
+	tests := []struct {
+		name         string
+		code         string
+		wantCategory string
+	}{
+		{
+			name: "error-discarded",
+			code: `package main
+
+import "errors"
+
+func fail() error { return errors.New("err") }
+
+func main() {
+	if err := fail(); err != nil {
+		_ = err
+	}
+}
+`,
+			wantCategory: CategoryErrorDiscarded,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := createTestModule(t, map[string]string{
+				"main.go": tc.code,
+			})
+
+			res, err := Run(t.Context(), Options{
+				Dir:       dir,
+				APRoot:    dir,
+				SkipTests: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Findings) != 1 {
+				t.Fatalf("expected 1 finding, got %d: %+v", len(res.Findings), res.Findings)
+			}
+			if res.Findings[0].Category != tc.wantCategory {
+				t.Errorf("category mismatch: got %q, want %q", res.Findings[0].Category, tc.wantCategory)
+			}
+		})
+	}
+}
