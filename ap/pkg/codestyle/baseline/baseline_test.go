@@ -47,20 +47,24 @@ pkg/baz/qux.go  (*Server).Serve   fmt.Fprintln
 func TestParse_Category(t *testing.T) {
 	input := `
 pkg/foo/bar.go:MyFunc:error-only-checked-for-success:myFunc
+pkg/foo/bar.go:MyFunc:error-discarded:closeErr
 pkg/baz/qux.go:MyFunc:myOtherFunc
 `
 	entries, err := Parse([]byte(input))
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(entries))
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
 	}
 	if entries[0].Category != CategoryErrorOnlyCheckedForSuccess || entries[0].Detail != "myFunc" {
 		t.Errorf("entry 0 mismatch: %+v", entries[0])
 	}
-	if entries[1].Category != "" || entries[1].Detail != "myOtherFunc" {
+	if entries[1].Category != CategoryErrorDiscarded || entries[1].Detail != "closeErr" {
 		t.Errorf("entry 1 mismatch: %+v", entries[1])
+	}
+	if entries[2].Category != "" || entries[2].Detail != "myOtherFunc" {
+		t.Errorf("entry 2 mismatch: %+v", entries[2])
 	}
 }
 

@@ -32,6 +32,28 @@ func isErrorType(t types.Type) bool {
 	return types.Implements(t, errorInterface)
 }
 
+func unparen(e ast.Expr) ast.Expr {
+	for {
+		p, ok := e.(*ast.ParenExpr)
+		if !ok {
+			return e
+		}
+		e = p.X
+	}
+}
+
+func isErrorIdent(id *ast.Ident, info *types.Info) bool {
+	if id == nil || id.Name == "_" || id.Name == "nil" {
+		return false
+	}
+	if obj, ok := info.Uses[id]; ok {
+		if v, ok := obj.(*types.Var); ok {
+			return isErrorType(v.Type())
+		}
+	}
+	return false
+}
+
 func isTypeConversion(info *types.Info, call *ast.CallExpr) bool {
 	if tv, ok := info.Types[call.Fun]; ok && tv.IsType() {
 		return true
@@ -127,6 +149,14 @@ func findDroppedErrorsInFile(file *ast.File, info *types.Info, matcher *Exclusio
 							}
 						}
 					}
+				} else if len(stmt.Lhs) == 1 {
+					if id, ok := stmt.Lhs[0].(*ast.Ident); ok && id.Name == "_" {
+						if rhsIdent, ok := unparen(stmt.Rhs[0]).(*ast.Ident); ok {
+							if isErrorIdent(rhsIdent, info) {
+								findings = append(findings, rawFinding{pos: id.Pos(), expr: rhsIdent, category: CategoryErrorDiscarded})
+							}
+						}
+					}
 				}
 			} else if len(stmt.Lhs) == len(stmt.Rhs) {
 				for i := range stmt.Lhs {
@@ -136,6 +166,10 @@ func findDroppedErrorsInFile(file *ast.File, info *types.Info, matcher *Exclusio
 							errIndices := returnErrorIndices(info, call)
 							if (isRecv || (len(errIndices) > 0 && errIndices[0])) && !matcher.IsExcluded(call, info) {
 								findings = append(findings, rawFinding{pos: id.Pos(), expr: call, category: CategoryDroppedError})
+							}
+						} else if rhsIdent, ok := unparen(stmt.Rhs[i]).(*ast.Ident); ok {
+							if isErrorIdent(rhsIdent, info) {
+								findings = append(findings, rawFinding{pos: id.Pos(), expr: rhsIdent, category: CategoryErrorDiscarded})
 							}
 						}
 					}
@@ -156,6 +190,14 @@ func findDroppedErrorsInFile(file *ast.File, info *types.Info, matcher *Exclusio
 							}
 						}
 					}
+				} else if len(stmt.Names) == 1 {
+					if stmt.Names[0].Name == "_" {
+						if rhsIdent, ok := unparen(stmt.Values[0]).(*ast.Ident); ok {
+							if isErrorIdent(rhsIdent, info) {
+								findings = append(findings, rawFinding{pos: stmt.Names[0].Pos(), expr: rhsIdent, category: CategoryErrorDiscarded})
+							}
+						}
+					}
 				}
 			} else if len(stmt.Names) == len(stmt.Values) {
 				for i := range stmt.Names {
@@ -165,6 +207,10 @@ func findDroppedErrorsInFile(file *ast.File, info *types.Info, matcher *Exclusio
 							errIndices := returnErrorIndices(info, call)
 							if (isRecv || (len(errIndices) > 0 && errIndices[0])) && !matcher.IsExcluded(call, info) {
 								findings = append(findings, rawFinding{pos: stmt.Names[i].Pos(), expr: call, category: CategoryDroppedError})
+							}
+						} else if rhsIdent, ok := unparen(stmt.Values[i]).(*ast.Ident); ok {
+							if isErrorIdent(rhsIdent, info) {
+								findings = append(findings, rawFinding{pos: stmt.Names[i].Pos(), expr: rhsIdent, category: CategoryErrorDiscarded})
 							}
 						}
 					}

@@ -58,8 +58,11 @@ func NewAnalyzer(cfg Config) *analysis.Analyzer {
 					posn := pass.Fset.Position(raw.pos)
 
 					desc := "unchecked error"
-					if raw.category == CategoryErrorOnlyCheckedForSuccess {
+					switch raw.category {
+					case CategoryErrorOnlyCheckedForSuccess:
 						desc = "error only checked for success"
+					case CategoryErrorDiscarded:
+						desc = "error discarded"
 					}
 					msg := fmt.Sprintf("%s in %s: %s", desc, enclosingFunc, callee)
 					diagMsg := fmt.Sprintf("%s: %s", desc, callee)

@@ -27,4 +27,8 @@ func test() {
 	if err == nil {
 		println("ok")
 	}
+
+	if err := fail(); err != nil {
+		_ = err // want "error discarded"
+	}
 }

@@ -21,6 +21,7 @@ import (
 const (
 	CategoryDroppedError               = baseline.CategoryDroppedError
 	CategoryErrorOnlyCheckedForSuccess = baseline.CategoryErrorOnlyCheckedForSuccess
+	CategoryErrorDiscarded             = baseline.CategoryErrorDiscarded
 )
 
 // Finding represents an unchecked error finding in source code.
