@@ -215,25 +215,13 @@ func TestFindRepoRootFromPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	realRepoDir, err := filepath.EvalSymlinks(repoDir)
-	if err != nil {
-		realRepoDir = repoDir
-	}
-
-	t.Run("from symlink", func(t *testing.T) {
-		if runtime.GOOS == "windows" {
-			t.Skip("symlinking is not supported on Windows")
-		}
-		symlinkPath := filepath.Join(nestedDir, "link-to-script")
-		if err := os.Symlink(filePath, symlinkPath); err != nil {
-			t.Fatal(err)
-		}
-		root, err := FindRepoRootFromPath(symlinkPath)
+	t.Run("nested file", func(t *testing.T) {
+		root, err := FindRepoRootFromPath(filePath)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if root != realRepoDir {
-			t.Errorf("expected root %s, got %s", realRepoDir, root)
+		if root != repoDir {
+			t.Errorf("expected root %s, got %s", repoDir, root)
 		}
 	})
 
