@@ -211,7 +211,7 @@ Run `ap tool update-versions` to refresh baked-in release tables (`ap/pkg/tool/p
 
 ### Tool Installation and Busybox Dispatch
 
-`ap` can be invoked under the name of any tool it manages (`kind`, `kubectl`, `docker`, `docker-buildx`, `protoc`, `go`) to behave as `ap tool <name> -- <args...>`. On Unix, `ap` uses `syscall.Exec` of the pinned binary so signals, stdio, and exit codes pass straight through without an intermediate wrapper process. Running `ap tool install [dir]` creates or refreshes symlinks pointing to `ap` for all registered tools in `AP_CACHE_DIR/bin` (the directory `ScriptEnv` already places on `PATH` for task scripts) or in a specified directory on `PATH`, giving developers and CI jobs every pinned tool automatically.
+`ap` can be invoked under the name of any tool it manages (`kind`, `kubectl`, `docker`, `docker-buildx`, `protoc`, `go`) to behave as `ap tool <name> -- <args...>`. On Unix, `ap` uses `syscall.Exec` of the pinned binary so signals, stdio, and exit codes pass straight through without an intermediate wrapper process. Running `ap tool install [dir]` creates or refreshes symlinks pointing to `ap` for all registered tools in `${REPO_ROOT}/.build/bin` (or `AP_CACHE_DIR/bin` outside a repository) or in a specified directory on `PATH`, giving developers and CI jobs every pinned tool automatically. Before executing any discovered task script (`dev/tasks/test-*`, `test-e2e*`, `build-*`, `generate-*`, etc.), `ap` ensures those symlinks exist in `${REPO_ROOT}/.build/bin` and prepends that directory to `PATH`. Task scripts should call tools by name and never download them; `ap` provides them on `PATH`.
 
 ### ap.yaml
 
@@ -285,5 +285,5 @@ Commands:
 - `tool kubectl`: Run kubectl with pinned binary
 - `tool protoc`: Run protoc with pinned binary and language plugins
 - `tool go`: Run go with pinned toolchain (GOROOT set to install directory, GOTOOLCHAIN=local)
-- `tool install`: Install symlinks for managed tools pointing to `ap` (default: `AP_CACHE_DIR/bin`)
+- `tool install`: Install symlinks for managed tools pointing to `ap` (default: `${REPO_ROOT}/.build/bin` in a repository, or `AP_CACHE_DIR/bin`)
 - `tool update-versions`: Update baked-in tool release versions and checksums in versions.yaml (supports `--protoc`, `--docker`, `--buildx`, `--kind`, `--kubectl`, `--go`)

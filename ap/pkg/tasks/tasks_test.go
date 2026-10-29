@@ -262,55 +262,6 @@ func TestTasksRun_ContinueOnError(t *testing.T) {
 	}
 }
 
-func TestScriptEnv(t *testing.T) {
-	tempCache := t.TempDir()
-	t.Setenv("AP_CACHE_DIR", tempCache)
-
-	env, err := ScriptEnv()
-	if err != nil {
-		t.Fatalf("ScriptEnv failed: %v", err)
-	}
-	expectedBinDir := filepath.Join(tempCache, "bin")
-
-	var foundPath string
-	for _, e := range env {
-		if strings.HasPrefix(e, "PATH=") {
-			foundPath = e[5:]
-			break
-		}
-	}
-	if foundPath == "" {
-		t.Fatal("PATH not found in ScriptEnv")
-	}
-
-	parts := strings.Split(foundPath, string(os.PathListSeparator))
-	if len(parts) == 0 || parts[0] != expectedBinDir {
-		t.Errorf("expected PATH to start with %s, got %v", expectedBinDir, parts)
-	}
-
-	binName := "ap"
-	if runtime.GOOS == "windows" {
-		binName = "ap.exe"
-	}
-	if _, err := os.Stat(filepath.Join(expectedBinDir, binName)); err != nil {
-		t.Errorf("expected %s to exist in isolated bin dir: %v", binName, err)
-	}
-}
-
-func TestScriptEnv_ErrorOnUnwritableCache(t *testing.T) {
-	tempCache := t.TempDir()
-	unwritableCache := filepath.Join(tempCache, "readonly")
-	if err := os.WriteFile(unwritableCache, []byte("not-a-dir"), 0444); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AP_CACHE_DIR", unwritableCache)
-
-	_, err := ScriptEnv()
-	if err == nil {
-		t.Fatal("expected error from ScriptEnv when cache dir is unwritable, got nil")
-	}
-}
-
 func TestTaskScript_ResolvesApOnPath(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -353,6 +304,54 @@ func TestTaskScript_ResolvesApOnPath(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "fake-ap-version") {
 		t.Errorf("unexpected output: %s", string(out))
+	}
+}
+
+func TestTaskScript_ResolvesToolsOnPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinking is not supported on Windows")
+	}
+
+	tmpDir := t.TempDir()
+
+	fakeAp := filepath.Join(t.TempDir(), "ap")
+	fakeScript := "#!/bin/sh\necho \"fake-tool: $(basename \"$0\")\"\n"
+	if err := os.WriteFile(fakeAp, []byte(fakeScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	scriptFile := filepath.Join(tmpDir, "test.sh")
+	outputFile := filepath.Join(tmpDir, "output.txt")
+	scriptContent := fmt.Sprintf("#!/bin/sh\nkind >> %q\nkubectl >> %q\n", outputFile, outputFile)
+	if err := os.WriteFile(scriptFile, []byte(scriptContent), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := &TaskScript{
+		Name: "test-script",
+		Path: scriptFile,
+		Root: tmpDir,
+	}
+
+	t.Setenv("AP_EXECUTABLE", fakeAp)
+	tree, err := sourcetree.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.Run(t.Context(), NewScope(tmpDir, tmpDir, tree)); err != nil {
+		t.Fatalf("task run failed: %v", err)
+	}
+
+	out, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "fake-tool: kind") {
+		t.Errorf("expected output to contain 'fake-tool: kind', got: %s", outStr)
+	}
+	if !strings.Contains(outStr, "fake-tool: kubectl") {
+		t.Errorf("expected output to contain 'fake-tool: kubectl', got: %s", outStr)
 	}
 }
 

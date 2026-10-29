@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/scoped"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 )
 
 type blockTransport struct {
@@ -532,6 +533,13 @@ func TestToolInstall(t *testing.T) {
 	}
 
 	output := buf.String()
+	expectedAp := filepath.Join(tempDir, "ap")
+	if fi, err := os.Stat(expectedAp); err != nil {
+		t.Fatalf("expected installed ap binary at %s: %v", expectedAp, err)
+	} else if fi.Mode()&0111 == 0 {
+		t.Fatalf("expected installed ap at %s to be executable", expectedAp)
+	}
+
 	expectedTools := []string{"kind", "kubectl", "docker", "docker-buildx", "protoc", "go"}
 	for _, toolName := range expectedTools {
 		linkPath := filepath.Join(tempDir, toolName)
@@ -546,8 +554,8 @@ func TestToolInstall(t *testing.T) {
 		if err != nil {
 			t.Fatalf("failed to readlink for %s: %v", linkPath, err)
 		}
-		if dest != fakeAp {
-			t.Fatalf("expected symlink %s to point to %s, got %s", linkPath, fakeAp, dest)
+		if dest != expectedAp {
+			t.Fatalf("expected symlink %s to point to %s, got %s", linkPath, expectedAp, dest)
 		}
 		if !strings.Contains(output, linkPath) {
 			t.Errorf("expected output to mention %s, got: %s", linkPath, output)
@@ -561,23 +569,64 @@ func TestToolInstall(t *testing.T) {
 		t.Fatalf("unexpected error refreshing ap tool install: %v\nOutput: %s", err, buf.String())
 	}
 
-	// Test default dir (AP_CACHE_DIR/bin)
-	cacheDir := t.TempDir()
-	t.Setenv("AP_CACHE_DIR", cacheDir)
+	// Test default dir in repository (${REPO_ROOT}/.build/bin)
+	repoDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repoDir, ".ap"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("REPO_ROOT", repoDir)
+	t.Setenv("AP_ROOT", repoDir)
+
 	buf.Reset()
+	rootCmd = BuildRootCommand()
+	rootCmd.SetOut(buf)
+	rootCmd.SetErr(buf)
 	rootCmd.SetArgs([]string{"tool", "install"})
 	if err := rootCmd.ExecuteContext(t.Context()); err != nil {
-		t.Fatalf("unexpected error running ap tool install with default dir: %v\nOutput: %s", err, buf.String())
+		t.Fatalf("unexpected error running ap tool install in repository: %v\nOutput: %s", err, buf.String())
 	}
-	defaultBinDir := filepath.Join(cacheDir, "bin")
+	repoBinDir := filepath.Join(repoDir, ".build", "bin")
+	repoAp := filepath.Join(repoBinDir, "ap")
+	if _, err := os.Stat(repoAp); err != nil {
+		t.Fatalf("expected installed ap binary at %s: %v", repoAp, err)
+	}
 	for _, toolName := range expectedTools {
-		linkPath := filepath.Join(defaultBinDir, toolName)
+		linkPath := filepath.Join(repoBinDir, toolName)
 		dest, err := os.Readlink(linkPath)
 		if err != nil {
-			t.Fatalf("failed to readlink in default dir for %s: %v", toolName, err)
+			t.Fatalf("failed to readlink in repository bin dir for %s: %v", toolName, err)
 		}
-		if dest != fakeAp {
-			t.Fatalf("expected default symlink %s to point to %s, got %s", linkPath, fakeAp, dest)
+		if dest != repoAp {
+			t.Fatalf("expected repo symlink %s to point to %s, got %s", linkPath, repoAp, dest)
+		}
+	}
+
+	// Test default dir outside repository (AP_CACHE_DIR/bin)
+	nonRepoDir := t.TempDir()
+	t.Chdir(nonRepoDir)
+	t.Setenv("REPO_ROOT", "")
+	t.Setenv("AP_ROOT", "")
+	cacheDir := t.TempDir()
+	t.Setenv("AP_CACHE_DIR", cacheDir)
+	installedDir, err := tool.Install(tool.InstallOptions{
+		Stdout: buf,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error running tool.Install with default cache dir: %v", err)
+	}
+	defaultBinDir := filepath.Join(cacheDir, "bin")
+	if installedDir != defaultBinDir {
+		t.Fatalf("expected installed dir %s, got %s", defaultBinDir, installedDir)
+	}
+	for _, toolName := range expectedTools {
+		linkPath := filepath.Join(defaultBinDir, toolName)
+		if dest, err := os.Readlink(linkPath); err != nil {
+			t.Fatalf("failed to readlink in default cache dir for %s: %v", toolName, err)
+		} else if dest != filepath.Join(defaultBinDir, "ap") {
+			t.Fatalf("expected symlink %s to point to %s, got %s", linkPath, filepath.Join(defaultBinDir, "ap"), dest)
 		}
 	}
 }
