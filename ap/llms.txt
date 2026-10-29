@@ -35,7 +35,7 @@ When making changes to an AP-managed project, coding agents should follow this v
     -   When adopting a strict check at `mode: error` with existing findings, run `ap lint --write-baseline`, commit the `.ap/*-baseline.txt` files, and fix entries over time.
 3.  **Test**:
     -   Run `ap test` for unit and integration tests.
-    -   Run `ap e2e` for end-to-end tests.
+    -   Run `ap e2e` for end-to-end tests (if a kind worker's kubelet restarts in a loop while other nodes are Ready, check inotify limits).
 
 ## Deployment
 

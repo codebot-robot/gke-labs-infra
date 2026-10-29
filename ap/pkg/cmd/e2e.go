@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/e2e"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/spf13/cobra"
 )
@@ -74,6 +75,10 @@ func RunE2e(ctx context.Context, opt E2eOptions) error {
 			}
 			allTasks = append(allTasks, group)
 		}
+	}
+
+	if !opt.DryRun && len(allTasks) > 0 {
+		e2e.EnsureInotifyLimits()
 	}
 
 	return tasks.Run(ctx, tasks.NewScope(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun})
