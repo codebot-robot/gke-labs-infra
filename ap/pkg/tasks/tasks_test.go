@@ -262,55 +262,6 @@ func TestTasksRun_ContinueOnError(t *testing.T) {
 	}
 }
 
-func TestScriptEnv(t *testing.T) {
-	tempCache := t.TempDir()
-	t.Setenv("AP_CACHE_DIR", tempCache)
-
-	env, err := ScriptEnv()
-	if err != nil {
-		t.Fatalf("ScriptEnv failed: %v", err)
-	}
-	expectedBinDir := filepath.Join(tempCache, "bin")
-
-	var foundPath string
-	for _, e := range env {
-		if strings.HasPrefix(e, "PATH=") {
-			foundPath = e[5:]
-			break
-		}
-	}
-	if foundPath == "" {
-		t.Fatal("PATH not found in ScriptEnv")
-	}
-
-	parts := strings.Split(foundPath, string(os.PathListSeparator))
-	if len(parts) == 0 || parts[0] != expectedBinDir {
-		t.Errorf("expected PATH to start with %s, got %v", expectedBinDir, parts)
-	}
-
-	binName := "ap"
-	if runtime.GOOS == "windows" {
-		binName = "ap.exe"
-	}
-	if _, err := os.Stat(filepath.Join(expectedBinDir, binName)); err != nil {
-		t.Errorf("expected %s to exist in isolated bin dir: %v", binName, err)
-	}
-}
-
-func TestScriptEnv_ErrorOnUnwritableCache(t *testing.T) {
-	tempCache := t.TempDir()
-	unwritableCache := filepath.Join(tempCache, "readonly")
-	if err := os.WriteFile(unwritableCache, []byte("not-a-dir"), 0444); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AP_CACHE_DIR", unwritableCache)
-
-	_, err := ScriptEnv()
-	if err == nil {
-		t.Fatal("expected error from ScriptEnv when cache dir is unwritable, got nil")
-	}
-}
-
 func TestTaskScript_ResolvesApOnPath(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -353,53 +304,6 @@ func TestTaskScript_ResolvesApOnPath(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "fake-ap-version") {
 		t.Errorf("unexpected output: %s", string(out))
-	}
-}
-
-func TestScriptEnvForRepo(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlinking is not supported on Windows")
-	}
-
-	repoDir := t.TempDir()
-	fakeAp := filepath.Join(t.TempDir(), "ap")
-	if err := os.WriteFile(fakeAp, []byte("#!/bin/sh\n"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("AP_EXECUTABLE", fakeAp)
-
-	env, err := ScriptEnvForRepo(repoDir)
-	if err != nil {
-		t.Fatalf("ScriptEnvForRepo failed: %v", err)
-	}
-
-	expectedBinDir := filepath.Join(repoDir, ".build", "bin")
-	var foundPath string
-	for _, e := range env {
-		if strings.HasPrefix(e, "PATH=") {
-			foundPath = e[5:]
-			break
-		}
-	}
-	if foundPath == "" {
-		t.Fatal("PATH not found in ScriptEnvForRepo")
-	}
-
-	parts := strings.Split(foundPath, string(os.PathListSeparator))
-	if len(parts) == 0 || parts[0] != expectedBinDir {
-		t.Errorf("expected PATH to start with %s, got %v", expectedBinDir, parts)
-	}
-
-	if _, err := os.Stat(filepath.Join(expectedBinDir, "ap")); err != nil {
-		t.Errorf("expected ap to exist in repo bin dir: %v", err)
-	}
-	for _, toolName := range []string{"kind", "kubectl", "docker", "docker-buildx", "protoc", "go"} {
-		link := filepath.Join(expectedBinDir, toolName)
-		if dest, err := os.Readlink(link); err != nil {
-			t.Errorf("failed to readlink for %s: %v", toolName, err)
-		} else if dest != filepath.Join(expectedBinDir, "ap") {
-			t.Errorf("expected %s to point to %s, got %s", link, filepath.Join(expectedBinDir, "ap"), dest)
-		}
 	}
 }
 

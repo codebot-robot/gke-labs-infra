@@ -16,17 +16,21 @@ package tasks
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 )
 
 var (
-	ensureKubectl    = kubectl.EnsureKubectlForRepo
-	kubectlResolveMu sync.Mutex
+	ensureKubectl      = kubectl.EnsureKubectlForRepo
+	kubectlResolveMu   sync.Mutex
+	scriptEnvResolveMu sync.Mutex
 )
 
 // APScope represents the context for an ap root directory.
@@ -44,6 +48,9 @@ type APScope struct {
 	// KubectlBin holds the resolved path to the kubectl binary for this scope.
 	// If empty, EnsureKubectl resolves it lazily and memoizes it here.
 	KubectlBin string
+
+	// scriptEnv holds the memoized environment with the tool bin directory prepended to PATH.
+	scriptEnv []string
 
 	// Discovered Tasks
 	BuildTasks    []Task
@@ -109,4 +116,38 @@ func (s *APScope) EnsureKubectl(ctx context.Context) (string, error) {
 	}
 	s.KubectlBin = bin
 	return bin, nil
+}
+
+// ScriptEnv returns an environment slice with the tool bin directory prepended to PATH,
+// populated once per scope using tool.Install and memoized.
+func (s *APScope) ScriptEnv() ([]string, error) {
+	scriptEnvResolveMu.Lock()
+	defer scriptEnvResolveMu.Unlock()
+	if s.scriptEnv != nil {
+		return s.scriptEnv, nil
+	}
+
+	binDir, err := tool.Install(tool.InstallOptions{
+		RepoRoot: s.RepoRoot,
+		Stdout:   io.Discard,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare tool bin directory for PATH: %w", err)
+	}
+
+	var env []string
+	foundPath := false
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(strings.ToUpper(e), "PATH=") {
+			foundPath = true
+			env = append(env, "PATH="+binDir+string(os.PathListSeparator)+e[5:])
+		} else {
+			env = append(env, e)
+		}
+	}
+	if !foundPath {
+		env = append(env, "PATH="+binDir)
+	}
+	s.scriptEnv = env
+	return env, nil
 }

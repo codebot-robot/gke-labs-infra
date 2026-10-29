@@ -605,16 +605,29 @@ func TestToolInstall(t *testing.T) {
 	}
 
 	// Test default dir outside repository (AP_CACHE_DIR/bin)
+	nonRepoDir := t.TempDir()
+	t.Chdir(nonRepoDir)
+	t.Setenv("REPO_ROOT", "")
+	t.Setenv("AP_ROOT", "")
 	cacheDir := t.TempDir()
 	t.Setenv("AP_CACHE_DIR", cacheDir)
-	created, err := tool.Install(tool.InstallOptions{
+	installedDir, err := tool.Install(tool.InstallOptions{
 		Stdout: buf,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error running tool.Install with default cache dir: %v", err)
 	}
-	if len(created) != len(expectedTools) {
-		t.Fatalf("expected %d links created, got %d", len(expectedTools), len(created))
+	defaultBinDir := filepath.Join(cacheDir, "bin")
+	if installedDir != defaultBinDir {
+		t.Fatalf("expected installed dir %s, got %s", defaultBinDir, installedDir)
+	}
+	for _, toolName := range expectedTools {
+		linkPath := filepath.Join(defaultBinDir, toolName)
+		if dest, err := os.Readlink(linkPath); err != nil {
+			t.Fatalf("failed to readlink in default cache dir for %s: %v", toolName, err)
+		} else if dest != filepath.Join(defaultBinDir, "ap") {
+			t.Fatalf("expected symlink %s to point to %s, got %s", linkPath, filepath.Join(defaultBinDir, "ap"), dest)
+		}
 	}
 }
 

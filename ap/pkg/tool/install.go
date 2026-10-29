@@ -46,17 +46,23 @@ func RepoInstallDir(repoRoot string) string {
 	return filepath.Join(repoRoot, ".build", "bin")
 }
 
-// Install creates or refreshes symlinks for all registered tools pointing at the ap executable.
-func Install(opt InstallOptions) ([]string, error) {
-	if runtime.GOOS == "windows" {
-		return nil, fmt.Errorf("ap tool install is not supported on Windows")
+func findGitRoot() string {
+	repoRoot, _, err := FindRoots()
+	if err != nil {
+		return ""
 	}
+	return repoRoot
+}
 
+// Install creates or refreshes symlinks for all registered tools pointing at the ap executable.
+// On Windows, it copies ap.exe into targetDir and skips creating symlinks.
+// It returns the directory path that it installed into.
+func Install(opt InstallOptions) (string, error) {
 	targetDir := opt.TargetDir
 	if targetDir == "" {
 		repoRoot := opt.RepoRoot
 		if repoRoot == "" {
-			repoRoot = FindRepoRoot()
+			repoRoot = findGitRoot()
 		}
 		if repoRoot != "" {
 			targetDir = RepoInstallDir(repoRoot)
@@ -64,18 +70,18 @@ func Install(opt InstallOptions) ([]string, error) {
 			var err error
 			targetDir, err = DefaultInstallDir()
 			if err != nil {
-				return nil, err
+				return "", err
 			}
 		}
 	}
 
 	targetDir, err := filepath.Abs(targetDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to determine absolute path for %s: %w", targetDir, err)
+		return "", fmt.Errorf("failed to determine absolute path for %s: %w", targetDir, err)
 	}
 
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create directory %s: %w", targetDir, err)
+		return "", fmt.Errorf("failed to create directory %s: %w", targetDir, err)
 	}
 
 	execPath := opt.Executable
@@ -86,17 +92,17 @@ func Install(opt InstallOptions) ([]string, error) {
 		var err error
 		execPath, err = os.Executable()
 		if err != nil {
-			return nil, fmt.Errorf("failed to determine executable path: %w", err)
+			return "", fmt.Errorf("failed to determine executable path: %w", err)
 		}
 	}
 
 	execPath, err = filepath.EvalSymlinks(execPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve symlink for executable %s: %w", execPath, err)
+		return "", fmt.Errorf("failed to resolve symlink for executable %s: %w", execPath, err)
 	}
 	execPath, err = filepath.Abs(execPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to determine absolute path for executable: %w", err)
+		return "", fmt.Errorf("failed to determine absolute path for executable: %w", err)
 	}
 
 	binName := "ap"
@@ -109,7 +115,7 @@ func Install(opt InstallOptions) ([]string, error) {
 		shouldCopy := true
 		srcFi, err := os.Stat(execPath)
 		if err != nil {
-			return nil, fmt.Errorf("failed to stat executable %s: %w", execPath, err)
+			return "", fmt.Errorf("failed to stat executable %s: %w", execPath, err)
 		}
 		dstFi, err := os.Stat(targetApPath)
 		if err == nil {
@@ -119,9 +125,13 @@ func Install(opt InstallOptions) ([]string, error) {
 		}
 		if shouldCopy {
 			if err := fileutils.CopyFile(execPath, targetApPath, 0755); err != nil {
-				return nil, fmt.Errorf("failed to copy ap to %s: %w", targetApPath, err)
+				return "", fmt.Errorf("failed to copy ap to %s: %w", targetApPath, err)
 			}
 		}
+	}
+
+	if runtime.GOOS == "windows" {
+		return targetDir, nil
 	}
 
 	stdout := opt.Stdout
@@ -129,23 +139,21 @@ func Install(opt InstallOptions) ([]string, error) {
 		stdout = os.Stdout
 	}
 
-	var created []string
 	for _, t := range All() {
 		linkPath := filepath.Join(targetDir, t.Name)
 
 		if err := os.Remove(linkPath); err != nil && !os.IsNotExist(err) {
-			return nil, fmt.Errorf("failed to remove existing link %s: %w", linkPath, err)
+			return "", fmt.Errorf("failed to remove existing link %s: %w", linkPath, err)
 		}
 
 		if err := os.Symlink(targetApPath, linkPath); err != nil {
-			return nil, fmt.Errorf("failed to create symlink %s -> %s: %w", linkPath, targetApPath, err)
+			return "", fmt.Errorf("failed to create symlink %s -> %s: %w", linkPath, targetApPath, err)
 		}
 
 		if _, err := fmt.Fprintf(stdout, "%s -> %s\n", linkPath, targetApPath); err != nil {
-			return nil, fmt.Errorf("failed to write link output for %s: %w", linkPath, err)
+			return "", fmt.Errorf("failed to write link output for %s: %w", linkPath, err)
 		}
-		created = append(created, linkPath)
 	}
 
-	return created, nil
+	return targetDir, nil
 }
