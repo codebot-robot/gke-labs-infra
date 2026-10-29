@@ -42,16 +42,160 @@ func unparen(e ast.Expr) ast.Expr {
 	}
 }
 
-func isErrorIdent(id *ast.Ident, info *types.Info) bool {
-	if id == nil || id.Name == "_" || id.Name == "nil" {
+func buildParentMap(file *ast.File) map[ast.Node]ast.Node {
+	parentMap := make(map[ast.Node]ast.Node)
+	var walkParents func(ast.Node, ast.Node)
+	walkParents = func(curr, parent ast.Node) {
+		if curr == nil {
+			return
+		}
+		if parent != nil {
+			parentMap[curr] = parent
+		}
+		ast.Inspect(curr, func(child ast.Node) bool {
+			if child != nil && child != curr {
+				walkParents(child, curr)
+				return false
+			}
+			return true
+		})
+	}
+	walkParents(file, nil)
+	return parentMap
+}
+
+func isNilComparisonOperand(id *ast.Ident, parentMap map[ast.Node]ast.Node) bool {
+	curr := ast.Expr(id)
+	parent := parentMap[curr]
+	for {
+		paren, ok := parent.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		curr = paren
+		parent = parentMap[curr]
+	}
+	bin, ok := parent.(*ast.BinaryExpr)
+	if !ok {
 		return false
 	}
-	if obj, ok := info.Uses[id]; ok {
-		if v, ok := obj.(*types.Var); ok {
-			return isErrorType(v.Type())
+	if bin.Op != token.EQL && bin.Op != token.NEQ {
+		return false
+	}
+	if unparen(bin.X) == id && isNilExpr(unparen(bin.Y)) {
+		return true
+	}
+	if unparen(bin.Y) == id && isNilExpr(unparen(bin.X)) {
+		return true
+	}
+	return false
+}
+
+func isBlankAssignRHS(id *ast.Ident, parentMap map[ast.Node]ast.Node) bool {
+	curr := ast.Expr(id)
+	parent := parentMap[curr]
+	for {
+		paren, ok := parent.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		curr = paren
+		parent = parentMap[curr]
+	}
+	switch stmt := parent.(type) {
+	case *ast.AssignStmt:
+		if len(stmt.Lhs) == 1 && len(stmt.Rhs) == 1 {
+			if lhsIdent, ok := stmt.Lhs[0].(*ast.Ident); ok && lhsIdent.Name == "_" {
+				return unparen(stmt.Rhs[0]) == id
+			}
+		} else if len(stmt.Lhs) == len(stmt.Rhs) {
+			for i := range stmt.Rhs {
+				if unparen(stmt.Rhs[i]) == id {
+					if lhsIdent, ok := stmt.Lhs[i].(*ast.Ident); ok && lhsIdent.Name == "_" {
+						return true
+					}
+				}
+			}
+		}
+	case *ast.ValueSpec:
+		if len(stmt.Names) == 1 && len(stmt.Values) == 1 {
+			if stmt.Names[0].Name == "_" {
+				return unparen(stmt.Values[0]) == id
+			}
+		} else if len(stmt.Names) == len(stmt.Values) {
+			for i := range stmt.Values {
+				if unparen(stmt.Values[i]) == id {
+					if stmt.Names[i].Name == "_" {
+						return true
+					}
+				}
+			}
 		}
 	}
 	return false
+}
+
+func isAssignLHS(id *ast.Ident, parentMap map[ast.Node]ast.Node) bool {
+	curr := ast.Expr(id)
+	parent := parentMap[curr]
+	for {
+		paren, ok := parent.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		curr = paren
+		parent = parentMap[curr]
+	}
+	assign, ok := parent.(*ast.AssignStmt)
+	if !ok {
+		return false
+	}
+	for _, lhs := range assign.Lhs {
+		if unparen(lhs) == id {
+			return true
+		}
+	}
+	return false
+}
+
+func isDiscardedErrorVar(rhsIdent *ast.Ident, info *types.Info, parentMap map[ast.Node]ast.Node) bool {
+	if rhsIdent == nil || rhsIdent.Name == "_" || rhsIdent.Name == "nil" || info == nil || parentMap == nil {
+		return false
+	}
+	obj, ok := info.Uses[rhsIdent]
+	if !ok {
+		return false
+	}
+	v, ok := obj.(*types.Var)
+	if !ok {
+		return false
+	}
+	if !isErrorType(v.Type()) {
+		return false
+	}
+	// Only flag local variables and function parameters, not package-level variables
+	if v.Pkg() != nil && v.Parent() == v.Pkg().Scope() {
+		return false
+	}
+
+	// Count uses of the variable object; skip if any use is not a nil comparison,
+	// a blank assignment right-hand side, or an assignment left-hand side.
+	for id, usedObj := range info.Uses {
+		if usedObj != v {
+			continue
+		}
+		if isNilComparisonOperand(id, parentMap) {
+			continue
+		}
+		if isBlankAssignRHS(id, parentMap) {
+			continue
+		}
+		if isAssignLHS(id, parentMap) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func isTypeConversion(info *types.Info, call *ast.CallExpr) bool {
@@ -107,6 +251,7 @@ type rawFinding struct {
 }
 
 func findDroppedErrorsInFile(file *ast.File, info *types.Info, matcher *ExclusionMatcher) []rawFinding {
+	parentMap := buildParentMap(file)
 	var findings []rawFinding
 
 	ast.Inspect(file, func(n ast.Node) bool {
@@ -152,7 +297,7 @@ func findDroppedErrorsInFile(file *ast.File, info *types.Info, matcher *Exclusio
 				} else if len(stmt.Lhs) == 1 {
 					if id, ok := stmt.Lhs[0].(*ast.Ident); ok && id.Name == "_" {
 						if rhsIdent, ok := unparen(stmt.Rhs[0]).(*ast.Ident); ok {
-							if isErrorIdent(rhsIdent, info) {
+							if isDiscardedErrorVar(rhsIdent, info, parentMap) {
 								findings = append(findings, rawFinding{pos: id.Pos(), expr: rhsIdent, category: CategoryErrorDiscarded})
 							}
 						}
@@ -168,7 +313,7 @@ func findDroppedErrorsInFile(file *ast.File, info *types.Info, matcher *Exclusio
 								findings = append(findings, rawFinding{pos: id.Pos(), expr: call, category: CategoryDroppedError})
 							}
 						} else if rhsIdent, ok := unparen(stmt.Rhs[i]).(*ast.Ident); ok {
-							if isErrorIdent(rhsIdent, info) {
+							if isDiscardedErrorVar(rhsIdent, info, parentMap) {
 								findings = append(findings, rawFinding{pos: id.Pos(), expr: rhsIdent, category: CategoryErrorDiscarded})
 							}
 						}
@@ -193,7 +338,7 @@ func findDroppedErrorsInFile(file *ast.File, info *types.Info, matcher *Exclusio
 				} else if len(stmt.Names) == 1 {
 					if stmt.Names[0].Name == "_" {
 						if rhsIdent, ok := unparen(stmt.Values[0]).(*ast.Ident); ok {
-							if isErrorIdent(rhsIdent, info) {
+							if isDiscardedErrorVar(rhsIdent, info, parentMap) {
 								findings = append(findings, rawFinding{pos: stmt.Names[0].Pos(), expr: rhsIdent, category: CategoryErrorDiscarded})
 							}
 						}
@@ -209,7 +354,7 @@ func findDroppedErrorsInFile(file *ast.File, info *types.Info, matcher *Exclusio
 								findings = append(findings, rawFinding{pos: stmt.Names[i].Pos(), expr: call, category: CategoryDroppedError})
 							}
 						} else if rhsIdent, ok := unparen(stmt.Values[i]).(*ast.Ident); ok {
-							if isErrorIdent(rhsIdent, info) {
+							if isDiscardedErrorVar(rhsIdent, info, parentMap) {
 								findings = append(findings, rawFinding{pos: stmt.Names[i].Pos(), expr: rhsIdent, category: CategoryErrorDiscarded})
 							}
 						}
@@ -225,7 +370,7 @@ func findDroppedErrorsInFile(file *ast.File, info *types.Info, matcher *Exclusio
 	})
 
 	// Check for "error only tested for success" pattern
-	successOnlyFindings := findSuccessOnlyChecks(file, info)
+	successOnlyFindings := findSuccessOnlyChecks(file, info, parentMap)
 	findings = append(findings, successOnlyFindings...)
 
 	return findings
@@ -297,7 +442,7 @@ type errVarDef struct {
 	pos  token.Pos
 }
 
-func findSuccessOnlyChecks(file *ast.File, info *types.Info) []rawFinding {
+func findSuccessOnlyChecks(file *ast.File, info *types.Info, parentMap map[ast.Node]ast.Node) []rawFinding {
 	var errDefs []errVarDef
 
 	// 1. Identify local error variables whose value comes from a call
@@ -353,26 +498,6 @@ func findSuccessOnlyChecks(file *ast.File, info *types.Info) []rawFinding {
 	if len(errDefs) == 0 {
 		return nil
 	}
-
-	// 2. Build parent map for file to inspect AST context of uses
-	parentMap := make(map[ast.Node]ast.Node)
-	var walkParents func(ast.Node, ast.Node)
-	walkParents = func(curr, parent ast.Node) {
-		if curr == nil {
-			return
-		}
-		if parent != nil {
-			parentMap[curr] = parent
-		}
-		ast.Inspect(curr, func(child ast.Node) bool {
-			if child != nil && child != curr {
-				walkParents(child, curr)
-				return false
-			}
-			return true
-		})
-	}
-	walkParents(file, nil)
 
 	var findings []rawFinding
 

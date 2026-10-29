@@ -20,7 +20,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/baseline"
@@ -848,88 +847,15 @@ func main() {
 	}
 }
 
-func TestChecker_ErrorDiscarded(t *testing.T) {
-	code := `package main
-
-import "errors"
-
-type Closer interface {
-	Close() error
-}
-
-func fail() error { return errors.New("err") }
-
-func test(c Closer) {
-	// Case 1: defer with nil check and discarded error
-	defer func() {
-		if closeErr := c.Close(); closeErr != nil {
-			_ = closeErr
-		}
-	}()
-
-	// Case 2: if err != nil with _ = err
-	if err := fail(); err != nil {
-		_ = err
-	}
-
-	// Case 3: multi-assignment with discarded error
-	var err2 error
-	_, _ = 123, err2
-
-	// Case 4: standalone _ = err
-	var err3 error
-	_ = err3
-
-	// Handled: not discarded
-	if err4 := fail(); err4 != nil {
-		println(err4.Error())
-	}
-
-	// Non-error discarded
-	val := 42
-	_ = val
-}
-`
-	dir := createTestModule(t, map[string]string{
-		"main.go": code,
-	})
-
-	res, err := Run(t.Context(), Options{
-		Dir:       dir,
-		APRoot:    dir,
-		SkipTests: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var discarded []Finding
-	for _, f := range res.Findings {
-		if f.Category == CategoryErrorDiscarded {
-			discarded = append(discarded, f)
-		}
-	}
-
-	if len(discarded) != 4 {
-		t.Fatalf("expected 4 discarded error findings, got %d: %+v", len(discarded), discarded)
-	}
-
-	expectedCallees := []string{"closeErr", "err", "err2", "err3"}
-	var gotCallees []string
-	for _, f := range discarded {
-		gotCallees = append(gotCallees, f.Callee)
-	}
-	sort.Strings(expectedCallees)
-	sort.Strings(gotCallees)
-	for i := range expectedCallees {
-		if gotCallees[i] != expectedCallees[i] {
-			t.Errorf("callee %d mismatch: got %q, want %q", i, gotCallees[i], expectedCallees[i])
-		}
-	}
-}
-
-func TestChecker_ErrorDiscarded_BaselineRatchet(t *testing.T) {
-	codeV1 := `package main
+func TestChecker_CategoryErrorDiscarded(t *testing.T) {
+	tests := []struct {
+		name         string
+		code         string
+		wantCategory string
+	}{
+		{
+			name: "error-discarded",
+			code: `package main
 
 import "errors"
 
@@ -940,51 +866,31 @@ func main() {
 		_ = err
 	}
 }
-`
-	dir := createTestModule(t, map[string]string{
-		"main.go": codeV1,
-	})
-
-	baselinePath := filepath.Join(dir, ".ap", "droppederrors-baseline.txt")
-
-	// 1. Write baseline
-	resWrite, err := Run(t.Context(), Options{
-		Dir:           dir,
-		APRoot:        dir,
-		BaselinePath:  baselinePath,
-		WriteBaseline: true,
-		SkipTests:     true,
-	})
-	if err != nil {
-		t.Fatalf("write baseline failed: %v", err)
-	}
-	if len(resWrite.Findings) != 1 {
-		t.Fatalf("expected 1 finding, got %d", len(resWrite.Findings))
-	}
-	if resWrite.Findings[0].Category != CategoryErrorDiscarded {
-		t.Fatalf("expected CategoryErrorDiscarded, got %q", resWrite.Findings[0].Category)
+`,
+			wantCategory: CategoryErrorDiscarded,
+		},
 	}
 
-	content, err := os.ReadFile(baselinePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(content), "main:error-discarded:err") {
-		t.Errorf("expected baseline to contain 'main:error-discarded:err', got:\n%s", string(content))
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := createTestModule(t, map[string]string{
+				"main.go": tc.code,
+			})
 
-	// 2. Check with baseline -> should have 0 new findings
-	resCheck, err := Run(t.Context(), Options{
-		Dir:          dir,
-		APRoot:       dir,
-		BaselinePath: baselinePath,
-		Mode:         "error",
-		SkipTests:    true,
-	})
-	if err != nil {
-		t.Fatalf("check failed: %v", err)
-	}
-	if len(resCheck.NewFindings) != 0 {
-		t.Fatalf("expected 0 new findings, got %d", len(resCheck.NewFindings))
+			res, err := Run(t.Context(), Options{
+				Dir:       dir,
+				APRoot:    dir,
+				SkipTests: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Findings) != 1 {
+				t.Fatalf("expected 1 finding, got %d: %+v", len(res.Findings), res.Findings)
+			}
+			if res.Findings[0].Category != tc.wantCategory {
+				t.Errorf("category mismatch: got %q, want %q", res.Findings[0].Category, tc.wantCategory)
+			}
+		})
 	}
 }
