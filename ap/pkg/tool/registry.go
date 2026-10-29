@@ -471,24 +471,15 @@ func FindRepoRoot() string {
 }
 
 // FindRepoRootFromPath discovers the repository root by walking up from the given file or directory path
-// until .git is found. It resolves symlinks and does not check environment variables or cwd.
+// until .git is found. It does not check environment variables or cwd.
 func FindRepoRootFromPath(path string) (string, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", fmt.Errorf("failed to get absolute path for %q: %w", path, err)
-	}
-	eval, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		return "", fmt.Errorf("failed to resolve symlink for %q: %w", path, err)
-	}
-	abs = eval
-	fi, err := os.Stat(abs)
+	fi, err := os.Stat(path)
 	if err != nil {
 		return "", fmt.Errorf("failed to stat %q: %w", path, err)
 	}
-	dir := abs
+	dir := path
 	if !fi.IsDir() {
-		dir = filepath.Dir(abs)
+		dir = filepath.Dir(path)
 	}
 	for {
 		hasGit, err := fileutils.FileExists(filepath.Join(dir, ".git"))

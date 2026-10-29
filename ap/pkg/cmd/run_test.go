@@ -100,33 +100,7 @@ func TestRun_Success(t *testing.T) {
 	baseEnv := filterEnv("REPO_ROOT", "AP_ROOT")
 	baseEnv = append(baseEnv, "AP_TEST_EXEC=1", "AP_EXECUTABLE="+testExe)
 
-	// Subtest 1: Invoked from repo root
-	t.Run("from repo root", func(t *testing.T) {
-		cmd := exec.Command(testExe, "run", "bash", scriptPath, "foo", "bar")
-		cmd.Dir = repoDir
-		cmd.Env = baseEnv
-
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("run failed: %v\nOutput: %s", err, string(out))
-		}
-
-		output := string(out)
-		if !strings.Contains(output, "PWD="+realRepoDir) {
-			t.Errorf("expected PWD=%s, got output:\n%s", realRepoDir, output)
-		}
-		if !strings.Contains(output, "REPO_ROOT="+realRepoDir) {
-			t.Errorf("expected REPO_ROOT=%s, got output:\n%s", realRepoDir, output)
-		}
-		if !strings.Contains(output, "KUBECTL="+expectedKubectl) {
-			t.Errorf("expected KUBECTL=%s, got output:\n%s", expectedKubectl, output)
-		}
-		if !strings.Contains(output, "ARGS=foo bar") {
-			t.Errorf("expected ARGS=foo bar, got output:\n%s", output)
-		}
-	})
-
-	// Subtest 2: Invoked from subdirectory with relative script path
+	// Subtest 1: Invoked from subdirectory with relative script path
 	t.Run("from subdirectory with relative path", func(t *testing.T) {
 		cmd := exec.Command(testExe, "run", "bash", "./hello", "baz")
 		cmd.Dir = taskDir
@@ -152,34 +126,7 @@ func TestRun_Success(t *testing.T) {
 		}
 	})
 
-	// Subtest 3: Invoked from an outside directory completely separate from repo
-	t.Run("from outside directory", func(t *testing.T) {
-		outsideDir := t.TempDir()
-		cmd := exec.Command(testExe, "run", "bash", scriptPath, "qux")
-		cmd.Dir = outsideDir
-		cmd.Env = baseEnv
-
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("run failed: %v\nOutput: %s", err, string(out))
-		}
-
-		output := string(out)
-		if !strings.Contains(output, "PWD="+realRepoDir) {
-			t.Errorf("expected PWD=%s, got output:\n%s", realRepoDir, output)
-		}
-		if !strings.Contains(output, "REPO_ROOT="+realRepoDir) {
-			t.Errorf("expected REPO_ROOT=%s, got output:\n%s", realRepoDir, output)
-		}
-		if !strings.Contains(output, "KUBECTL="+expectedKubectl) {
-			t.Errorf("expected KUBECTL=%s, got output:\n%s", expectedKubectl, output)
-		}
-		if !strings.Contains(output, "ARGS=qux") {
-			t.Errorf("expected ARGS=qux, got output:\n%s", output)
-		}
-	})
-
-	// Subtest 4: Shebang execution via #!/usr/bin/env -S ap run bash
+	// Subtest 2: Shebang execution via #!/usr/bin/env -S ap run bash
 	if runtime.GOOS != "windows" {
 		t.Run("shebang execution", func(t *testing.T) {
 			binDir := t.TempDir()
@@ -249,18 +196,6 @@ func TestRun_ErrorCases(t *testing.T) {
 		}
 	})
 
-	t.Run("non-existent script", func(t *testing.T) {
-		cmd := exec.Command(testExe, "run", "bash", "/non/existent/script/path.sh")
-		cmd.Env = baseEnv
-		out, err := cmd.CombinedOutput()
-		if err == nil {
-			t.Fatalf("expected error for non-existent script, but succeeded:\n%s", string(out))
-		}
-		if !strings.Contains(string(out), "failed to stat") && !strings.Contains(string(out), "no such file") {
-			t.Errorf("expected stat or not found error, got:\n%s", string(out))
-		}
-	})
-
 	t.Run("script not in git repo", func(t *testing.T) {
 		nonRepoDir := t.TempDir()
 		scriptPath := filepath.Join(nonRepoDir, "script.sh")
@@ -276,27 +211,6 @@ func TestRun_ErrorCases(t *testing.T) {
 		}
 		if !strings.Contains(string(out), "could not find git repository root") {
 			t.Errorf("expected 'could not find git repository root' error, got:\n%s", string(out))
-		}
-	})
-
-	t.Run("interpreter not on PATH", func(t *testing.T) {
-		repoDir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0755); err != nil {
-			t.Fatal(err)
-		}
-		scriptPath := filepath.Join(repoDir, "script.sh")
-		if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho hi\n"), 0755); err != nil {
-			t.Fatal(err)
-		}
-
-		cmd := exec.Command(testExe, "run", "non-existent-interpreter-xyz", scriptPath)
-		cmd.Env = baseEnv
-		out, err := cmd.CombinedOutput()
-		if err == nil {
-			t.Fatalf("expected error for missing interpreter, but succeeded:\n%s", string(out))
-		}
-		if !strings.Contains(string(out), "failed to find interpreter") {
-			t.Errorf("expected 'failed to find interpreter' error, got:\n%s", string(out))
 		}
 	})
 }

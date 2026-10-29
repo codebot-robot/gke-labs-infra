@@ -160,7 +160,7 @@ func Install(opt InstallOptions) (string, error) {
 }
 
 // ScriptEnv ensures the managed-tool symlinks exist for repoRoot and returns an environment
-// slice with that tool bin directory prepended to PATH and REPO_ROOT set if repoRoot is provided.
+// slice with that tool bin directory prepended to PATH and REPO_ROOT set.
 func ScriptEnv(repoRoot string) ([]string, error) {
 	binDir, err := Install(InstallOptions{
 		RepoRoot: repoRoot,
@@ -170,25 +170,18 @@ func ScriptEnv(repoRoot string) ([]string, error) {
 		return nil, fmt.Errorf("failed to prepare tool bin directory for PATH: %w", err)
 	}
 
+	path := binDir
+	if curPath := os.Getenv("PATH"); curPath != "" {
+		path = binDir + string(os.PathListSeparator) + curPath
+	}
+
 	var env []string
-	foundPath := false
-	foundRepoRoot := false
 	for _, e := range os.Environ() {
-		if strings.HasPrefix(strings.ToUpper(e), "PATH=") {
-			foundPath = true
-			env = append(env, "PATH="+binDir+string(os.PathListSeparator)+e[5:])
-		} else if repoRoot != "" && strings.HasPrefix(e, "REPO_ROOT=") {
-			foundRepoRoot = true
-			env = append(env, "REPO_ROOT="+repoRoot)
-		} else {
-			env = append(env, e)
+		if strings.HasPrefix(strings.ToUpper(e), "PATH=") || strings.HasPrefix(e, "REPO_ROOT=") {
+			continue
 		}
+		env = append(env, e)
 	}
-	if !foundPath {
-		env = append(env, "PATH="+binDir)
-	}
-	if repoRoot != "" && !foundRepoRoot {
-		env = append(env, "REPO_ROOT="+repoRoot)
-	}
+	env = append(env, "PATH="+path, "REPO_ROOT="+repoRoot)
 	return env, nil
 }

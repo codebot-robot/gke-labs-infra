@@ -56,11 +56,6 @@ func BuildRunCommand() *cobra.Command {
 // RunScript resolves repository root from script, prepares the tool environment, changes directory to repo root,
 // and executes the interpreter with script and args.
 func RunScript(ctx context.Context, interpreter, script string, scriptArgs []string) error {
-	repoRoot, err := tool.FindRepoRootFromPath(script)
-	if err != nil {
-		return err
-	}
-
 	absScript, err := filepath.Abs(script)
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path for script %q: %w", script, err)
@@ -71,8 +66,9 @@ func RunScript(ctx context.Context, interpreter, script string, scriptArgs []str
 	}
 	absScript = eval
 
-	if err := os.Setenv("REPO_ROOT", repoRoot); err != nil {
-		return fmt.Errorf("failed to export REPO_ROOT: %w", err)
+	repoRoot, err := tool.FindRepoRootFromPath(absScript)
+	if err != nil {
+		return err
 	}
 
 	env, err := tool.ScriptEnv(repoRoot)

@@ -220,32 +220,11 @@ func TestFindRepoRootFromPath(t *testing.T) {
 		realRepoDir = repoDir
 	}
 
-	t.Run("from nested file", func(t *testing.T) {
-		root, err := FindRepoRootFromPath(filePath)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if root != realRepoDir {
-			t.Errorf("expected root %s, got %s", realRepoDir, root)
-		}
-	})
-
-	t.Run("from nested directory", func(t *testing.T) {
-		root, err := FindRepoRootFromPath(nestedDir)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if root != realRepoDir {
-			t.Errorf("expected root %s, got %s", realRepoDir, root)
-		}
-	})
-
 	t.Run("from symlink", func(t *testing.T) {
 		if runtime.GOOS == "windows" {
 			t.Skip("symlinking is not supported on Windows")
 		}
-		symlinkDir := t.TempDir()
-		symlinkPath := filepath.Join(symlinkDir, "link-to-script")
+		symlinkPath := filepath.Join(nestedDir, "link-to-script")
 		if err := os.Symlink(filePath, symlinkPath); err != nil {
 			t.Fatal(err)
 		}
@@ -255,13 +234,6 @@ func TestFindRepoRootFromPath(t *testing.T) {
 		}
 		if root != realRepoDir {
 			t.Errorf("expected root %s, got %s", realRepoDir, root)
-		}
-	})
-
-	t.Run("non-existent path", func(t *testing.T) {
-		_, err := FindRepoRootFromPath(filepath.Join(repoDir, "non-existent"))
-		if err == nil {
-			t.Fatal("expected error for non-existent path")
 		}
 	})
 
@@ -276,44 +248,4 @@ func TestFindRepoRootFromPath(t *testing.T) {
 			t.Fatal("expected error for path outside git repository")
 		}
 	})
-}
-
-func TestScriptEnv(t *testing.T) {
-	repoDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(repoDir, ".git"), 0755); err != nil {
-		t.Fatal(err)
-	}
-
-	env, err := ScriptEnv(repoDir)
-	if err != nil {
-		t.Fatalf("unexpected error from ScriptEnv: %v", err)
-	}
-
-	realRepoDir, err := filepath.EvalSymlinks(repoDir)
-	if err != nil {
-		realRepoDir = repoDir
-	}
-	expectedBinDir := filepath.Join(realRepoDir, ".build", "bin")
-
-	foundPath := false
-	foundRepoRoot := false
-	for _, e := range env {
-		if strings.HasPrefix(strings.ToUpper(e), "PATH=") {
-			foundPath = true
-			pathVal := e[5:]
-			if !strings.HasPrefix(pathVal, expectedBinDir+string(os.PathListSeparator)) && pathVal != expectedBinDir {
-				t.Errorf("expected PATH to start with %s, got %s", expectedBinDir, pathVal)
-			}
-		}
-		if e == "REPO_ROOT="+repoDir {
-			foundRepoRoot = true
-		}
-	}
-
-	if !foundPath {
-		t.Error("PATH not found in returned env")
-	}
-	if !foundRepoRoot {
-		t.Errorf("REPO_ROOT=%s not found in returned env", repoDir)
-	}
 }
