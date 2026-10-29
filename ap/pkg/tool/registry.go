@@ -100,7 +100,7 @@ func (t *Tool) Exec(ctx context.Context, repoRoot string, args []string) error {
 	if err != nil {
 		return err
 	}
-	return execProcess(inv)
+	return ExecProcess(inv)
 }
 
 func loadToolConfig[T any](repoRoot string, load func(string) (*T, error), defaultFn func() *T) (*T, error) {
@@ -468,4 +468,41 @@ func FindRepoRoot() string {
 		return apRoot
 	}
 	return repoRoot
+}
+
+// FindRepoRootFromPath discovers the repository root by walking up from the given file or directory path
+// until .git is found. It resolves symlinks and does not check environment variables or cwd.
+func FindRepoRootFromPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to get absolute path for %q: %w", path, err)
+	}
+	eval, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve symlink for %q: %w", path, err)
+	}
+	abs = eval
+	fi, err := os.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("failed to stat %q: %w", path, err)
+	}
+	dir := abs
+	if !fi.IsDir() {
+		dir = filepath.Dir(abs)
+	}
+	for {
+		hasGit, err := fileutils.FileExists(filepath.Join(dir, ".git"))
+		if err != nil {
+			return "", err
+		}
+		if hasGit {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", fmt.Errorf("could not find git repository root for %q (walked up from %q)", path, dir)
 }
