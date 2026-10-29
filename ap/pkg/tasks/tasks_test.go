@@ -356,6 +356,101 @@ func TestTaskScript_ResolvesApOnPath(t *testing.T) {
 	}
 }
 
+func TestScriptEnvForRepo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinking is not supported on Windows")
+	}
+
+	repoDir := t.TempDir()
+	fakeAp := filepath.Join(t.TempDir(), "ap")
+	if err := os.WriteFile(fakeAp, []byte("#!/bin/sh\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AP_EXECUTABLE", fakeAp)
+
+	env, err := ScriptEnvForRepo(repoDir)
+	if err != nil {
+		t.Fatalf("ScriptEnvForRepo failed: %v", err)
+	}
+
+	expectedBinDir := filepath.Join(repoDir, ".build", "bin")
+	var foundPath string
+	for _, e := range env {
+		if strings.HasPrefix(e, "PATH=") {
+			foundPath = e[5:]
+			break
+		}
+	}
+	if foundPath == "" {
+		t.Fatal("PATH not found in ScriptEnvForRepo")
+	}
+
+	parts := strings.Split(foundPath, string(os.PathListSeparator))
+	if len(parts) == 0 || parts[0] != expectedBinDir {
+		t.Errorf("expected PATH to start with %s, got %v", expectedBinDir, parts)
+	}
+
+	if _, err := os.Stat(filepath.Join(expectedBinDir, "ap")); err != nil {
+		t.Errorf("expected ap to exist in repo bin dir: %v", err)
+	}
+	for _, toolName := range []string{"kind", "kubectl", "docker", "docker-buildx", "protoc", "go"} {
+		link := filepath.Join(expectedBinDir, toolName)
+		if dest, err := os.Readlink(link); err != nil {
+			t.Errorf("failed to readlink for %s: %v", toolName, err)
+		} else if dest != filepath.Join(expectedBinDir, "ap") {
+			t.Errorf("expected %s to point to %s, got %s", link, filepath.Join(expectedBinDir, "ap"), dest)
+		}
+	}
+}
+
+func TestTaskScript_ResolvesToolsOnPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinking is not supported on Windows")
+	}
+
+	tmpDir := t.TempDir()
+
+	fakeAp := filepath.Join(t.TempDir(), "ap")
+	fakeScript := "#!/bin/sh\necho \"fake-tool: $(basename \"$0\")\"\n"
+	if err := os.WriteFile(fakeAp, []byte(fakeScript), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	scriptFile := filepath.Join(tmpDir, "test.sh")
+	outputFile := filepath.Join(tmpDir, "output.txt")
+	scriptContent := fmt.Sprintf("#!/bin/sh\nkind >> %q\nkubectl >> %q\n", outputFile, outputFile)
+	if err := os.WriteFile(scriptFile, []byte(scriptContent), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := &TaskScript{
+		Name: "test-script",
+		Path: scriptFile,
+		Root: tmpDir,
+	}
+
+	t.Setenv("AP_EXECUTABLE", fakeAp)
+	tree, err := sourcetree.Open(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ts.Run(t.Context(), NewScope(tmpDir, tmpDir, tree)); err != nil {
+		t.Fatalf("task run failed: %v", err)
+	}
+
+	out, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+	outStr := string(out)
+	if !strings.Contains(outStr, "fake-tool: kind") {
+		t.Errorf("expected output to contain 'fake-tool: kind', got: %s", outStr)
+	}
+	if !strings.Contains(outStr, "fake-tool: kubectl") {
+		t.Errorf("expected output to contain 'fake-tool: kubectl', got: %s", outStr)
+	}
+}
+
 func TestParallelGroup(t *testing.T) {
 	// 1. Verify concurrency actually happens, bounded by the limit,
 	// and output blocks are whole and in completion order.

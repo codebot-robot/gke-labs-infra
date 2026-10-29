@@ -65,6 +65,17 @@ func (t *LegacyFormatScriptTask) Run(ctx context.Context, scope *tasks.APScope) 
 	klog.Infof("Running legacy format script: %s", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = scope.Dir
+	repoRoot := ""
+	if scope != nil && scope.RepoRoot != "" {
+		repoRoot = scope.RepoRoot
+	} else if scope != nil && scope.Dir != "" {
+		repoRoot = scope.Dir
+	}
+	env, err := tasks.ScriptEnvForRepo(repoRoot)
+	if err != nil {
+		return fmt.Errorf("failed to prepare script environment for %s: %w", t.Name, err)
+	}
+	cmd.Env = env
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

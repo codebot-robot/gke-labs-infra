@@ -17,24 +17,26 @@ package tasks
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool"
 	"k8s.io/klog/v2"
 )
 
-// ensureIsolatedAp copies the current running ap binary into a dedicated cache bin directory
-// (e.g. <cacheRoot>/bin/ap) so that other binaries in the same directory as ap are not dragged into PATH.
-func ensureIsolatedAp() (string, error) {
-	cacheRoot, err := fileutils.CacheDir()
-	if err != nil {
-		return "", err
+var ensureScriptBinMu sync.Mutex
+
+func ensureIsolatedApInDir(binDir string) (string, error) {
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create directory %s: %w", binDir, err)
 	}
 
 	execPath := os.Getenv("AP_EXECUTABLE")
@@ -51,11 +53,10 @@ func ensureIsolatedAp() (string, error) {
 		binName = "ap.exe"
 	}
 
-	apBinDir := filepath.Join(cacheRoot, "bin")
-	targetPath := filepath.Join(apBinDir, binName)
+	targetPath := filepath.Join(binDir, binName)
 
 	if execPath == targetPath {
-		return apBinDir, nil
+		return binDir, nil
 	}
 
 	srcFi, err := os.Stat(execPath)
@@ -69,8 +70,8 @@ func ensureIsolatedAp() (string, error) {
 			klog.V(2).Infof("failed to stat %s: %v", targetPath, statErr)
 		}
 	} else {
-		if dstFi.Size() == srcFi.Size() && dstFi.ModTime().Equal(srcFi.ModTime()) {
-			return apBinDir, nil
+		if os.SameFile(srcFi, dstFi) || (dstFi.Size() == srcFi.Size() && dstFi.ModTime().Equal(srcFi.ModTime())) {
+			return binDir, nil
 		}
 	}
 
@@ -78,13 +79,47 @@ func ensureIsolatedAp() (string, error) {
 		return "", fmt.Errorf("failed to copy ap to isolated bin directory: %w", err)
 	}
 
-	return apBinDir, nil
+	return binDir, nil
 }
 
-// ScriptEnv returns an environment slice with an isolated directory containing only the ap binary
-// prepended to PATH so child scripts can invoke ap directly without dragging other binaries into PATH.
-func ScriptEnv() ([]string, error) {
-	apBinDir, err := ensureIsolatedAp()
+// EnsureScriptBin ensures the ap binary and tool symlinks exist in the target bin directory
+// (defaults to ${repoRoot}/.build/bin if repoRoot is provided, or <cacheRoot>/bin otherwise)
+// and returns the bin directory path.
+func EnsureScriptBin(repoRoot string) (string, error) {
+	ensureScriptBinMu.Lock()
+	defer ensureScriptBinMu.Unlock()
+
+	var binDir string
+	if repoRoot != "" {
+		binDir = filepath.Join(repoRoot, ".build", "bin")
+	} else {
+		cacheRoot, err := fileutils.CacheDir()
+		if err != nil {
+			return "", err
+		}
+		binDir = filepath.Join(cacheRoot, "bin")
+	}
+
+	if runtime.GOOS == "windows" {
+		return ensureIsolatedApInDir(binDir)
+	}
+
+	_, err := tool.Install(tool.InstallOptions{
+		RepoRoot:  repoRoot,
+		TargetDir: binDir,
+		Stdout:    io.Discard,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to install tools in %s: %w", binDir, err)
+	}
+	return binDir, nil
+}
+
+// ScriptEnvForRepo returns an environment slice with an isolated directory containing ap and tool symlinks
+// prepended to PATH so child scripts can invoke ap and tools directly.
+// If repoRoot is non-empty, ${repoRoot}/.build/bin is used; otherwise AP_CACHE_DIR/bin is used.
+func ScriptEnvForRepo(repoRoot string) ([]string, error) {
+	apBinDir, err := EnsureScriptBin(repoRoot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to isolate ap binary for PATH: %w", err)
 	}
@@ -105,6 +140,13 @@ func ScriptEnv() ([]string, error) {
 	return env, nil
 }
 
+// ScriptEnv returns an environment slice with an isolated directory containing only the ap binary
+// prepended to PATH so child scripts can invoke ap directly without dragging other binaries into PATH.
+func ScriptEnv() ([]string, error) {
+	repoRoot := os.Getenv("REPO_ROOT")
+	return ScriptEnvForRepo(repoRoot)
+}
+
 // TaskScript represents a discoverable task script.
 type TaskScript struct {
 	Name string
@@ -116,7 +158,13 @@ func (t *TaskScript) Run(ctx context.Context, scope *APScope) error {
 	klog.Infof("Running task: %s", t.Name)
 	cmd := exec.CommandContext(ctx, t.Path)
 	cmd.Dir = t.Root
-	env, err := ScriptEnv()
+	repoRoot := ""
+	if scope != nil && scope.RepoRoot != "" {
+		repoRoot = scope.RepoRoot
+	} else if t.Root != "" {
+		repoRoot = t.Root
+	}
+	env, err := ScriptEnvForRepo(repoRoot)
 	if err != nil {
 		return fmt.Errorf("failed to prepare script environment for %s: %w", t.Name, err)
 	}
