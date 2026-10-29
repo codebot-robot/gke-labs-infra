@@ -25,7 +25,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"k8s.io/klog/v2"
 )
 
@@ -157,9 +157,9 @@ func WithExcludePrefix(prefix string) FindOption {
 }
 
 // FindTaskScripts looks for executable scripts in dev/tasks that match the prefix.
-func FindTaskScripts(r *repo.Repo, root string, opts ...FindOption) ([]Task, error) {
+func FindTaskScripts(r *sourcetree.SourceTree, root string, opts ...FindOption) ([]Task, error) {
 	if r == nil {
-		return nil, fmt.Errorf("repo is nil")
+		return nil, fmt.Errorf("sourcetree is nil")
 	}
 	options := FindOptions{}
 	for _, o := range opts {

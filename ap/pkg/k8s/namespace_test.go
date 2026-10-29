@@ -22,6 +22,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
@@ -372,8 +373,12 @@ metadata:
 		},
 	}
 
-	scope := &tasks.APScope{RepoRoot: tempDir, Dir: tempDir}
-	err := task.Run(t.Context(), scope)
+	tree, err := sourcetree.Open(tempDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := tasks.NewScope(tempDir, tempDir, tree)
+	err = task.Run(t.Context(), scope)
 	if err == nil {
 		t.Fatalf("expected error when namespace does not exist, got nil")
 	}

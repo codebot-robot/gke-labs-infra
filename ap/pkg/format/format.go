@@ -24,7 +24,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/fileheaders"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/gostyle"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
 )
@@ -37,10 +37,7 @@ type CodestyleTask struct {
 
 func (t *CodestyleTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running codestyle in %s...", t.Root)
-	r, err := scope.GetRepo()
-	if err != nil {
-		return err
-	}
+	r := scope.SourceTree
 	if err := fileheaders.Run(ctx, r, t.Root, t.Files); err != nil {
 		return fmt.Errorf("fileheaders failed in %s: %w", t.Root, err)
 	}
@@ -85,9 +82,9 @@ func (t *LegacyFormatScriptTask) GetChildren() []tasks.Task {
 }
 
 // FormatTasks returns a task group for all formatting tasks.
-func FormatTasks(r *repo.Repo, root string, files ...string) (tasks.Task, error) {
+func FormatTasks(r *sourcetree.SourceTree, root string, files ...string) (tasks.Task, error) {
 	if r == nil {
-		return nil, fmt.Errorf("repo is nil")
+		return nil, fmt.Errorf("sourcetree is nil")
 	}
 	var allTasks []tasks.Task
 
@@ -100,7 +97,7 @@ func FormatTasks(r *repo.Repo, root string, files ...string) (tasks.Task, error)
 		name := f.Name
 		if strings.HasPrefix(name, "format-") {
 			allTasks = append(allTasks, &LegacyFormatScriptTask{
-				Name: name,
+				Name: strings.TrimPrefix(name, "format-"),
 				Path: f.Path,
 			})
 		}
@@ -113,10 +110,10 @@ func FormatTasks(r *repo.Repo, root string, files ...string) (tasks.Task, error)
 	}, nil
 }
 
-func Run(ctx context.Context, r *repo.Repo, root string) error {
+func Run(ctx context.Context, r *sourcetree.SourceTree, root string) error {
 	t, err := FormatTasks(r, root)
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r})
+	return t.Run(ctx, tasks.NewScope(root, root, r))
 }

@@ -26,7 +26,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"k8s.io/klog/v2"
 )
 
@@ -186,7 +186,7 @@ func (p *processor) shouldIgnoreFile(relPath string, isDir bool) bool {
 	return p.ignoreList.ShouldIgnore(relPath, isDir)
 }
 
-func Run(ctx context.Context, r *repo.Repo, repoRoot string, files []string) error {
+func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files []string) error {
 	var errs []error
 
 	var opt FileHeadersOptions
@@ -269,7 +269,7 @@ func (p *processor) processFile(ctx context.Context, absPath, relPath string) er
 	}
 
 	if p.config.SkipGenerated != nil && *p.config.SkipGenerated {
-		if repo.CheckIsGenerated(absPath) {
+		if sourcetree.CheckIsGenerated(absPath) {
 			return nil
 		}
 	}

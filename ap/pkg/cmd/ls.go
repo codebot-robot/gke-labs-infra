@@ -58,7 +58,7 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 		return err
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func RunLs(ctx context.Context, opt LsOptions) error {
 			return fmt.Errorf("failed to load config for %s: %w", apRoot, err)
 		}
 		naming := images.ResolveImageNaming(cfg)
-		buildTasks, err := images.BuildTasks(scope.Repo, apRoot, false, "", naming)
+		buildTasks, err := images.BuildTasks(scope.SourceTree, apRoot, false, "", naming)
 		if err == nil && buildTasks != nil {
 			all = append(all, buildTasks)
 		}

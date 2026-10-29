@@ -17,7 +17,7 @@ package walker
 import (
 	"os"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
 // File represents a file in the file system.
@@ -29,15 +29,15 @@ type File struct {
 
 // FileView represents a view of a directory tree, with ignore patterns.
 type FileView struct {
-	Repo   *repo.Repo
+	Tree   *sourcetree.SourceTree
 	Dir    string
 	Ignore *IgnoreList
 }
 
-// NewFileView creates a new FileView backed by the repo tree snapshot.
-func NewFileView(r *repo.Repo, dir string, ignorePatterns []string) *FileView {
+// NewFileView creates a new FileView backed by the sourcetree snapshot.
+func NewFileView(r *sourcetree.SourceTree, dir string, ignorePatterns []string) *FileView {
 	return &FileView{
-		Repo:   r,
+		Tree:   r,
 		Dir:    dir,
 		Ignore: NewIgnoreList(ignorePatterns),
 	}
@@ -45,7 +45,7 @@ func NewFileView(r *repo.Repo, dir string, ignorePatterns []string) *FileView {
 
 // Walk walks the directory tree and calls callback for each file.
 func (v *FileView) Walk(callback func(File) error) error {
-	return v.Repo.WalkFileView(v.Dir, v.Ignore, func(f *repo.File, relPath string) error {
+	return v.Tree.WalkFileView(v.Dir, v.Ignore, func(f *sourcetree.File, relPath string) error {
 		return callback(File{
 			Path:    f.Path,
 			Info:    f.Info(),

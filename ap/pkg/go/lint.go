@@ -33,7 +33,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/testonlyimports"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/checker"
@@ -455,7 +455,7 @@ func (t *AnalyzersTask) GetChildren() []tasks.Task {
 	return nil
 }
 
-func determineTargetGOOS(r *repo.Repo, dir string, skipGlobs []string, hostGOOS string) []string {
+func determineTargetGOOS(r *sourcetree.SourceTree, dir string, skipGlobs []string, hostGOOS string) []string {
 	if hostGOOS == "" {
 		hostGOOS = runtime.GOOS
 	}
@@ -500,7 +500,7 @@ func determineTargetGOOS(r *repo.Repo, dir string, skipGlobs []string, hostGOOS 
 }
 
 // LintTasks returns a task group for running go linting in discovered modules.
-func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
+func LintTasks(r *sourcetree.SourceTree, root string) (tasks.Task, error) {
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
@@ -581,16 +581,16 @@ func LintTasks(r *repo.Repo, root string) (tasks.Task, error) {
 }
 
 // Lint runs go vet and govulncheck in discovered modules.
-func Lint(ctx context.Context, r *repo.Repo, root string) error {
+func Lint(ctx context.Context, r *sourcetree.SourceTree, root string) error {
 	task, err := LintTasks(r, root)
 	if err != nil {
 		return err
 	}
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r}, []tasks.Task{task}, tasks.RunOptions{})
+	return tasks.Run(ctx, tasks.NewScope(root, root, r), []tasks.Task{task}, tasks.RunOptions{})
 }
 
 // hasGoFiles returns true if the directory or any of its subdirectories
 // (excluding those that are themselves Go modules) contain at least one .go file.
-func hasGoFiles(r *repo.Repo, root string) (bool, error) {
+func hasGoFiles(r *sourcetree.SourceTree, root string) (bool, error) {
 	return r.Under(root).HasGoFiles(), nil
 }

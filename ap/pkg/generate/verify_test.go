@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
@@ -165,11 +165,11 @@ generate:
 		t.Fatal(err)
 	}
 
-	r, err := repo.Open(root)
+	r, err := sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := &tasks.APScope{RepoRoot: root, Dir: root, Repo: r}
+	scope := tasks.NewScope(root, root, r)
 
 	files, err := FindGeneratedFiles(root, []*tasks.APScope{scope})
 	if err != nil {
@@ -224,11 +224,11 @@ func TestRunVerify_SuccessAndMtimePreservation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := repo.Open(root)
+	r, err := sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := &tasks.APScope{RepoRoot: root, Dir: root, Repo: r}
+	scope := tasks.NewScope(root, root, r)
 
 	genTask := &tasks.FuncTask{
 		Name: "ap-test",
@@ -271,11 +271,11 @@ func TestRunVerify_UnrestoredMarkerDetected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := repo.Open(root)
+	r, err := sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := &tasks.APScope{RepoRoot: root, Dir: root, Repo: r}
+	scope := tasks.NewScope(root, root, r)
 
 	noopTask := &tasks.FuncTask{
 		Name: "ap-test",
@@ -314,11 +314,11 @@ func TestRunVerify_StaleMarkerDetected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	r, err := repo.Open(root)
+	r, err := sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope := &tasks.APScope{RepoRoot: root, Dir: root, Repo: r}
+	scope := tasks.NewScope(root, root, r)
 
 	noopTask := &tasks.FuncTask{
 		Name: "ap-test",

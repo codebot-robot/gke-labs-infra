@@ -281,9 +281,9 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 		if err := opt.Resolve(nil); err != nil {
 			t.Fatalf("opt.Resolve failed: %v", err)
 		}
-		r, err := opt.GetRepo()
+		r, err := opt.GetSourceTree()
 		if err != nil {
-			t.Fatalf("opt.GetRepo failed: %v", err)
+			t.Fatalf("opt.GetSourceTree failed: %v", err)
 		}
 
 		cfg, err := config.Load(opt.RepoRoot)
@@ -364,9 +364,9 @@ func TestBuildDeployPlan_KindMode(t *testing.T) {
 				if err := opt.Resolve(nil); err != nil {
 					t.Fatalf("opt.Resolve failed: %v", err)
 				}
-				r, err := opt.GetRepo()
+				r, err := opt.GetSourceTree()
 				if err != nil {
-					t.Fatalf("opt.GetRepo failed: %v", err)
+					t.Fatalf("opt.GetSourceTree failed: %v", err)
 				}
 
 				cfg, err := config.Load(opt.RepoRoot)
@@ -535,9 +535,9 @@ func TestBuildDeployPlan_DryRunClusterKind(t *testing.T) {
 	if err := opt.Resolve(nil); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
-		t.Fatalf("opt.GetRepo failed: %v", err)
+		t.Fatalf("opt.GetSourceTree failed: %v", err)
 	}
 
 	cfg, err := config.Load(tempDir)
@@ -628,9 +628,9 @@ func TestBuildDeployPlan_DryRunClusterNonKind(t *testing.T) {
 	if err := opt.Resolve(nil); err != nil {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
-		t.Fatalf("opt.GetRepo failed: %v", err)
+		t.Fatalf("opt.GetSourceTree failed: %v", err)
 	}
 
 	cfg, err := config.Load(tempDir)
@@ -717,9 +717,9 @@ func TestDeploy_FixtureRepo_SelectK8s(t *testing.T) {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
-		t.Fatalf("GetRepo failed: %v", err)
+		t.Fatalf("GetSourceTree failed: %v", err)
 	}
 
 	naming := images.ResolveImageNaming(nil)
@@ -765,9 +765,9 @@ func TestDeploy_FixtureRepo_SelectWholeRoot(t *testing.T) {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
-		t.Fatalf("GetRepo failed: %v", err)
+		t.Fatalf("GetSourceTree failed: %v", err)
 	}
 
 	naming := images.ResolveImageNaming(nil)
@@ -815,9 +815,9 @@ func TestDeploy_FixtureRepo_SelectSubK8s(t *testing.T) {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
-		t.Fatalf("GetRepo failed: %v", err)
+		t.Fatalf("GetSourceTree failed: %v", err)
 	}
 
 	naming := images.ResolveImageNaming(nil)
@@ -855,9 +855,9 @@ func TestDeploy_FixtureRepo_SelectFile(t *testing.T) {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
-		t.Fatalf("GetRepo failed: %v", err)
+		t.Fatalf("GetSourceTree failed: %v", err)
 	}
 
 	naming := images.ResolveImageNaming(nil)
@@ -895,9 +895,9 @@ func TestDeploy_FixtureRepo_SelectNoImages(t *testing.T) {
 		t.Fatalf("opt.Resolve failed: %v", err)
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
-		t.Fatalf("GetRepo failed: %v", err)
+		t.Fatalf("GetSourceTree failed: %v", err)
 	}
 
 	naming := images.ResolveImageNaming(nil)
@@ -1043,7 +1043,7 @@ func TestDeploy_NonexistentPath(t *testing.T) {
 func TestDeploy_BuildkitAndBuildx(t *testing.T) {
 	tempDir := setupFixtureRepo(t)
 
-	r, err := (&RootOptions{RepoRoot: tempDir, APRoot: tempDir}).GetRepo()
+	r, err := (&RootOptions{RepoRoot: tempDir, APRoot: tempDir}).GetSourceTree()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1227,7 +1227,7 @@ func TestDeploy_DryRun_StdoutOutput(t *testing.T) {
 func TestBuildDeployPlans_Direct(t *testing.T) {
 	tempDir := setupFixtureRepo(t)
 
-	r, err := (&RootOptions{RepoRoot: tempDir, APRoot: tempDir}).GetRepo()
+	r, err := (&RootOptions{RepoRoot: tempDir, APRoot: tempDir}).GetSourceTree()
 	if err != nil {
 		t.Fatal(err)
 	}

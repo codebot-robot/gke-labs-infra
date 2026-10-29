@@ -27,11 +27,11 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/cache"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"k8s.io/klog/v2"
 )
 
-var tidyRunner = func(ctx context.Context, r *repo.Repo, dir string) error {
+var tidyRunner = func(ctx context.Context, r *sourcetree.SourceTree, dir string) error {
 	cmd := exec.CommandContext(ctx, "go", "mod", "tidy")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOWORK=off")
@@ -45,7 +45,7 @@ var tidyRunner = func(ctx context.Context, r *repo.Repo, dir string) error {
 	return nil
 }
 
-func Run(ctx context.Context, r *repo.Repo, repoRoot string, files []string) error {
+func Run(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files []string) error {
 	log := klog.FromContext(ctx)
 
 	// Initialize cache
@@ -65,14 +65,6 @@ func Run(ctx context.Context, r *repo.Repo, repoRoot string, files []string) err
 		return err
 	}
 
-	if r == nil {
-		var openErr error
-		r, openErr = repo.Open(repoRoot, repo.WithSkip(cfg.Skip...))
-		if openErr != nil {
-			return openErr
-		}
-	}
-
 	if cfg.IsGofmtEnabled() {
 		if err := runGofmt(ctx, r, repoRoot, files, cfg.Skip, cm); err != nil {
 			return err
@@ -88,7 +80,7 @@ func Run(ctx context.Context, r *repo.Repo, repoRoot string, files []string) err
 	return nil
 }
 
-func runGofmt(ctx context.Context, r *repo.Repo, repoRoot string, files []string, skip []string, cm *cache.Manager) error {
+func runGofmt(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files []string, skip []string, cm *cache.Manager) error {
 	log := klog.FromContext(ctx)
 
 	ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
@@ -171,7 +163,7 @@ func runGofmt(ctx context.Context, r *repo.Repo, repoRoot string, files []string
 	return nil
 }
 
-func runGoModTidy(ctx context.Context, r *repo.Repo, repoRoot string, files []string, skip []string, cm *cache.Manager) error {
+func runGoModTidy(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, files []string, skip []string, cm *cache.Manager) error {
 	log := klog.FromContext(ctx)
 
 	ignoreList := walker.NewIgnoreList(append([]string{"vendor", ".git"}, skip...))
@@ -197,7 +189,7 @@ func runGoModTidy(ctx context.Context, r *repo.Repo, repoRoot string, files []st
 			continue
 		}
 
-		goFiles := r.Under(modDir).Files(func(f *repo.File) bool {
+		goFiles := r.Under(modDir).Files(func(f *sourcetree.File) bool {
 			if !strings.HasSuffix(f.Name, ".go") || f.Module() != modDir {
 				return false
 			}
@@ -241,7 +233,7 @@ func runGoModTidy(ctx context.Context, r *repo.Repo, repoRoot string, files []st
 	return nil
 }
 
-func computeModuleKey(modDir string, r *repo.Repo, goFiles []*repo.File) (string, error) {
+func computeModuleKey(modDir string, r *sourcetree.SourceTree, goFiles []*sourcetree.File) (string, error) {
 	h := sha256.New()
 	if f := r.File(filepath.Join(modDir, "go.mod")); f != nil {
 		hash, err := f.Hash()

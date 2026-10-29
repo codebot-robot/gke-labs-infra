@@ -84,7 +84,7 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 		return err
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
 		return err
 	}
@@ -104,7 +104,7 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 	// Format tasks are also root-sensitive
 	for _, scope := range scopes {
 		apRoot := scope.Dir
-		formatTasks, err := format.FormatTasks(scope.Repo, apRoot)
+		formatTasks, err := format.FormatTasks(scope.SourceTree, apRoot)
 		if err != nil {
 			return err
 		}
@@ -122,5 +122,5 @@ func RunGenerate(ctx context.Context, opt GenerateOptions) error {
 		})
 	}
 
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, tasks.NewScope(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

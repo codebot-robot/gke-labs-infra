@@ -22,7 +22,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
 func TestBuildGenerateCommand(t *testing.T) {
@@ -293,8 +293,8 @@ func TestRunGenerate_SecondRunOpensNoUnchangedFiles(t *testing.T) {
 	}
 
 	// First run: cold cache
-	repo.ResetCache()
-	repo.ResetContentReadCount()
+	sourcetree.ResetCache()
+	sourcetree.ResetContentReadCount()
 
 	rootOpt1 := &RootOptions{
 		RepoRoot: tempDir,
@@ -309,13 +309,13 @@ func TestRunGenerate_SecondRunOpensNoUnchangedFiles(t *testing.T) {
 	}
 
 	// Verify cold run performed some content reads
-	if repo.ContentReadCount() == 0 {
+	if sourcetree.ContentReadCount() == 0 {
 		t.Errorf("expected cold run to open and read files for hashing, got 0")
 	}
 
 	// Second run: warm cache
-	repo.ResetCache()
-	repo.ResetContentReadCount()
+	sourcetree.ResetCache()
+	sourcetree.ResetContentReadCount()
 
 	rootOpt2 := &RootOptions{
 		RepoRoot: tempDir,
@@ -330,7 +330,7 @@ func TestRunGenerate_SecondRunOpensNoUnchangedFiles(t *testing.T) {
 	}
 
 	// Second generate should open NO unchanged files for hashing
-	if count := repo.ContentReadCount(); count != 0 {
+	if count := sourcetree.ContentReadCount(); count != 0 {
 		t.Errorf("expected second ap generate to perform 0 content reads for unchanged files, got %d", count)
 	}
 

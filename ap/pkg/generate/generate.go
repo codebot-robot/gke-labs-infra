@@ -26,7 +26,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/images"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
 )
@@ -66,12 +66,8 @@ func (t *LegacyScriptTask) Run(ctx context.Context, scope *tasks.APScope) error 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to run %s: %w", t.Name, err)
 	}
-	if scope != nil {
-		if r, err := scope.GetRepo(); err == nil && r != nil {
-			if err := r.InvalidateAll(); err != nil {
-				return fmt.Errorf("failed to invalidate repo tree after %s: %w", t.Name, err)
-			}
-		}
+	if err := scope.SourceTree.InvalidateAll(); err != nil {
+		return fmt.Errorf("failed to invalidate repo tree after %s: %w", t.Name, err)
 	}
 	return nil
 }
@@ -99,12 +95,8 @@ func (t *GoGenerateTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go generate failed in %s: %w", t.Dir, err)
 	}
-	if scope != nil {
-		if r, err := scope.GetRepo(); err == nil && r != nil {
-			if err := r.InvalidateAll(); err != nil {
-				return fmt.Errorf("failed to invalidate repo tree after go generate in %s: %w", t.Dir, err)
-			}
-		}
+	if err := scope.SourceTree.InvalidateAll(); err != nil {
+		return fmt.Errorf("failed to invalidate repo tree after go generate in %s: %w", t.Dir, err)
 	}
 	return nil
 }
@@ -117,7 +109,7 @@ func (t *GoGenerateTask) GetChildren() []tasks.Task {
 	return nil
 }
 
-func hasGoGenerate(r *repo.Repo, apRoot string) bool {
+func hasGoGenerate(r *sourcetree.SourceTree, apRoot string) bool {
 	if r == nil {
 		return false
 	}
@@ -134,20 +126,12 @@ func hasGoGenerate(r *repo.Repo, apRoot string) bool {
 // BuiltinGeneratorTask represents a task to run a built-in generator.
 type BuiltinGeneratorTask struct {
 	Name    string
-	RunFunc func(ctx context.Context, r *repo.Repo, repoRoot string) error
+	RunFunc func(ctx context.Context, r *sourcetree.SourceTree, repoRoot string) error
 }
 
 func (t *BuiltinGeneratorTask) Run(ctx context.Context, scope *tasks.APScope) error {
 	klog.Infof("Running built-in generator: %s", t.Name)
-	var r *repo.Repo
-	if scope != nil {
-		var err error
-		r, err = scope.GetRepo()
-		if err != nil {
-			return err
-		}
-	}
-	return t.RunFunc(ctx, r, scope.RepoRoot)
+	return t.RunFunc(ctx, scope.SourceTree, scope.RepoRoot)
 }
 
 func (t *BuiltinGeneratorTask) GetName() string {
@@ -168,10 +152,7 @@ func GenerateTasks(repoRoot string, scopes []*tasks.APScope) (tasks.Task, error)
 			Name: fmt.Sprintf("generate-%s", filepath.Base(apRoot)),
 		}
 
-		r, err := scope.GetRepo()
-		if err != nil {
-			return nil, err
-		}
+		r := scope.SourceTree
 
 		// 1. Run legacy scripts
 		tasksDir := filepath.Join(apRoot, "dev", "tasks")
@@ -222,19 +203,19 @@ func GenerateTasks(repoRoot string, scopes []*tasks.APScope) (tasks.Task, error)
 	})
 	allTasks = append(allTasks, &BuiltinGeneratorTask{
 		Name: "ap-build",
-		RunFunc: func(ctx context.Context, r *repo.Repo, repoRoot string) error {
+		RunFunc: func(ctx context.Context, r *sourcetree.SourceTree, repoRoot string) error {
 			return runApBuildGenerator(ctx, r, repoRoot, scopes)
 		},
 	})
 	allTasks = append(allTasks, &BuiltinGeneratorTask{
 		Name: "ap-e2e",
-		RunFunc: func(ctx context.Context, r *repo.Repo, repoRoot string) error {
+		RunFunc: func(ctx context.Context, r *sourcetree.SourceTree, repoRoot string) error {
 			return runApE2eGenerator(ctx, r, repoRoot, scopes)
 		},
 	})
 	allTasks = append(allTasks, &BuiltinGeneratorTask{
 		Name: "github-actions",
-		RunFunc: func(ctx context.Context, r *repo.Repo, repoRoot string) error {
+		RunFunc: func(ctx context.Context, r *sourcetree.SourceTree, repoRoot string) error {
 			return runGithubActionsGenerator(ctx, r, repoRoot, scopes)
 		},
 	})
@@ -250,22 +231,11 @@ func Run(ctx context.Context, repoRoot string, scopes []*tasks.APScope) error {
 	if err != nil {
 		return err
 	}
-	var r *repo.Repo
+	var r *sourcetree.SourceTree
 	if len(scopes) > 0 {
-		var scopeErr error
-		r, scopeErr = scopes[0].GetRepo()
-		if scopeErr != nil {
-			return scopeErr
-		}
+		r = scopes[0].SourceTree
 	}
-	if r == nil {
-		var openErr error
-		r, openErr = repo.Open(repoRoot)
-		if openErr != nil {
-			return openErr
-		}
-	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: repoRoot, Dir: repoRoot, Repo: r})
+	return t.Run(ctx, tasks.NewScope(repoRoot, repoRoot, r))
 }
 
 func getSuffix(repoRoot, apRoot string) string {
@@ -279,7 +249,7 @@ func getSuffix(repoRoot, apRoot string) string {
 	return "-" + strings.ReplaceAll(rel, string(filepath.Separator), "-")
 }
 
-func runGenerateVerifierGenerator(_ context.Context, r *repo.Repo, repoRoot string) error {
+func runGenerateVerifierGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string) error {
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 
 	targetFile := filepath.Join(presubmitsDir, "ap-verify-generate")
@@ -341,7 +311,7 @@ fi
 	return nil
 }
 
-func runAuditGeneratedGenerator(_ context.Context, r *repo.Repo, repoRoot string) error {
+func runAuditGeneratedGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string) error {
 	rootCfg, err := config.LoadAPConfig(repoRoot)
 	if err != nil {
 		return err
@@ -407,7 +377,7 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApTestGenerator(_ context.Context, r *repo.Repo, repoRoot string) error {
+func runApTestGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string) error {
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 
 	targetFile := filepath.Join(presubmitsDir, "ap-test")
@@ -461,7 +431,7 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApLintGenerator(_ context.Context, r *repo.Repo, repoRoot string) error {
+func runApLintGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string) error {
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 
 	targetFile := filepath.Join(presubmitsDir, "ap-lint")
@@ -515,16 +485,13 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApBuildGenerator(_ context.Context, r *repo.Repo, repoRoot string, scopes []*tasks.APScope) error {
+func runApBuildGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.APScope) error {
 	// Check if any apRoot has any images to build OR any build-* scripts
 	hasBuild := false
 	for _, scope := range scopes {
 		apRoot := scope.Dir
-		scopeRepo, err := scope.GetRepo()
-		if err != nil {
-			return err
-		}
-		ok, err := images.HasImages(scopeRepo, apRoot)
+		scopeTree := scope.SourceTree
+		ok, err := images.HasImages(scopeTree, apRoot)
 		if err == nil && ok {
 			hasBuild = true
 			break
@@ -605,7 +572,7 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runApE2eGenerator(_ context.Context, r *repo.Repo, repoRoot string, scopes []*tasks.APScope) error {
+func runApE2eGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.APScope) error {
 	presubmitsDir := filepath.Join(repoRoot, "dev", "ci", "presubmits")
 
 	// Remove the global ap-e2e script if it exists
@@ -697,7 +664,7 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
-func runGithubActionsGenerator(_ context.Context, r *repo.Repo, repoRoot string, scopes []*tasks.APScope) error {
+func runGithubActionsGenerator(_ context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.APScope) error {
 	workflowsDir := filepath.Join(repoRoot, ".github", "workflows")
 	outputFile := filepath.Join(workflowsDir, "ci-presubmits.yaml")
 
@@ -733,10 +700,7 @@ jobs:
 
 	for _, scope := range scopes {
 		apRoot := scope.Dir
-		scopeRepo, err := scope.GetRepo()
-		if err != nil {
-			return err
-		}
+		scopeTree := scope.SourceTree
 
 		suffix := getSuffix(repoRoot, apRoot)
 		presubmitsDir := filepath.Join(apRoot, "dev", "ci", "presubmits")
@@ -753,7 +717,7 @@ jobs:
 			return fmt.Errorf("failed to read presubmits dir %s: %w", presubmitsDir, err)
 		}
 
-		goModExists := scopeRepo.FileExists(filepath.Join(apRoot, "go.mod"))
+		goModExists := scopeTree.FileExists(filepath.Join(apRoot, "go.mod"))
 
 		relPresubmitsDir, err := filepath.Rel(repoRoot, presubmitsDir)
 		if err != nil {

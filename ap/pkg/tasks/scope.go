@@ -16,12 +16,11 @@ package tasks
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"sync"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 )
 
@@ -30,11 +29,14 @@ var (
 	kubectlResolveMu sync.Mutex
 )
 
-// APScope represents the context for an ap root directory
+// APScope represents the context for an ap root directory.
+//
+// A scope always has a source tree by construction; access is through the
+// SourceTree field directly, which is guaranteed never to be nil.
 type APScope struct {
-	RepoRoot string
-	Dir      string
-	Repo     *repo.Repo
+	RepoRoot   string
+	Dir        string
+	SourceTree *sourcetree.SourceTree
 
 	Stdout io.Writer
 	Stderr io.Writer
@@ -50,6 +52,19 @@ type APScope struct {
 	LintTasks     []Task
 	GenerateTasks []Task
 	FormatTasks   []Task
+}
+
+// NewScope constructs an APScope for the given repoRoot, dir, and source tree.
+// Every scope must have a non-nil tree by construction; NewScope panics if tree is nil.
+func NewScope(repoRoot, dir string, tree *sourcetree.SourceTree) *APScope {
+	if tree == nil {
+		panic("tasks.NewScope: tree cannot be nil")
+	}
+	return &APScope{
+		RepoRoot:   repoRoot,
+		Dir:        dir,
+		SourceTree: tree,
+	}
 }
 
 // GetStdout returns the configured stdout writer, or os.Stdout if unset.
@@ -94,15 +109,4 @@ func (s *APScope) EnsureKubectl(ctx context.Context) (string, error) {
 	}
 	s.KubectlBin = bin
 	return bin, nil
-}
-
-// GetRepo returns the repository tree associated with this scope.
-func (s *APScope) GetRepo() (*repo.Repo, error) {
-	if s.Repo != nil {
-		return s.Repo, nil
-	}
-	if s.Dir != "" {
-		return nil, fmt.Errorf("repo is not set on scope %s", s.Dir)
-	}
-	return nil, fmt.Errorf("repo is not set on scope")
 }

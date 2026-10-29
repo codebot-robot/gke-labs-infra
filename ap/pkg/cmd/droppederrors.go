@@ -208,5 +208,16 @@ func RunDroppedErrors(ctx context.Context, cmd *cobra.Command, opt DroppedErrors
 		BaselinePath:  opt.Baseline,
 	}
 
-	return task.Run(ctx, &tasks.APScope{RepoRoot: repoRoot, Dir: cwd})
+	if opt.RootOptions == nil {
+		opt.RootOptions = &RootOptions{}
+	}
+	if opt.RepoRoot == "" {
+		opt.RepoRoot = repoRoot
+	}
+	r, err := opt.GetSourceTree()
+	if err != nil {
+		return err
+	}
+
+	return task.Run(ctx, tasks.NewScope(repoRoot, cwd, r))
 }

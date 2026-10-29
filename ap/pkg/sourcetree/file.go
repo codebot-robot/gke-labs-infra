@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package repo
+package sourcetree
 
 import (
 	"bytes"
@@ -84,7 +84,7 @@ var knownArch = map[string]bool{
 
 // File represents a file in the repository tree.
 type File struct {
-	repo    *Repo
+	tree    *SourceTree
 	Path    string // Absolute path on disk
 	RelPath string // Path relative to view root (forward slash separated)
 	Name    string // File base name
@@ -321,11 +321,11 @@ func (f *File) computeHashLocked() (string, error) {
 	}
 
 	// Consult persistent hashes.bin cache if available
-	if f.repo != nil && f.repo.hashIndex != nil {
-		relPath, err := filepath.Rel(f.repo.repoRoot, f.Path)
+	if f.tree != nil && f.tree.hashIndex != nil {
+		relPath, err := filepath.Rel(f.tree.repoRoot, f.Path)
 		if err == nil && !strings.HasPrefix(relPath, "..") {
 			key := sha256.Sum256([]byte(filepath.ToSlash(relPath)))
-			if payload, ok := f.repo.hashIndex.Lookup(key); ok && len(payload) == 56 {
+			if payload, ok := f.tree.hashIndex.Lookup(key); ok && len(payload) == 56 {
 				recSize := int64(binary.LittleEndian.Uint64(payload[0:8]))
 				recMtime := int64(binary.LittleEndian.Uint64(payload[8:16]))
 				recInode := binary.LittleEndian.Uint64(payload[16:24])
@@ -356,8 +356,8 @@ func (f *File) computeHashLocked() (string, error) {
 	f.metaInode = ino
 
 	// Store pending in hashes.bin
-	if f.repo != nil && f.repo.hashIndex != nil {
-		relPath, err := filepath.Rel(f.repo.repoRoot, f.Path)
+	if f.tree != nil && f.tree.hashIndex != nil {
+		relPath, err := filepath.Rel(f.tree.repoRoot, f.Path)
 		if err == nil && !strings.HasPrefix(relPath, "..") {
 			key := sha256.Sum256([]byte(filepath.ToSlash(relPath)))
 			var rawHash [32]byte
@@ -367,7 +367,7 @@ func (f *File) computeHashLocked() (string, error) {
 				binary.LittleEndian.PutUint64(payload[8:16], uint64(mtime))
 				binary.LittleEndian.PutUint64(payload[16:24], ino)
 				copy(payload[24:56], rawHash[:])
-				if setErr := f.repo.hashIndex.Set(key, payload[:]); setErr != nil {
+				if setErr := f.tree.hashIndex.Set(key, payload[:]); setErr != nil {
 					klog.V(2).Infof("failed to set hash cache for %s: %v", relPath, setErr)
 				}
 			}

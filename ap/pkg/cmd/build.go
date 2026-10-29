@@ -67,7 +67,7 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		return err
 	}
 
-	r, err := opt.GetRepo()
+	r, err := opt.GetSourceTree()
 	if err != nil {
 		return err
 	}
@@ -89,7 +89,7 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 			Name: fmt.Sprintf("build-%s", filepath.Base(scope.Dir)),
 		}
 
-		imageTasks, err := images.BuildTasks(scope.Repo, scope.Dir, opt.Push, buildkitHost, naming)
+		imageTasks, err := images.BuildTasks(scope.SourceTree, scope.Dir, opt.Push, buildkitHost, naming)
 		if err != nil {
 			return err
 		}
@@ -104,5 +104,5 @@ func RunBuild(ctx context.Context, opt BuildOptions) error {
 		}
 	}
 
-	return tasks.Run(ctx, &tasks.APScope{RepoRoot: opt.RepoRoot, Dir: opt.RepoRoot, Repo: r}, allTasks, tasks.RunOptions{DryRun: opt.DryRun})
+	return tasks.Run(ctx, tasks.NewScope(opt.RepoRoot, opt.RepoRoot, r), allTasks, tasks.RunOptions{DryRun: opt.DryRun})
 }

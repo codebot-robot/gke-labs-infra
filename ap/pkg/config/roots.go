@@ -15,10 +15,10 @@
 package config
 
 import (
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
 // FindAllAPRoots finds all directories containing a .ap directory within the given repoRoot.
-func FindAllAPRoots(r *repo.Repo, repoRoot string) ([]string, error) {
+func FindAllAPRoots(r *sourcetree.SourceTree, repoRoot string) ([]string, error) {
 	return r.Under(repoRoot).APRoots(), nil
 }

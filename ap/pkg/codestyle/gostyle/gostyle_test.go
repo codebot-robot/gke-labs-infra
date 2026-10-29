@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
 func TestRun_NoConfig(t *testing.T) {
@@ -35,7 +35,7 @@ func TestRun_NoConfig(t *testing.T) {
 	ctx := t.Context()
 
 	// Run should succeed (do nothing) when no config exists
-	r, err := repo.Open(tmpDir)
+	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ gofmt:
 	}
 
 	ctx := t.Context()
-	r, err := repo.Open(tmpDir)
+	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestRun_GoModTidy_UntidyModuleMadeTidy(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	r, err := repo.Open(tmpDir)
+	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestRun_GoModTidy_MultiModuleWithGoWork(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	r, err := repo.Open(tmpDir)
+	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestRun_GoModTidy_ChangeCache(t *testing.T) {
 	origTidyRunner := tidyRunner
 	defer func() { tidyRunner = origTidyRunner }()
 
-	tidyRunner = func(ctx context.Context, r *repo.Repo, dir string) error {
+	tidyRunner = func(ctx context.Context, r *sourcetree.SourceTree, dir string) error {
 		runCount++
 		return origTidyRunner(ctx, r, dir)
 	}
@@ -214,7 +214,7 @@ func TestRun_GoModTidy_ChangeCache(t *testing.T) {
 	t.Setenv("AP_CACHE_DIR", cacheDir)
 
 	ctx := t.Context()
-	r, err := repo.Open(tmpDir)
+	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ func TestRun_GoModTidy_NetworkFailure(t *testing.T) {
 	t.Setenv("GOPROXY", "off")
 
 	ctx := t.Context()
-	r, err := repo.Open(tmpDir)
+	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestRun_GoModTidy_DisabledInConfig(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	r, err := repo.Open(tmpDir)
+	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,7 +349,7 @@ func TestRun_GoModTidy_SkipPattern(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	r, err := repo.Open(tmpDir)
+	r, err := sourcetree.Open(tmpDir)
 	if err != nil {
 		t.Fatal(err)
 	}

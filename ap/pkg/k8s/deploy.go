@@ -27,7 +27,7 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"gopkg.in/yaml.v3"
 	"k8s.io/klog/v2"
@@ -620,7 +620,7 @@ func DeployTasksForManifests(manifests []string, opts ...DeployTaskOptions) task
 }
 
 // DeployTasks returns a task group for deploying all k8s manifests found in k8s directories.
-func DeployTasks(r *repo.Repo, root string) (tasks.Task, error) {
+func DeployTasks(r *sourcetree.SourceTree, root string) (tasks.Task, error) {
 	manifests, err := findManifests(r, root)
 	if err != nil {
 		return nil, err
@@ -629,14 +629,14 @@ func DeployTasks(r *repo.Repo, root string) (tasks.Task, error) {
 }
 
 // Deploy deploys k8s manifests found in k8s directories.
-func Deploy(ctx context.Context, r *repo.Repo, root string) error {
+func Deploy(ctx context.Context, r *sourcetree.SourceTree, root string) error {
 	t, err := DeployTasks(r, root)
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: root, Dir: root, Repo: r})
+	return t.Run(ctx, tasks.NewScope(root, root, r))
 }
 
-func findManifests(r *repo.Repo, root string) ([]string, error) {
+func findManifests(r *sourcetree.SourceTree, root string) ([]string, error) {
 	return r.Under(root).FindManifests(), nil
 }

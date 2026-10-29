@@ -29,6 +29,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/kindload"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
@@ -56,6 +57,7 @@ type Harness struct {
 	kindBin     string
 	repoRoot    string
 	kubectlBin  string
+	sourceTree  *sourcetree.SourceTree
 }
 
 // NewHarness creates a new e2e test harness.
@@ -260,7 +262,15 @@ func (h *Harness) KindLoad(tag string) {
 		ClusterName: h.clusterName,
 		Images:      []*imageref.ImageRef{ref},
 	}
-	scope := &tasks.APScope{RepoRoot: h.RepoRoot()}
+	if h.sourceTree == nil {
+		tree, err := sourcetree.Open(h.RepoRoot())
+		if err != nil {
+			h.t.Fatalf("failed to open sourcetree: %v", err)
+		}
+		h.sourceTree = tree
+	}
+	scope := tasks.NewScope(h.RepoRoot(), h.RepoRoot(), h.sourceTree)
+	scope.KubectlBin = h.kubectlBin
 	if err := tasks.RunTask(h.t.Context(), scope, task); err != nil {
 		h.t.Fatalf("KindLoad failed: %v", err)
 	}

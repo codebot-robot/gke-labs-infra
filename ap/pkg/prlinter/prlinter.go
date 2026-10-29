@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"k8s.io/klog/v2"
 )
@@ -74,7 +75,13 @@ func Lint(ctx context.Context, repoRoot string) error {
 	if err != nil {
 		return err
 	}
-	return t.Run(ctx, &tasks.APScope{RepoRoot: repoRoot, Dir: repoRoot})
+	// prlinter is an independent entry point without an existing command scope;
+	// open a sourcetree once for the repo root.
+	tree, err := sourcetree.Open(repoRoot)
+	if err != nil {
+		return err
+	}
+	return t.Run(ctx, tasks.NewScope(repoRoot, repoRoot, tree))
 }
 
 func detectBaseBranch(ctx context.Context, repoRoot string) (string, error) {

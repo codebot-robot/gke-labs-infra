@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
 // IsGenerated reports whether the AST file represents generated code per https://go.dev/s/generatedcode.
@@ -31,7 +31,7 @@ func IsGenerated(file *ast.File) bool {
 	}
 	for _, group := range file.Comments {
 		for _, comment := range group.List {
-			if isGen, _ := repo.IsGeneratedLine(comment.Text); isGen {
+			if isGen, _ := sourcetree.IsGeneratedLine(comment.Text); isGen {
 				return true
 			}
 		}

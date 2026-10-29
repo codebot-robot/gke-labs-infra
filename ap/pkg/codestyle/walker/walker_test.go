@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
 func TestExpandPaths(t *testing.T) {
@@ -103,9 +103,9 @@ func TestExpandPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r, err := repo.Open(repoRoot)
+			r, err := sourcetree.Open(repoRoot)
 			if err != nil {
-				t.Fatalf("repo.Open failed: %v", err)
+				t.Fatalf("sourcetree.Open failed: %v", err)
 			}
 			got, err := ExpandPaths(r, repoRoot, tt.paths, ignore)
 			if err != nil {

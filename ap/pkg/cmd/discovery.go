@@ -22,51 +22,47 @@ import (
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/format"
 	golang "github.com/gke-labs/gke-labs-infra/ap/pkg/go"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
 // DiscoverScopes discovers all tasks for all given AP roots.
-func DiscoverScopes(r *repo.Repo, repoRoot string, apRoots []string) ([]*tasks.APScope, error) {
+func DiscoverScopes(r *sourcetree.SourceTree, repoRoot string, apRoots []string) ([]*tasks.APScope, error) {
 	var scopes []*tasks.APScope
 
 	for _, apRoot := range apRoots {
-		scope := &tasks.APScope{
-			RepoRoot: repoRoot,
-			Dir:      apRoot,
-			Repo:     r.Under(apRoot),
-		}
+		scope := tasks.NewScope(repoRoot, apRoot, r.Under(apRoot))
 
 		// Discover e2e scripts
-		e2eScripts, err := tasks.FindTaskScripts(scope.Repo, apRoot, tasks.WithPrefix("test-e2e"))
+		e2eScripts, err := tasks.FindTaskScripts(scope.SourceTree, apRoot, tasks.WithPrefix("test-e2e"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover e2e scripts in %s: %w", apRoot, err)
 		}
 		scope.E2ETasks = append(scope.E2ETasks, e2eScripts...)
 
 		// Discover test scripts
-		testScripts, err := tasks.FindTaskScripts(scope.Repo, apRoot, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
+		testScripts, err := tasks.FindTaskScripts(scope.SourceTree, apRoot, tasks.WithPrefix("test-"), tasks.WithExcludePrefix("test-e2e"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover test scripts in %s: %w", apRoot, err)
 		}
 		scope.TestTasks = append(scope.TestTasks, testScripts...)
 
 		// Discover build scripts
-		buildScripts, err := tasks.FindTaskScripts(scope.Repo, apRoot, tasks.WithPrefix("build-"))
+		buildScripts, err := tasks.FindTaskScripts(scope.SourceTree, apRoot, tasks.WithPrefix("build-"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover build scripts in %s: %w", apRoot, err)
 		}
 		scope.BuildTasks = append(scope.BuildTasks, buildScripts...)
 
 		// Discover lint scripts
-		lintScripts, err := tasks.FindTaskScripts(scope.Repo, apRoot, tasks.WithPrefix("lint-"))
+		lintScripts, err := tasks.FindTaskScripts(scope.SourceTree, apRoot, tasks.WithPrefix("lint-"))
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover lint scripts in %s: %w", apRoot, err)
 		}
 		scope.LintTasks = append(scope.LintTasks, lintScripts...)
 
 		// Discover format tasks
-		formatTasks, err := format.FormatTasks(scope.Repo, apRoot)
+		formatTasks, err := format.FormatTasks(scope.SourceTree, apRoot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover format tasks in %s: %w", apRoot, err)
 		}
@@ -116,7 +112,7 @@ func DiscoverScopes(r *repo.Repo, repoRoot string, apRoots []string) ([]*tasks.A
 		}
 
 		// Go Test tasks
-		goTestTasks, err := golang.TestTasks(scope.Repo, apRoot)
+		goTestTasks, err := golang.TestTasks(scope.SourceTree, apRoot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover test tasks in %s: %w", apRoot, err)
 		}
@@ -125,7 +121,7 @@ func DiscoverScopes(r *repo.Repo, repoRoot string, apRoots []string) ([]*tasks.A
 		}
 
 		// Go lint tasks
-		goLintTasks, err := golang.LintTasks(scope.Repo, apRoot)
+		goLintTasks, err := golang.LintTasks(scope.SourceTree, apRoot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to discover lint tasks in %s: %w", apRoot, err)
 		}

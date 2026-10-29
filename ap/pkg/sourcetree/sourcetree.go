@@ -12,7 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package repo
+// Package sourcetree provides an in-memory tree representation of the repository checkout
+// (files, directories, modules, AP roots, and memoized hashes).
+//
+// Two fundamental rules govern sourcetree usage:
+//  1. One tree per command, held by the scope (APScope.SourceTree).
+//  2. Writes and external tool runs invalidate through it (#563).
+package sourcetree
 
 import (
 	"bytes"
@@ -41,10 +47,10 @@ var HashesConfig = recordfile.Config{
 var (
 	walkCounter int64
 	openMu      sync.Mutex
-	openCache   = make(map[string]*Repo)
+	openCache   = make(map[string]*SourceTree)
 )
 
-// WalkCount returns the total number of filesystem tree walks performed by the repo package.
+// WalkCount returns the total number of filesystem tree walks performed by the sourcetree package.
 // Intended for tests to verify the single-walk property.
 func WalkCount() int64 {
 	return atomic.LoadInt64(&walkCounter)
@@ -55,11 +61,11 @@ func ResetWalkCount() {
 	atomic.StoreInt64(&walkCounter, 0)
 }
 
-// ResetCache clears the in-memory cached repo trees and resets the walk counter. Intended for tests.
+// ResetCache clears the in-memory cached sourcetree trees and resets the walk counter. Intended for tests.
 func ResetCache() {
 	openMu.Lock()
 	defer openMu.Unlock()
-	openCache = make(map[string]*Repo)
+	openCache = make(map[string]*SourceTree)
 	ResetWalkCount()
 }
 
@@ -69,7 +75,7 @@ type Filter func(*File) bool
 // DirFilter is a predicate function for filtering directories.
 type DirFilter func(string) bool
 
-// Option configures repo loading.
+// Option configures sourcetree loading.
 type Option func(*options)
 
 type options struct {
@@ -99,8 +105,8 @@ func WithCacheDir(dir string) Option {
 	}
 }
 
-// Repo represents an in-memory snapshot of a repository directory tree.
-type Repo struct {
+// SourceTree represents an in-memory snapshot of a repository directory tree.
+type SourceTree struct {
 	mu sync.RWMutex
 
 	root     string // root directory of this view
@@ -127,7 +133,7 @@ type Repo struct {
 
 // Open opens an in-memory snapshot of the repository. If root has already been opened,
 // it returns the cached in-memory view without walking the filesystem again.
-func Open(root string, opts ...Option) (*Repo, error) {
+func Open(root string, opts ...Option) (*SourceTree, error) {
 	absRoot, err := filepath.Abs(filepath.Clean(root))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path for %s: %w", root, err)
@@ -140,7 +146,7 @@ func Open(root string, opts ...Option) (*Repo, error) {
 		return r, nil
 	}
 
-	r, err := loadRepo(absRoot, opts...)
+	r, err := loadSourceTree(absRoot, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -150,15 +156,15 @@ func Open(root string, opts ...Option) (*Repo, error) {
 }
 
 // Load loads a fresh in-memory view of the repository by walking root, bypassing the cache.
-func Load(root string, opts ...Option) (*Repo, error) {
+func Load(root string, opts ...Option) (*SourceTree, error) {
 	absRoot, err := filepath.Abs(filepath.Clean(root))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get absolute path for %s: %w", root, err)
 	}
-	return loadRepo(absRoot, opts...)
+	return loadSourceTree(absRoot, opts...)
 }
 
-func loadRepo(root string, opts ...Option) (*Repo, error) {
+func loadSourceTree(root string, opts ...Option) (*SourceTree, error) {
 	var opt options
 	for _, o := range opts {
 		o(&opt)
@@ -238,7 +244,7 @@ func loadRepo(root string, opts ...Option) (*Repo, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Directory does not exist on disk, return empty repo
-			return newRepo(root, root, nil, nil, nil, nil, ignoreList, nil, ""), nil
+			return newSourceTree(root, root, nil, nil, nil, nil, ignoreList, nil, ""), nil
 		}
 		return nil, fmt.Errorf("failed to walk repository %s: %w", root, err)
 	}
@@ -292,10 +298,10 @@ func loadRepo(root string, opts ...Option) (*Repo, error) {
 		f.module = closestAncestor(f.Path, modules)
 	}
 
-	return newRepo(root, root, files, dirs, apRoots, modules, ignoreList, hashIndex, hashPath), nil
+	return newSourceTree(root, root, files, dirs, apRoots, modules, ignoreList, hashIndex, hashPath), nil
 }
 
-func newRepo(root, repoRoot string, files []*File, dirs, apRoots, modules []string, ignoreList *IgnoreList, hashIndex *recordfile.File, hashPath string) *Repo {
+func newSourceTree(root, repoRoot string, files []*File, dirs, apRoots, modules []string, ignoreList *IgnoreList, hashIndex *recordfile.File, hashPath string) *SourceTree {
 	filesByPath := make(map[string]*File, len(files))
 	filesByDir := make(map[string][]*File)
 	hasTestsDirs := make(map[string]bool)
@@ -334,7 +340,7 @@ func newRepo(root, repoRoot string, files []*File, dirs, apRoots, modules []stri
 	})
 	sort.Strings(dirs)
 
-	r := &Repo{
+	r := &SourceTree{
 		root:         root,
 		repoRoot:     repoRoot,
 		files:        files,
@@ -350,7 +356,7 @@ func newRepo(root, repoRoot string, files []*File, dirs, apRoots, modules []stri
 		hashPath:     hashPath,
 	}
 	for _, f := range files {
-		f.repo = r
+		f.tree = r
 	}
 	return r
 }
@@ -385,17 +391,17 @@ func uniqueSorted(items []string) []string {
 }
 
 // Root returns the root path for this view.
-func (r *Repo) Root() string {
+func (r *SourceTree) Root() string {
 	return r.root
 }
 
 // RepoRoot returns the repository root path.
-func (r *Repo) RepoRoot() string {
+func (r *SourceTree) RepoRoot() string {
 	return r.repoRoot
 }
 
 // Files returns all files matching the given filters.
-func (r *Repo) Files(filters ...Filter) []*File {
+func (r *SourceTree) Files(filters ...Filter) []*File {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if len(filters) == 0 {
@@ -420,7 +426,7 @@ func (r *Repo) Files(filters ...Filter) []*File {
 }
 
 // FilePaths returns the paths of all files matching the given filters.
-func (r *Repo) FilePaths(filters ...Filter) []string {
+func (r *SourceTree) FilePaths(filters ...Filter) []string {
 	files := r.Files(filters...)
 	paths := make([]string, len(files))
 	for i, f := range files {
@@ -430,7 +436,7 @@ func (r *Repo) FilePaths(filters ...Filter) []string {
 }
 
 // File looks up a file by absolute path or path relative to the repo root / view root.
-func (r *Repo) File(path string) *File {
+func (r *SourceTree) File(path string) *File {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	clean := filepath.Clean(path)
@@ -447,13 +453,13 @@ func (r *Repo) File(path string) *File {
 }
 
 // FileExists reports whether a file at the given path exists in this repo tree.
-func (r *Repo) FileExists(path string) bool {
+func (r *SourceTree) FileExists(path string) bool {
 	return r.File(path) != nil
 }
 
 // TrackFile ensures that a file at path is known to the Repo tree, adding it if not already present.
 // If the file is already tracked, TrackFile returns the existing *File.
-func (r *Repo) TrackFile(path string) *File {
+func (r *SourceTree) TrackFile(path string) *File {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
 		clean = filepath.Join(r.root, clean)
@@ -463,7 +469,7 @@ func (r *Repo) TrackFile(path string) *File {
 	return r.trackFileLocked(clean)
 }
 
-func (r *Repo) trackFileLocked(clean string) *File {
+func (r *SourceTree) trackFileLocked(clean string) *File {
 	if f, ok := r.filesByPath[clean]; ok {
 		return f
 	}
@@ -484,7 +490,7 @@ func (r *Repo) trackFileLocked(clean string) *File {
 	r.ensureDirs(parentDir)
 
 	f := &File{
-		repo:      r,
+		tree:      r,
 		Path:      clean,
 		RelPath:   relPath,
 		Name:      filepath.Base(clean),
@@ -533,7 +539,7 @@ func (r *Repo) trackFileLocked(clean string) *File {
 	return f
 }
 
-func (r *Repo) ensureDirs(dir string) {
+func (r *SourceTree) ensureDirs(dir string) {
 	if r.dirsSet == nil {
 		r.dirsSet = make(map[string]bool)
 	}
@@ -551,7 +557,7 @@ func (r *Repo) ensureDirs(dir string) {
 	sort.Strings(r.dirs)
 }
 
-func (r *Repo) untrackFileLocked(clean string) {
+func (r *SourceTree) untrackFileLocked(clean string) {
 	f, ok := r.filesByPath[clean]
 	if !ok {
 		return
@@ -582,7 +588,7 @@ func (r *Repo) untrackFileLocked(clean string) {
 	}
 }
 
-func (r *Repo) recomputeHasTestsDirs() {
+func (r *SourceTree) recomputeHasTestsDirs() {
 	r.hasTestsDirs = make(map[string]bool)
 	for _, f := range r.files {
 		if f.IsTest() {
@@ -602,7 +608,7 @@ func (r *Repo) recomputeHasTestsDirs() {
 // the tree's own write methods, so that subsequent tree queries (e.g. Files,
 // File, FileExists) no longer report it as present. To delete a file from both
 // disk and the tree, callers should prefer Remove.
-func (r *Repo) UntrackFile(path string) {
+func (r *SourceTree) UntrackFile(path string) {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
 		clean = filepath.Join(r.root, clean)
@@ -613,7 +619,7 @@ func (r *Repo) UntrackFile(path string) {
 }
 
 // Remove is equivalent to calling os.Remove, but will update any Repo state appropriately.
-func (r *Repo) Remove(path string) error {
+func (r *SourceTree) Remove(path string) error {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
 		clean = filepath.Join(r.root, clean)
@@ -628,7 +634,7 @@ func (r *Repo) Remove(path string) error {
 // WriteFile writes content to path atomically. If the file already exists with
 // identical content, it is left untouched so mtime is preserved. The repo tree
 // is updated to reflect the new file state.
-func (r *Repo) WriteFile(path string, content []byte, perm os.FileMode) error {
+func (r *SourceTree) WriteFile(path string, content []byte, perm os.FileMode) error {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
 		clean = filepath.Join(r.root, clean)
@@ -651,7 +657,7 @@ func (r *Repo) WriteFile(path string, content []byte, perm os.FileMode) error {
 }
 
 // WriteFileAtomic writes data to path atomically and ensures the file is tracked in the repo tree.
-func (r *Repo) WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+func (r *SourceTree) WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	clean := filepath.Clean(path)
 	if !filepath.IsAbs(clean) {
 		clean = filepath.Join(r.root, clean)
@@ -670,7 +676,7 @@ func (r *Repo) WriteFileAtomic(path string, data []byte, perm os.FileMode) error
 }
 
 // CopyFile copies a file from src to dst atomically and ensures dst is tracked in the repo tree.
-func (r *Repo) CopyFile(src, dst string, perm os.FileMode) error {
+func (r *SourceTree) CopyFile(src, dst string, perm os.FileMode) error {
 	cleanDst := filepath.Clean(dst)
 	if !filepath.IsAbs(cleanDst) {
 		cleanDst = filepath.Join(r.root, cleanDst)
@@ -690,13 +696,13 @@ func (r *Repo) CopyFile(src, dst string, perm os.FileMode) error {
 
 // InvalidateAll drops memoized state for every file in the repository tree,
 // re-stats lazily, and discovers newly created and deleted files across the entire repo.
-func (r *Repo) InvalidateAll() error {
+func (r *SourceTree) InvalidateAll() error {
 	return r.InvalidateTree(r.root)
 }
 
 // InvalidateTree drops memoized state for every file under dir, re-stats lazily,
 // and picks up newly created and deleted files.
-func (r *Repo) InvalidateTree(dir string) error {
+func (r *SourceTree) InvalidateTree(dir string) error {
 	cleanDir := filepath.Clean(dir)
 	if !filepath.IsAbs(cleanDir) {
 		cleanDir = filepath.Join(r.root, cleanDir)
@@ -773,7 +779,7 @@ func (r *Repo) InvalidateTree(dir string) error {
 			r.ensureDirs(parentDir)
 
 			f := &File{
-				repo:    r,
+				tree:    r,
 				Path:    path,
 				RelPath: relPath,
 				Name:    d.Name(),
@@ -829,7 +835,7 @@ func (r *Repo) InvalidateTree(dir string) error {
 // Track ensures that each file in paths is updated in the Repo tree: adding it
 // if newly created, invalidating its cached info if already tracked, or untracking
 // it if deleted on disk.
-func (r *Repo) Track(paths ...string) {
+func (r *SourceTree) Track(paths ...string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, path := range paths {
@@ -850,7 +856,7 @@ func (r *Repo) Track(paths ...string) {
 }
 
 // FilesInDir returns all files located directly within dir (non-recursive).
-func (r *Repo) FilesInDir(dir string) []*File {
+func (r *SourceTree) FilesInDir(dir string) []*File {
 	clean := filepath.Clean(dir)
 	if !filepath.IsAbs(clean) {
 		clean = filepath.Join(r.root, clean)
@@ -862,7 +868,7 @@ func (r *Repo) FilesInDir(dir string) []*File {
 }
 
 // Dirs returns all directory paths matching the given filters.
-func (r *Repo) Dirs(filters ...DirFilter) []string {
+func (r *SourceTree) Dirs(filters ...DirFilter) []string {
 	if len(filters) == 0 {
 		res := make([]string, len(r.dirs))
 		copy(res, r.dirs)
@@ -885,7 +891,7 @@ func (r *Repo) Dirs(filters ...DirFilter) []string {
 }
 
 // DirExists reports whether the given directory exists in this repo tree.
-func (r *Repo) DirExists(path string) bool {
+func (r *SourceTree) DirExists(path string) bool {
 	clean := filepath.Clean(path)
 	if r.dirsSet[clean] {
 		return true
@@ -898,33 +904,33 @@ func (r *Repo) DirExists(path string) bool {
 }
 
 // Modules returns all Go module root directory paths in this view (sorted).
-func (r *Repo) Modules() []string {
+func (r *SourceTree) Modules() []string {
 	res := make([]string, len(r.modules))
 	copy(res, r.modules)
 	return res
 }
 
 // APRoots returns all AP root directory paths in this view (sorted).
-func (r *Repo) APRoots() []string {
+func (r *SourceTree) APRoots() []string {
 	res := make([]string, len(r.apRoots))
 	copy(res, r.apRoots)
 	return res
 }
 
 // APRootFor returns the closest enclosing AP root for the given path.
-func (r *Repo) APRootFor(path string) string {
+func (r *SourceTree) APRootFor(path string) string {
 	clean := filepath.Clean(path)
 	return closestAncestor(clean, r.apRoots)
 }
 
 // ModuleFor returns the closest enclosing Go module root for the given path.
-func (r *Repo) ModuleFor(path string) string {
+func (r *SourceTree) ModuleFor(path string) string {
 	clean := filepath.Clean(path)
 	return closestAncestor(clean, r.modules)
 }
 
 // Under returns a subview of the repository rooted at dir.
-func (r *Repo) Under(dir string) *Repo {
+func (r *SourceTree) Under(dir string) *SourceTree {
 	cleanDir := filepath.Clean(dir)
 	if !filepath.IsAbs(cleanDir) {
 		cleanDir = filepath.Join(r.root, cleanDir)
@@ -969,11 +975,11 @@ func (r *Repo) Under(dir string) *Repo {
 		}
 	}
 
-	return newRepo(cleanDir, r.repoRoot, subFiles, subDirs, subAPRoots, subModules, r.ignoreList, r.hashIndex, r.hashPath)
+	return newSourceTree(cleanDir, r.repoRoot, subFiles, subDirs, subAPRoots, subModules, r.ignoreList, r.hashIndex, r.hashPath)
 }
 
 // Save persists pending record entries (such as hashes.bin) atomically.
-func (r *Repo) Save() error {
+func (r *SourceTree) Save() error {
 	if r == nil || r.hashIndex == nil || r.hashPath == "" {
 		return nil
 	}
@@ -981,7 +987,7 @@ func (r *Repo) Save() error {
 }
 
 // Glob returns absolute file paths matching the given glob pattern.
-func (r *Repo) Glob(pattern string) ([]string, error) {
+func (r *SourceTree) Glob(pattern string) ([]string, error) {
 	var matches []string
 	for _, f := range r.files {
 		relToView, err := filepath.Rel(r.root, f.Path)
@@ -1009,7 +1015,7 @@ func (r *Repo) Glob(pattern string) ([]string, error) {
 }
 
 // HasGoTests reports whether the view (or any subdirectory under dir if specified) contains a _test.go file.
-func (r *Repo) HasGoTests(dir ...string) bool {
+func (r *SourceTree) HasGoTests(dir ...string) bool {
 	target := r.root
 	if len(dir) > 0 && dir[0] != "" {
 		target = filepath.Clean(dir[0])
@@ -1022,7 +1028,7 @@ func (r *Repo) HasGoTests(dir ...string) bool {
 
 // HasGoFiles reports whether the view (or any subdirectory under dir if specified) contains
 // a .go file belonging to this module (excluding subdirectories that are separate Go modules).
-func (r *Repo) HasGoFiles(dir ...string) bool {
+func (r *SourceTree) HasGoFiles(dir ...string) bool {
 	view := r
 	if len(dir) > 0 && dir[0] != "" {
 		view = r.Under(dir[0])
@@ -1040,7 +1046,7 @@ func (r *Repo) HasGoFiles(dir ...string) bool {
 
 // FindDockerfiles returns all Dockerfile paths under this view that belong to this AP root
 // (excluding those belonging to child AP roots).
-func (r *Repo) FindDockerfiles() []string {
+func (r *SourceTree) FindDockerfiles() []string {
 	var dockerfiles []string
 	for _, f := range r.files {
 		if f.Name == "Dockerfile" && f.APRoot() == r.root {
@@ -1053,7 +1059,7 @@ func (r *Repo) FindDockerfiles() []string {
 
 // FindManifests returns all Kubernetes manifest paths under k8s directories that belong to this AP root
 // (excluding those belonging to child AP roots).
-func (r *Repo) FindManifests() []string {
+func (r *SourceTree) FindManifests() []string {
 	var manifests []string
 	for _, f := range r.files {
 		if f.APRoot() != r.root {
@@ -1086,7 +1092,7 @@ func (r *Repo) FindManifests() []string {
 }
 
 // Walk walks the directory tree rooted at root over the in-memory repo tree.
-func (r *Repo) Walk(root string, ignore *IgnoreList, filter func(path string, info os.FileInfo) bool) ([]string, error) {
+func (r *SourceTree) Walk(root string, ignore *IgnoreList, filter func(path string, info os.FileInfo) bool) ([]string, error) {
 	sub := r.Under(root)
 	var files []string
 	for _, f := range sub.files {
@@ -1107,7 +1113,7 @@ func (r *Repo) Walk(root string, ignore *IgnoreList, filter func(path string, in
 }
 
 // ExpandPaths expands target paths into individual file paths using the in-memory tree snapshot.
-func (r *Repo) ExpandPaths(repoRoot string, paths []string, ignore *IgnoreList) ([]string, error) {
+func (r *SourceTree) ExpandPaths(repoRoot string, paths []string, ignore *IgnoreList) ([]string, error) {
 	if len(paths) == 0 {
 		paths = []string{repoRoot}
 	}
@@ -1159,7 +1165,7 @@ func (r *Repo) ExpandPaths(repoRoot string, paths []string, ignore *IgnoreList) 
 }
 
 // WalkFileView traverses files under dir calling the callback for each file.
-func (r *Repo) WalkFileView(dir string, ignore *IgnoreList, callback func(f *File, relPath string) error) error {
+func (r *SourceTree) WalkFileView(dir string, ignore *IgnoreList, callback func(f *File, relPath string) error) error {
 	sub := r.Under(dir)
 	for _, f := range sub.files {
 		relPath, err := filepath.Rel(dir, f.Path)

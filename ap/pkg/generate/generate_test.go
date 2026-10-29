@@ -22,7 +22,7 @@ import (
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/fileutils"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 )
 
@@ -180,7 +180,7 @@ func writeTestHeadersConfig(t *testing.T, root string) {
 func TestPresubmitScriptsWithoutSkipConfig(t *testing.T) {
 	root := t.TempDir()
 	writeTestHeadersConfig(t, root)
-	r, err := repo.Open(root)
+	r, err := sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +210,7 @@ func TestPresubmitScriptsWithSkipConfig(t *testing.T) {
 	if err := fileutils.WriteFileAtomic(filepath.Join(root, ".ap", "ap.yaml"), []byte(apYAML), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r, err := repo.Open(root)
+	r, err := sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,11 +272,11 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 		}
 	}
 
-	r, err := repo.Open(root)
+	r, err := sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root, Repo: r}}
+	scopes := []*tasks.APScope{tasks.NewScope(root, root, r)}
 	if err := runGithubActionsGenerator(t.Context(), r, root, scopes); err != nil {
 		t.Fatalf("runGithubActionsGenerator: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
 
 func TestPresubmitScriptsWithoutHeadersConfig(t *testing.T) {
 	root := t.TempDir()
-	r, err := repo.Open(root)
+	r, err := sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestPresubmitScriptsWithLicenseNone(t *testing.T) {
 	if err := fileutils.WriteFileAtomic(filepath.Join(root, ".ap", "headers.yaml"), []byte("license: none\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	r, err := repo.Open(root)
+	r, err := sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,11 +348,11 @@ func TestPresubmitScriptsWithLicenseNone(t *testing.T) {
 
 func TestGenerateTasks_DevTasks(t *testing.T) {
 	root := t.TempDir()
-	r, err := repo.Open(root)
+	r, err := sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scopes := []*tasks.APScope{{Dir: root, RepoRoot: root, Repo: r}}
+	scopes := []*tasks.APScope{tasks.NewScope(root, root, r)}
 
 	// 1. dev/tasks does not exist -> should succeed
 	task, err := GenerateTasks(root, scopes)
@@ -372,12 +372,12 @@ func TestGenerateTasks_DevTasks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repo.ResetCache()
-	r, err = repo.Open(root)
+	sourcetree.ResetCache()
+	r, err = sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scopes = []*tasks.APScope{{Dir: root, RepoRoot: root, Repo: r}}
+	scopes = []*tasks.APScope{tasks.NewScope(root, root, r)}
 
 	task, err = GenerateTasks(root, scopes)
 	if err != nil {
@@ -435,12 +435,12 @@ func TestGenerateIdempotence(t *testing.T) {
 	}
 
 	// Run 1: initial generate
-	repo.ResetCache()
-	r1, err := repo.Open(root)
+	sourcetree.ResetCache()
+	r1, err := sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope1 := &tasks.APScope{Dir: root, RepoRoot: root, Repo: r1}
+	scope1 := tasks.NewScope(root, root, r1)
 	task1, err := GenerateTasks(root, []*tasks.APScope{scope1})
 	if err != nil {
 		t.Fatalf("GenerateTasks run 1 failed: %v", err)
@@ -463,12 +463,12 @@ func TestGenerateIdempotence(t *testing.T) {
 	}
 
 	// Run 2: generate again
-	repo.ResetCache()
-	r2, err := repo.Open(root)
+	sourcetree.ResetCache()
+	r2, err := sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	scope2 := &tasks.APScope{Dir: root, RepoRoot: root, Repo: r2}
+	scope2 := tasks.NewScope(root, root, r2)
 	task2, err := GenerateTasks(root, []*tasks.APScope{scope2})
 	if err != nil {
 		t.Fatalf("GenerateTasks run 2 failed: %v", err)
@@ -505,7 +505,7 @@ func TestAuditGeneratedGeneratorOptIn(t *testing.T) {
 	writeTestHeadersConfig(t, root)
 
 	scriptPath := filepath.Join(root, "dev", "ci", "presubmits", "ap-audit-generated")
-	r, err := repo.Open(root)
+	r, err := sourcetree.Open(root)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,11 +22,11 @@ import (
 	"testing"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/config"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 )
 
 func runTest(ctx context.Context, repoRoot string, files []string) error {
-	r, err := repo.Load(repoRoot)
+	r, err := sourcetree.Load(repoRoot)
 	if err != nil {
 		return err
 	}

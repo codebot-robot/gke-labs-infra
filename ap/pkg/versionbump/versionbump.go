@@ -29,7 +29,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/codestyle/walker"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/dockerfile"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/imageref"
-	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/sourcetree"
 	"k8s.io/klog/v2"
 )
 
@@ -40,7 +40,7 @@ type GoVersion struct {
 }
 
 // Run executes the versionbump command.
-func Run(ctx context.Context, r *repo.Repo, root string, targetGoVersion string) error {
+func Run(ctx context.Context, r *sourcetree.SourceTree, root string, targetGoVersion string) error {
 	var latestGo string
 	var err error
 	if targetGoVersion != "" {
