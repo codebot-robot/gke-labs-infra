@@ -15,11 +15,19 @@
 package tasks
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/repo"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
+)
+
+var (
+	ensureKubectl    = kubectl.EnsureKubectlForRepo
+	kubectlResolveMu sync.Mutex
 )
 
 // APScope represents the context for an ap root directory
@@ -30,6 +38,10 @@ type APScope struct {
 
 	Stdout io.Writer
 	Stderr io.Writer
+
+	// KubectlBin holds the resolved path to the kubectl binary for this scope.
+	// If empty, EnsureKubectl resolves it lazily and memoizes it here.
+	KubectlBin string
 
 	// Discovered Tasks
 	BuildTasks    []Task
@@ -62,6 +74,26 @@ func (s *APScope) WithOutput(stdout, stderr io.Writer) *APScope {
 	clone.Stdout = stdout
 	clone.Stderr = stderr
 	return &clone
+}
+
+// EnsureKubectl returns the path to the pinned kubectl binary for this scope,
+// resolving and memoizing it if not yet set.
+func (s *APScope) EnsureKubectl(ctx context.Context) (string, error) {
+	kubectlResolveMu.Lock()
+	defer kubectlResolveMu.Unlock()
+	if s.KubectlBin != "" {
+		return s.KubectlBin, nil
+	}
+	root := s.RepoRoot
+	if root == "" {
+		root = s.Dir
+	}
+	bin, err := ensureKubectl(ctx, root)
+	if err != nil {
+		return "", err
+	}
+	s.KubectlBin = bin
+	return bin, nil
 }
 
 // GetRepo returns the repository tree associated with this scope.

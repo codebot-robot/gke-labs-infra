@@ -31,6 +31,7 @@ import (
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/kindload"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tasks"
 	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kind"
+	"github.com/gke-labs/gke-labs-infra/ap/pkg/tool/kubectl"
 )
 
 // Options specifies configuration for the test harness.
@@ -54,6 +55,7 @@ type Harness struct {
 	skipCleanup bool
 	kindBin     string
 	repoRoot    string
+	kubectlBin  string
 }
 
 // NewHarness creates a new e2e test harness.
@@ -74,6 +76,7 @@ func NewHarness(t *testing.T, opts ...Options) *Harness {
 	}
 
 	h.ensureKind()
+	h.ensureKubectl()
 	h.setupCluster(opt.SkipClusterCreation)
 	h.setupNamespace()
 
@@ -118,12 +121,35 @@ func (h *Harness) ensureKind() {
 	h.kindBin = bin
 }
 
+// KubectlCommand returns the path to the kubectl executable used by the harness.
+func (h *Harness) KubectlCommand() string {
+	if h.kubectlBin == "" {
+		h.ensureKubectl()
+	}
+	return h.kubectlBin
+}
+
+// KubectlBin returns the path to the kubectl executable used by the harness.
+func (h *Harness) KubectlBin() string {
+	return h.KubectlCommand()
+}
+
+func (h *Harness) ensureKubectl() {
+	h.t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		h.t.Fatalf("failed to get current working directory: %v", err)
+	}
+	repoRoot := findRepoRoot(dir)
+	bin, err := kubectl.EnsureKubectlForRepo(h.t.Context(), repoRoot)
+	if err != nil {
+		h.t.Fatalf("failed to prepare kubectl tool: %v", err)
+	}
+	h.kubectlBin = bin
+}
+
 func (h *Harness) setupCluster(skipCreation bool) {
 	h.t.Helper()
-	// Check if kubectl is installed
-	if _, err := exec.LookPath("kubectl"); err != nil {
-		h.t.Fatalf("kubectl not found in PATH: %v", err)
-	}
 
 	if !skipCreation {
 		clusters := h.runCmd(h.KindCommand(), "get", "clusters")
@@ -143,7 +169,7 @@ func (h *Harness) setupCluster(skipCreation bool) {
 
 	// Ensure we are using the correct context
 	contextName := "kind-" + h.clusterName
-	h.runCmd("kubectl", "config", "use-context", contextName)
+	h.runCmd(h.KubectlCommand(), "config", "use-context", contextName)
 }
 
 func (h *Harness) setupNamespace() {
@@ -151,12 +177,12 @@ func (h *Harness) setupNamespace() {
 	// Create a unique namespace for this test
 	h.namespace = fmt.Sprintf("test-%d", rand.Intn(1000000))
 	h.t.Logf("Creating namespace %s", h.namespace)
-	h.runCmd("kubectl", "create", "namespace", h.namespace)
+	h.runCmd(h.KubectlCommand(), "create", "namespace", h.namespace)
 
 	if !h.skipCleanup {
 		h.t.Cleanup(func() {
 			h.t.Logf("Deleting namespace %s", h.namespace)
-			h.runCmd("kubectl", "delete", "namespace", h.namespace, "--ignore-not-found")
+			h.runCmd(h.KubectlCommand(), "delete", "namespace", h.namespace, "--ignore-not-found")
 		})
 	}
 }
@@ -169,7 +195,7 @@ func (h *Harness) Namespace() string {
 // KubectlApplyContent applies the given YAML content to the cluster in the test namespace.
 func (h *Harness) KubectlApplyContent(content string) {
 	h.t.Helper()
-	cmd := exec.Command("kubectl", "apply", "-n", h.namespace, "-f", "-")
+	cmd := exec.Command(h.KubectlCommand(), "apply", "-n", h.namespace, "-f", "-")
 	cmd.Stdin = strings.NewReader(content)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -182,19 +208,19 @@ func (h *Harness) KubectlApplyContent(content string) {
 // KubectlApplyFile applies the YAML file at the given path to the cluster in the test namespace.
 func (h *Harness) KubectlApplyFile(path string) {
 	h.t.Helper()
-	h.runCmd("kubectl", "apply", "-n", h.namespace, "-f", path)
+	h.runCmd(h.KubectlCommand(), "apply", "-n", h.namespace, "-f", path)
 }
 
 // KubectlDelete deletes the resource in the test namespace.
 func (h *Harness) KubectlDelete(resource string) {
 	h.t.Helper()
-	h.runCmd("kubectl", "delete", "-n", h.namespace, resource, "--ignore-not-found")
+	h.runCmd(h.KubectlCommand(), "delete", "-n", h.namespace, resource, "--ignore-not-found")
 }
 
 // Wait waits for a resource to meet a certain condition.
 func (h *Harness) Wait(resource, condition string, timeout time.Duration) {
 	h.t.Helper()
-	h.runCmd("kubectl", "wait", "-n", h.namespace, "--for="+condition, "--timeout="+timeout.String(), resource)
+	h.runCmd(h.KubectlCommand(), "wait", "-n", h.namespace, "--for="+condition, "--timeout="+timeout.String(), resource)
 }
 
 // WaitForDeployment waits for a deployment to be available.
@@ -206,7 +232,7 @@ func (h *Harness) WaitForDeployment(name string, timeout time.Duration) {
 // GetPodLogs returns the logs of a pod in the test namespace.
 func (h *Harness) GetPodLogs(name string) string {
 	h.t.Helper()
-	return h.runCmd("kubectl", "logs", name, "-n", h.namespace)
+	return h.runCmd(h.KubectlCommand(), "logs", name, "-n", h.namespace)
 }
 
 // DockerBuild builds a docker image with the given tag.
@@ -244,7 +270,7 @@ func (h *Harness) KindLoad(tag string) {
 func (h *Harness) SetupRegistry() {
 	h.t.Helper()
 	h.t.Log("Setting up in-cluster registry")
-	cmd := exec.Command("kubectl", "apply", "-f", "-")
+	cmd := exec.Command(h.KubectlCommand(), "apply", "-f", "-")
 	cmd.Stdin = strings.NewReader(RegistryManifests)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -252,7 +278,7 @@ func (h *Harness) SetupRegistry() {
 	if err := cmd.Run(); err != nil {
 		h.t.Fatalf("kubectl apply failed: %v\nStdout: %s\nStderr: %s", err, stdout.String(), stderr.String())
 	}
-	h.runCmd("kubectl", "wait", "-n", "in-cluster-image-registry-system", "--for=jsonpath={.status.readyReplicas}=1", "--timeout=2m", "statefulset/in-cluster-image-registry")
+	h.runCmd(h.KubectlCommand(), "wait", "-n", "in-cluster-image-registry-system", "--for=jsonpath={.status.readyReplicas}=1", "--timeout=2m", "statefulset/in-cluster-image-registry")
 }
 
 // RunCmd runs a command and returns its output.
