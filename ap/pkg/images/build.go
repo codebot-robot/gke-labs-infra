@@ -28,6 +28,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -362,6 +363,16 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 		buildctlArgs = append(buildctlArgs, "--opt", "platform="+strings.Join(platforms, ","))
 	}
 
+	cacheCfg := setupLayerCache(ctx, t.ImageName)
+	if cacheCfg != nil {
+		if cacheCfg.cacheFrom != "" {
+			buildctlArgs = append(buildctlArgs, "--import-cache", cacheCfg.cacheFrom)
+		}
+		if cacheCfg.cacheTo != "" {
+			buildctlArgs = append(buildctlArgs, "--export-cache", cacheCfg.cacheTo)
+		}
+	}
+
 	var progressBuffer bytes.Buffer
 
 	command := execCommandContext(ctx, buildctlBinary, buildctlArgs...)
@@ -376,7 +387,15 @@ func (t *DockerBuildTask) runBuildctl(ctx context.Context, scope *tasks.TaskCont
 	command.Env = append(environment, "BUILDKIT_HOST="+invocation.address)
 
 	if err := command.Run(); err != nil {
+		if cacheCfg != nil {
+			cacheCfg.onComplete(false, time.Since(start))
+		}
 		return fmt.Errorf("buildctl build failed for %s: %w", t.ImageName, err)
+	}
+
+	duration := time.Since(start)
+	if cacheCfg != nil {
+		cacheCfg.onComplete(true, duration)
 	}
 
 	digest := extractDigestFromMetadataFile(metadataFile)
@@ -503,6 +522,15 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 			args = append(args, "--platform", platforms[0])
 		}
 	}
+	cacheCfg := setupLayerCache(ctx, t.ImageName)
+	if cacheCfg != nil {
+		if cacheCfg.cacheFrom != "" {
+			args = append(args, "--cache-from", cacheCfg.cacheFrom)
+		}
+		if cacheCfg.cacheTo != "" {
+			args = append(args, "--cache-to", cacheCfg.cacheTo)
+		}
+	}
 	args = append(args, ".")
 
 	cmd := execCommandContext(ctx, buildxBin, args...)
@@ -511,7 +539,15 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 	cmd.Stderr = scope.Stderr()
 	cmd.Env = fileutils.PrependPath(os.Environ(), filepath.Dir(buildxBin))
 	if err := cmd.Run(); err != nil {
+		if cacheCfg != nil {
+			cacheCfg.onComplete(false, time.Since(start))
+		}
 		return fmt.Errorf("docker build failed for %s: %w", t.ImageName, err)
+	}
+
+	duration := time.Since(start)
+	if cacheCfg != nil {
+		cacheCfg.onComplete(true, duration)
 	}
 
 	digest := extractDigestFromMetadataFile(metaFile)
@@ -547,6 +583,144 @@ func (t *DockerBuildTask) runDocker(ctx context.Context, scope *tasks.TaskContex
 	}
 
 	return nil
+}
+
+type layerCacheConfig struct {
+	cacheFrom  string
+	cacheTo    string
+	onComplete func(success bool, duration time.Duration)
+}
+
+func setupLayerCache(ctx context.Context, imageName string) *layerCacheConfig {
+	if os.Getenv("GITHUB_ACTIONS") != "true" {
+		return nil
+	}
+
+	cacheDir := os.Getenv("AP_LAYER_CACHE_DIR")
+	if cacheDir == "" {
+		runnerTemp := os.Getenv("RUNNER_TEMP")
+		if runnerTemp == "" {
+			runnerTemp = os.TempDir()
+		}
+		cacheDir = filepath.Join(runnerTemp, "ap-layer-cache")
+	}
+	imageDir := filepath.Join(cacheDir, imageName)
+
+	var cacheFromDir string
+	if _, err := os.Stat(filepath.Join(imageDir, "index.json")); err == nil {
+		cacheFromDir = imageDir
+	} else if !os.IsNotExist(err) {
+		scoped.Log(ctx).Warn("failed to check layer cache index", "dir", imageDir, "error", err)
+	} else if _, err := os.Stat(filepath.Join(cacheDir, "index.json")); err == nil {
+		cacheFromDir = cacheDir
+	} else if !os.IsNotExist(err) {
+		scoped.Log(ctx).Warn("failed to check layer cache index", "dir", cacheDir, "error", err)
+	}
+
+	cacheRestored := false
+	var cacheFromArg string
+	if cacheFromDir != "" {
+		cacheRestored = true
+		cacheFromArg = fmt.Sprintf("type=local,src=%s", cacheFromDir)
+		scoped.Log(ctx).Info("restored layer cache", "image", imageName, "src", cacheFromDir)
+	} else {
+		scoped.Log(ctx).Info("layer cache miss", "image", imageName, "reason", "not found")
+	}
+
+	canSave := isCacheSaveAllowed()
+	var cacheToArg string
+	if canSave {
+		mode := os.Getenv("AP_CACHE_MODE")
+		if mode == "" {
+			mode = "max"
+		}
+		compression := os.Getenv("AP_CACHE_COMPRESSION")
+		if compression == "" {
+			compression = "uncompressed"
+		}
+		cacheToArg = fmt.Sprintf("type=local,dest=%s,mode=%s", imageDir, mode)
+		if compression != "gzip" && compression != "compressed" {
+			cacheToArg += ",compression=uncompressed"
+		}
+		if err := os.MkdirAll(imageDir, 0755); err != nil {
+			scoped.Log(ctx).Warn("failed to create layer cache directory", "dir", imageDir, "error", err)
+		}
+	}
+
+	onComplete := func(success bool, duration time.Duration) {
+		if !canSave {
+			return
+		}
+		if !success {
+			if !cacheRestored {
+				if err := os.RemoveAll(imageDir); err != nil && !os.IsNotExist(err) {
+					scoped.Log(ctx).Warn("failed to remove layer cache directory", "dir", imageDir, "error", err)
+				}
+			}
+			return
+		}
+		threshold := 90 * time.Second
+		if tStr := os.Getenv("AP_CACHE_SAVE_THRESHOLD_SECONDS"); tStr != "" {
+			sec, err := strconv.Atoi(tStr)
+			if err != nil {
+				scoped.Log(ctx).Warn("invalid AP_CACHE_SAVE_THRESHOLD_SECONDS, using default", "value", tStr, "error", err)
+			} else {
+				threshold = time.Duration(sec) * time.Second
+			}
+		}
+		if !cacheRestored && duration < threshold {
+			if err := os.RemoveAll(imageDir); err != nil && !os.IsNotExist(err) {
+				scoped.Log(ctx).Warn("failed to remove layer cache directory", "dir", imageDir, "error", err)
+			}
+			scoped.Log(ctx).Info("skipped layer cache save below threshold", "image", imageName, "duration", formatDuration(duration), "threshold", formatDuration(threshold))
+		} else {
+			scoped.Log(ctx).Info("saved layer cache", "image", imageName, "duration", formatDuration(duration))
+		}
+	}
+
+	return &layerCacheConfig{
+		cacheFrom:  cacheFromArg,
+		cacheTo:    cacheToArg,
+		onComplete: onComplete,
+	}
+}
+
+func isCacheSaveAllowed() bool {
+	if os.Getenv("AP_CACHE_ALLOW_PR_SAVE") == "true" {
+		return true
+	}
+	if os.Getenv("GITHUB_ACTIONS") != "true" {
+		return false
+	}
+	if os.Getenv("GITHUB_EVENT_NAME") != "push" {
+		return false
+	}
+	ref := os.Getenv("GITHUB_REF")
+	defaultBranch := getDefaultBranch()
+	if defaultBranch != "" && ref == "refs/heads/"+defaultBranch {
+		return true
+	}
+	return false
+}
+
+func getDefaultBranch() string {
+	eventPath := os.Getenv("GITHUB_EVENT_PATH")
+	if eventPath == "" {
+		return "main"
+	}
+	data, err := os.ReadFile(eventPath)
+	if err != nil {
+		return "main"
+	}
+	var event struct {
+		Repository struct {
+			DefaultBranch string `json:"default_branch"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal(data, &event); err != nil || event.Repository.DefaultBranch == "" {
+		return "main"
+	}
+	return event.Repository.DefaultBranch
 }
 
 // parseContextSizeFromPlain parses a buildctl --progress=plain stream and returns

@@ -16,6 +16,7 @@ package images
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -961,4 +962,125 @@ func TestDockerBuildTask_ConcurrentRef(t *testing.T) {
 	entered.Wait()
 	close(barrier)
 	wg.Wait()
+}
+
+func TestSetupLayerCache_OutsideGitHubActions(t *testing.T) {
+	t.Setenv("GITHUB_ACTIONS", "")
+	cfg := setupLayerCache(t.Context(), "test-img")
+	if cfg != nil {
+		t.Fatalf("expected nil config outside GITHUB_ACTIONS, got %+v", cfg)
+	}
+}
+
+func TestSetupLayerCache_RestoreAndSave(t *testing.T) {
+	tempDir := t.TempDir()
+	cacheDir := filepath.Join(tempDir, "cache")
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("AP_LAYER_CACHE_DIR", cacheDir)
+	t.Setenv("GITHUB_EVENT_NAME", "push")
+	t.Setenv("GITHUB_REF", "refs/heads/main")
+
+	// 1. Cold build (no index.json): cacheFrom is empty, cacheTo is set
+	cfg := setupLayerCache(t.Context(), "my-image")
+	if cfg == nil {
+		t.Fatal("expected non-nil config in GITHUB_ACTIONS")
+	}
+	if cfg.cacheFrom != "" {
+		t.Errorf("expected empty cacheFrom on miss, got %q", cfg.cacheFrom)
+	}
+	expectedTo := fmt.Sprintf("type=local,dest=%s,mode=max,compression=uncompressed", filepath.Join(cacheDir, "my-image"))
+	if cfg.cacheTo != expectedTo {
+		t.Errorf("expected cacheTo=%q, got %q", expectedTo, cfg.cacheTo)
+	}
+
+	// Fast build below 90s threshold: imageDir should be removed
+	cfg.onComplete(true, 10*time.Second)
+	if _, err := os.Stat(filepath.Join(cacheDir, "my-image")); !os.IsNotExist(err) {
+		t.Errorf("expected imageDir to be removed for build below threshold, err: %v", err)
+	}
+
+	// Build exceeding threshold: imageDir should be kept
+	cfg = setupLayerCache(t.Context(), "my-image")
+	if err := os.WriteFile(filepath.Join(cacheDir, "my-image", "index.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.onComplete(true, 100*time.Second)
+	if _, err := os.Stat(filepath.Join(cacheDir, "my-image")); err != nil {
+		t.Errorf("expected imageDir to be kept for build above threshold, err: %v", err)
+	}
+
+	// 2. Subsequent build: cacheFrom is populated from imageDir
+	cfg2 := setupLayerCache(t.Context(), "my-image")
+	if cfg2 == nil {
+		t.Fatal("expected non-nil cfg2")
+	}
+	expectedFrom := fmt.Sprintf("type=local,src=%s", filepath.Join(cacheDir, "my-image"))
+	if cfg2.cacheFrom != expectedFrom {
+		t.Errorf("expected cacheFrom=%q, got %q", expectedFrom, cfg2.cacheFrom)
+	}
+	// Even fast build (5s) should keep imageDir on cache hit
+	cfg2.onComplete(true, 5*time.Second)
+	if _, err := os.Stat(filepath.Join(cacheDir, "my-image")); err != nil {
+		t.Errorf("expected imageDir to be kept on cache hit, err: %v", err)
+	}
+}
+
+func TestSetupLayerCache_PullRequest(t *testing.T) {
+	tempDir := t.TempDir()
+	cacheDir := filepath.Join(tempDir, "cache")
+	t.Setenv("GITHUB_ACTIONS", "true")
+	t.Setenv("AP_LAYER_CACHE_DIR", cacheDir)
+	t.Setenv("GITHUB_EVENT_NAME", "pull_request")
+	t.Setenv("GITHUB_REF", "refs/pull/123/merge")
+
+	cfg := setupLayerCache(t.Context(), "pr-image")
+	if cfg == nil {
+		t.Fatal("expected non-nil config in GITHUB_ACTIONS")
+	}
+	if cfg.cacheTo != "" {
+		t.Errorf("expected empty cacheTo in pull request, got %q", cfg.cacheTo)
+	}
+}
+
+func TestIsCacheSaveAllowed(t *testing.T) {
+	tests := []struct {
+		name          string
+		githubActions string
+		eventName     string
+		ref           string
+		allowPRSave   string
+		defaultBranch string
+		want          bool
+	}{
+		{"outside actions", "", "push", "refs/heads/main", "", "", false},
+		{"pr run", "true", "pull_request", "refs/pull/1/merge", "", "", false},
+		{"push to feature branch", "true", "push", "refs/heads/feat", "", "", false},
+		{"push to default branch main", "true", "push", "refs/heads/main", "", "", true},
+		{"pr with allowPRSave", "true", "pull_request", "refs/pull/1/merge", "true", "", true},
+		{"push to custom default branch", "true", "push", "refs/heads/develop", "", "develop", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("GITHUB_ACTIONS", tc.githubActions)
+			t.Setenv("GITHUB_EVENT_NAME", tc.eventName)
+			t.Setenv("GITHUB_REF", tc.ref)
+			t.Setenv("AP_CACHE_ALLOW_PR_SAVE", tc.allowPRSave)
+
+			if tc.defaultBranch != "" {
+				eventFile := filepath.Join(t.TempDir(), "event.json")
+				content := fmt.Sprintf(`{"repository":{"default_branch":%q}}`, tc.defaultBranch)
+				if err := os.WriteFile(eventFile, []byte(content), 0644); err != nil {
+					t.Fatal(err)
+				}
+				t.Setenv("GITHUB_EVENT_PATH", eventFile)
+			} else {
+				t.Setenv("GITHUB_EVENT_PATH", "")
+			}
+
+			if got := isCacheSaveAllowed(); got != tc.want {
+				t.Errorf("isCacheSaveAllowed() = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
