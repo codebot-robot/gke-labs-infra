@@ -732,6 +732,20 @@ cd "${REPO_ROOT}"
 	return nil
 }
 
+// isImageBuildingJob reports whether the presubmit script builds or uses container images.
+func isImageBuildingJob(presubmitsDir, scriptName string) bool {
+	if scriptName == "ap-build" || strings.HasPrefix(scriptName, "ap-e2e") {
+		return true
+	}
+	content, err := os.ReadFile(filepath.Join(presubmitsDir, scriptName))
+	if err != nil {
+		return false
+	}
+	s := string(content)
+	return strings.Contains(s, "ap build") || strings.Contains(s, "ap e2e") ||
+		strings.Contains(s, "docker build") || strings.Contains(s, "buildx build")
+}
+
 func runGithubActionsGenerator(ctx context.Context, r *sourcetree.SourceTree, repoRoot string, scopes []*tasks.TaskContext) error {
 	workflowsDir := filepath.Join(repoRoot, ".github", "workflows")
 	outputFile := filepath.Join(workflowsDir, "ci-presubmits.yaml")
@@ -834,10 +848,35 @@ jobs:
 			}
 		}
 
+		if isImageBuildingJob(presubmitsDir, scriptName) {
+			sb.WriteString(fmt.Sprintf(`
+      - name: Restore image layer cache
+        uses: %s
+        with:
+          path: ${{ runner.temp }}/ap-layer-cache
+          key: ap-layer-cache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ap-layer-cache-${{ runner.os }}-
+`, actionCacheRestore))
+		}
+
 		sb.WriteString(fmt.Sprintf(`
       - name: Run %s
         run: ./%s/%s
+`, jobName, relPresubmitsDir, scriptName))
 
+		if scriptName == "ap-build" {
+			sb.WriteString(fmt.Sprintf(`
+      - name: Save image layer cache
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: %s
+        with:
+          path: ${{ runner.temp }}/ap-layer-cache
+          key: ap-layer-cache-${{ runner.os }}-${{ github.sha }}
+`, actionCacheSave))
+		}
+
+		sb.WriteString(fmt.Sprintf(`
       - name: Upload artifacts
         if: always()
         uses: %s
@@ -845,7 +884,7 @@ jobs:
           name: artifacts-%s
           path: /tmp/artifacts
           if-no-files-found: ignore
-`, jobName, relPresubmitsDir, scriptName, actionUploadArtifact, jobName))
+`, actionUploadArtifact, jobName))
 	}
 
 	if err := os.MkdirAll(workflowsDir, 0755); err != nil {

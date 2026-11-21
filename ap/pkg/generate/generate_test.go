@@ -238,7 +238,7 @@ func TestPresubmitScriptsWithSkipConfig(t *testing.T) {
 // workflows must reference actions by full commit SHA, never by a
 // mutable tag.
 func TestPinnedActionRefs(t *testing.T) {
-	for _, ref := range []string{actionCheckout, actionSetupGo, actionUploadArtifact} {
+	for _, ref := range []string{actionCheckout, actionSetupGo, actionUploadArtifact, actionCacheRestore, actionCacheSave} {
 		at := strings.Index(ref, "@")
 		if at < 0 {
 			t.Errorf("action ref %q has no @", ref)
@@ -298,6 +298,100 @@ func TestGithubActionsWorkflowArtifactUpload(t *testing.T) {
           if-no-files-found: ignore`, actionUploadArtifact, job)
 		if !strings.Contains(content, expectedStep) {
 			t.Errorf("job %s missing expected artifact upload step in workflow:\n%s", job, content)
+		}
+	}
+}
+
+func TestGithubActionsWorkflowLayerCache(t *testing.T) {
+	root := t.TempDir()
+	writeTestHeadersConfig(t, root)
+
+	presubmitsDir := filepath.Join(root, "dev", "ci", "presubmits")
+	if err := os.MkdirAll(presubmitsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, script := range []string{"ap-build", "ap-e2e-foo", "ap-lint", "ap-test"} {
+		path := filepath.Join(presubmitsDir, script)
+		if err := fileutils.WriteFileAtomic(t.Context(), path, []byte("#!/bin/bash\nexit 0\n"), 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	r, err := sourcetree.Open(t.Context(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := []*tasks.TaskContext{tasks.NewTaskContext(root, root, r)}
+	if err := runGithubActionsGenerator(t.Context(), r, root, scopes); err != nil {
+		t.Fatalf("runGithubActionsGenerator: %v", err)
+	}
+
+	workflowPath := filepath.Join(root, ".github", "workflows", "ci-presubmits.yaml")
+	b, err := os.ReadFile(workflowPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(b)
+
+	expectedRestoreStep := fmt.Sprintf(`      - name: Restore image layer cache
+        uses: %s
+        with:
+          path: ${{ runner.temp }}/ap-layer-cache
+          key: ap-layer-cache-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ap-layer-cache-${{ runner.os }}-`, actionCacheRestore)
+
+	expectedSaveStep := fmt.Sprintf(`      - name: Save image layer cache
+        if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: %s
+        with:
+          path: ${{ runner.temp }}/ap-layer-cache
+          key: ap-layer-cache-${{ runner.os }}-${{ github.sha }}`, actionCacheSave)
+
+	// ap-build must have both restore and save
+	if !strings.Contains(content, expectedRestoreStep) {
+		t.Fatalf("expected restore step in workflow, got:\n%s", content)
+	}
+	if !strings.Contains(content, expectedSaveStep) {
+		t.Fatalf("expected save step in workflow, got:\n%s", content)
+	}
+
+	// Verify job-specific placements
+	lines := strings.Split(content, "\n")
+	var currentJob string
+	jobContents := make(map[string]string)
+	for _, line := range lines {
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   ") && strings.HasSuffix(line, ":") {
+			currentJob = strings.TrimSpace(strings.TrimSuffix(line, ":"))
+		} else if currentJob != "" {
+			jobContents[currentJob] += line + "\n"
+		}
+	}
+
+	for jobName, j := range jobContents {
+		switch jobName {
+		case "ap-build":
+			if !strings.Contains(j, "Restore image layer cache") {
+				t.Errorf("ap-build missing Restore image layer cache:\n%s", j)
+			}
+			if !strings.Contains(j, "Save image layer cache") {
+				t.Errorf("ap-build missing Save image layer cache:\n%s", j)
+			}
+		case "ap-e2e-foo":
+			if !strings.Contains(j, "Restore image layer cache") {
+				t.Errorf("ap-e2e-foo missing Restore image layer cache:\n%s", j)
+			}
+			if strings.Contains(j, "Save image layer cache") {
+				t.Errorf("ap-e2e-foo should NOT contain Save image layer cache:\n%s", j)
+			}
+		case "ap-lint", "ap-test":
+			if strings.Contains(j, "Restore image layer cache") {
+				t.Errorf("%s should NOT contain Restore image layer cache:\n%s", jobName, j)
+			}
+			if strings.Contains(j, "Save image layer cache") {
+				t.Errorf("%s should NOT contain Save image layer cache:\n%s", jobName, j)
+			}
 		}
 	}
 }
